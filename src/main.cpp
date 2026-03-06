@@ -1,194 +1,138 @@
-﻿
-
 #include "raylib.h"
-//Pare que no se queje de los booleanos
-#include <stdbool.h>
+#include "Collision.h"
 
-//------------------------------------------------------------------------------------
-// Program main entry point
-//------------------------------------------------------------------------------------
 int main(void)
 {
-    // Initialization
-    //--------------------------------------------------------------------------------------
     const int screenWidth = 875;
     const int screenHeight = 950;
 
+    // ── Player ────────────────────────────────────────────────────────────
+    Rectangle player = { 100, 150, 60, 60 };
+    float     playerSpeed = 4.0f;
+    float     jumpForce = -8.0f;
+    float     gravity = 0.4f;
+    float     velocityX = 0.0f;
+    float     velocityY = 0.0f;
+    bool      isJumping = false;
+    bool      facingRight = true;
 
-    //Creatin of the character
-    // Creacion del personaje a partir de un cuadrado {x, y, width, height}
-    Rectangle player = { 100, 150, 30, 30 };
+    // FIX: track grounded across frames so we can skip gravity when on ground.
+    // Without this, gravity pushes the player down every frame, the collision
+    // corrects them back up+sideways, and that sideways push causes sliding.
+    bool isGrounded = false;
 
-    // Velocidad del jugador al presionar alguna tecla
-    float playerSpeed = 4.0f;
-    // Ahora vamos a  definir las variables de salto (Tener en cuenta que para ir hacia arriba del eje Y es nagativo y para abajo el positivo
-    float jumpForce = -8.0f;
-    // para simular la grabedad creamos otra variable que hara la velocidad que ira hacia abajop por cada frame
-    float gravity = 0.4f;
-    //esta variable hace el salto mas realista, haciendo que vaya bajando poco a poco progresivamente
-    float velocityY = 0;
-    //para evitar el do0ble salto hacemos una variable boleana para saber el estado de salto
-    bool isJumping = false;
-    //creacion del suelo {x, y, ancho, alto}
-    Rectangle ground = { 0, 400, 800, 50 };
-    
+    // ── Platforms ─────────────────────────────────────────────────────────
+    // Platform::Make(x, y, width, height)                    flat
+    // Platform::Make(x, y, width, height, 20.0f)             tilted right
+    // Platform::Make(x, y, width, height, -15.0f, RED)       tilted left + color
+    vector<Platform> platforms = {
+        Platform::Make(0,  880, 875, 30,   0.0f, DARKBROWN),  // ground
+        Platform::Make(200,  825, 200, 20,   -30.0f),  // flat platform
+        Platform::Make(500,  790, 150, 20,   0.0f),  // flat platform
+    };
 
-
-
-
-
-
-
-    InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
+    // ── Window & assets ───────────────────────────────────────────────────
+    InitWindow(screenWidth, screenHeight, "Donkey Kong");
 
     Texture2D imgMarioIdle = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
     Texture2D imgMarioWalk1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk1.png");
     Texture2D imgMarioWalk2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk2.png");
     Texture2D imgMarioJump = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Jump.png");
-    Vector2 marioPos{ player.x, player.y };
-    Texture2D image = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
+    Texture2D image = imgMarioIdle;
+    Texture2D background = LoadTexture("Wiki/stage1_P.png");
 
-    Texture2D background = LoadTexture("Assets/stage1.png");
+    SetTargetFPS(60);
 
-    SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
-    //--------------------------------------------------------------------------------------
-
-    //Initialize DeltaTime
-    float timer = 0.0f;
-
-    //Initialize animation Frames (Player)
     float animationTimer = 0.0f;
-    float animationSpeed = 0.15f;   // change frame every 0.15 seconds
-    int walkFrame = 0;
+    float animationSpeed = 0.15f;
+    int   walkFrame = 0;
 
-    //Player Mov Bool
-    bool facingRight = true; // true = right, false = left
-
-    // Main game loop
-    while (!WindowShouldClose())    // Detect window close button or ESC key
+    while (!WindowShouldClose())
     {
-        // Update
-        //----------------------------------------------------------------------------------
-        // TODO: Update your variables here
-        //----------------------------------------------------------------------------------
-
-        // Draw
-        //----------------------------------------------------------------------------------
-
-        //Get DeltaTime
-        float deltaTime = GetFrameTime();  // time since last frame
+        float deltaTime = GetFrameTime();
         animationTimer += deltaTime;
-        timer += deltaTime;
 
-        //init inside bool mov vars for player
-        bool PlayerisMoving = false;
+        float prevX = player.x;
+        float prevY = player.y;
 
-        // moverse de derecha a izquierda
-        if (IsKeyDown(KEY_D)) {
-            player.x += playerSpeed;
-            PlayerisMoving = true;
-            facingRight = true; 
-        }
+        // ── Input ─────────────────────────────────────────────────────────
+        bool playerIsMoving = false;
 
-        if (IsKeyDown(KEY_A)) {
-            player.x -= playerSpeed;
-            PlayerisMoving = true;
-            facingRight = false;
-        }
-
-        // salto
+        if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
+        if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
 
         if ((IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_W)) && !isJumping)
         {
             velocityY = jumpForce;
             isJumping = true;
+            isGrounded = false;
         }
 
-        //Playing Player Animations
-        if (isJumping) {
-            image = imgMarioJump;
-        }
-        else {
-            if (PlayerisMoving)
-            {
-                if (animationTimer >= animationSpeed)
-                {
-                    walkFrame++;
-                    if (walkFrame > 1) walkFrame = 0;  // only 2 frames (0 and 1)
-                    animationTimer = 0.0f;
-                }
+        // ── Physics ───────────────────────────────────────────────────────
+        // Only apply gravity when airborne – this stops the per-frame
+        // gravity+correction cycle that causes sliding on rotated platforms
+        if (!isGrounded)
+            velocityY += gravity;
 
-                if (walkFrame == 0)
-                    image = imgMarioWalk1;
-                else
-                    image = imgMarioWalk2;
-            }
-            else
-            {
-                image = imgMarioIdle;
-                walkFrame = 0;
-            }
-        }
-        
-        
-        
-        
-
-
-        //poner gravedad
-        velocityY += gravity;
         player.y += velocityY;
 
+        // ── Collision ─────────────────────────────────────────────────────
+        CollisionResult col = CollisionManager::ResolveAll(
+            player, velocityX, velocityY,
+            platforms,
+            prevX, prevY
+        );
 
-        //tener colision con el suelo
+        isGrounded = col.grounded;
+        if (col.grounded) isJumping = false;
 
-        if (CheckCollisionRecs(player, ground))
+        // ── Animation ─────────────────────────────────────────────────────
+        if (isJumping)
         {
-            player.y = ground.y - player.height;
-            velocityY = 0;
-            isJumping = false;
+            image = imgMarioJump;
+        }
+        else if (playerIsMoving)
+        {
+            if (animationTimer >= animationSpeed)
+            {
+                walkFrame = (walkFrame + 1) % 2;
+                animationTimer = 0.0f;
+            }
+            image = (walkFrame == 0) ? imgMarioWalk1 : imgMarioWalk2;
+        }
+        else
+        {
+            image = imgMarioIdle;
+            walkFrame = 0;
         }
 
-
-
-
-
-
-
-
+        // ── Draw ──────────────────────────────────────────────────────────
         BeginDrawing();
-
         ClearBackground(BLACK);
 
+        DrawTexturePro(background,
+            { 0, 0, 204, 179 }, { 0, 0, 875, 950 },
+            { 0.0f, 0.0f }, 0.0f, WHITE);
 
+        CollisionManager::DrawAll(platforms);
 
-        //poner suelo
-        DrawRectangleRec(ground, DARKBROWN);
-        //poner al jugador
-        DrawRectangleRec(player, {0,0,0,0});
+        float     scale = 3.8f;
+        Rectangle src = { 0, 0, (float)image.width, (float)image.height };
+        Rectangle dest = { player.x, player.y, image.width * scale, image.height * scale };
+        if (!facingRight) src.width *= -1;
+        DrawTexturePro(image, src, dest, { 0.0f, 0.0f }, 0.0f, WHITE);
 
         DrawText("Prueba de Donkey Kong_1", 10, 10, 20, WHITE);
-        //poner imagen
-        float scale = 2.0f;
-
-        Vector2 origin = { 0.0f, 0.0f };
-        Rectangle dest = { player.x , player.y ,image.width * scale, image.height * scale };
-        Rectangle src = { 0, 0, image.width, image.height };
-
-        if (!facingRight) src.width *= -1;
-
-        DrawTexturePro(image, src, dest, origin, 0.0f, WHITE);
-
 
         EndDrawing();
-        //----------------------------------------------------------------------------------
     }
 
-    // De-Initialization
-    //--------------------------------------------------------------------------------------
-    UnloadTexture(image);
-    CloseWindow();        // Close window and OpenGL context
-    //--------------------------------------------------------------------------------------
+    UnloadTexture(imgMarioIdle);
+    UnloadTexture(imgMarioWalk1);
+    UnloadTexture(imgMarioWalk2);
+    UnloadTexture(imgMarioJump);
+    UnloadTexture(background);
+    CloseWindow();
 
     return 0;
 }
