@@ -15,38 +15,54 @@ int main(void)
     float     velocityY = 0.0f;
     bool      isJumping = false;
     bool      facingRight = true;
-
-    // FIX: track grounded across frames so we can skip gravity when on ground.
-    // Without this, gravity pushes the player down every frame, the collision
-    // corrects them back up+sideways, and that sideways push causes sliding.
-    bool isGrounded = false;
+    bool      isGrounded = false;
 
     // ── Platforms ─────────────────────────────────────────────────────────
-    // Platform::Make(x, y, width, height)                    flat
-    // Platform::Make(x, y, width, height, 20.0f)             tilted right
-    // Platform::Make(x, y, width, height, -15.0f, RED)       tilted left + color
     vector<Platform> platforms = {
-        Platform::Make(0,  880, 875, 30,   0.0f, DARKBROWN),  // ground
-        Platform::Make(200,  825, 200, 20,   -30.0f),  // flat platform
-        Platform::Make(500,  790, 150, 20,   0.0f),  // flat platform
+        Platform::Make(27,  880, 412, 0,  0.0f),
+        Platform::Make(430, 870, 420, 0, -3.0f),
+        Platform::Make(60,  750, 700, 0,  3.0f),
+        Platform::Make(110, 620, 700, 0, -3.0f),
+        Platform::Make(60,  490, 700, 0,  3.0f),
+        Platform::Make(110, 360, 700, 0, -3.0f),
+        Platform::Make(430, 250, 340, 0,  3.0f),
+        Platform::Make(60,  240, 400, 0,  0.0f),
     };
 
     // ── Window & assets ───────────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
+    InitAudioDevice();
 
     Texture2D imgMarioIdle = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
     Texture2D imgMarioWalk1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk1.png");
     Texture2D imgMarioWalk2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk2.png");
     Texture2D imgMarioJump = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Jump.png");
-    Texture2D image = imgMarioIdle;
     Texture2D background = LoadTexture("Wiki/stage1_P.png");
+    Texture2D beam = LoadTexture("Assets/Textures/Architecture/Dk_FloorPart.png");
 
+    // ── Bake all beams into a static texture ONCE before the loop ─────────
+    RenderTexture2D staticLayer = LoadRenderTexture(screenWidth, screenHeight);
+    BeginTextureMode(staticLayer);
+    ClearBackground(BLANK);
+
+    float beamScale = 2.0f; // change this to whatever size you want
+
+    DrawTexturePro(beam,
+        { 0, 0, (float)beam.width, (float)beam.height },          // source rect (full texture)
+        { 100, 200, beam.width * beamScale, beam.height * beamScale }, // dest rect (position + size)
+        { 0, 0 }, 0.f, WHITE);
+
+    EndTextureMode();
+    UnloadTexture(beam); // source no longer needed after baking
+
+    Texture2D image = imgMarioIdle;
     SetTargetFPS(60);
 
     float animationTimer = 0.0f;
     float animationSpeed = 0.15f;
     int   walkFrame = 0;
 
+    // ── Game loop ─────────────────────────────────────────────────────────
     while (!WindowShouldClose())
     {
         float deltaTime = GetFrameTime();
@@ -57,7 +73,6 @@ int main(void)
 
         // ── Input ─────────────────────────────────────────────────────────
         bool playerIsMoving = false;
-
         if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
         if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
 
@@ -69,19 +84,12 @@ int main(void)
         }
 
         // ── Physics ───────────────────────────────────────────────────────
-        // Only apply gravity when airborne – this stops the per-frame
-        // gravity+correction cycle that causes sliding on rotated platforms
-        if (!isGrounded)
-            velocityY += gravity;
-
+        if (!isGrounded) velocityY += gravity;
         player.y += velocityY;
 
         // ── Collision ─────────────────────────────────────────────────────
         CollisionResult col = CollisionManager::ResolveAll(
-            player, velocityX, velocityY,
-            platforms,
-            prevX, prevY
-        );
+            player, velocityX, velocityY, platforms, prevX, prevY);
 
         isGrounded = col.grounded;
         if (col.grounded) isJumping = false;
@@ -111,8 +119,12 @@ int main(void)
         ClearBackground(BLACK);
 
         DrawTexturePro(background,
-            { 0, 0, 204, 179 }, { 0, 0, 875, 950 },
-            { 0.0f, 0.0f }, 0.0f, WHITE);
+            { 0, 0, 204, 179 }, { 0, 0, 875, 950 }, {}, 0.f, WHITE);
+
+        // Draw baked beams — single draw call, no per-frame cost
+        DrawTextureRec(staticLayer.texture,
+            { 0, 0, (float)screenWidth, -(float)screenHeight }, // negative H = Y flip
+            { 0, 0 }, WHITE);
 
         CollisionManager::DrawAll(platforms);
 
@@ -120,18 +132,20 @@ int main(void)
         Rectangle src = { 0, 0, (float)image.width, (float)image.height };
         Rectangle dest = { player.x, player.y, image.width * scale, image.height * scale };
         if (!facingRight) src.width *= -1;
-        DrawTexturePro(image, src, dest, { 0.0f, 0.0f }, 0.0f, WHITE);
+        DrawTexturePro(image, src, dest, {}, 0.f, WHITE);
 
         DrawText("Prueba de Donkey Kong_1", 10, 10, 20, WHITE);
-
         EndDrawing();
     }
 
+    // ── Cleanup ───────────────────────────────────────────────────────────
     UnloadTexture(imgMarioIdle);
     UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);
     UnloadTexture(imgMarioJump);
     UnloadTexture(background);
+    UnloadRenderTexture(staticLayer);
+    CloseAudioDevice();
     CloseWindow();
 
     return 0;
