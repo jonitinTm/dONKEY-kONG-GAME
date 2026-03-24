@@ -575,7 +575,7 @@ int main(void)
 
         if (currentScreen == GAMEPLAY)
         {
-            DrawTexturePro(background, { 0,0,548,308 }, { 0,0,875,950 }, {}, 0.f, WHITE);
+            DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
             DrawTextureRec(ladderLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
             DrawTextureRec(staticLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
             CollisionManager::DrawAll(platforms);
