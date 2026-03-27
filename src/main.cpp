@@ -19,11 +19,11 @@ struct Barrel
     int       currentNode = 0;
     float     speed = 2.5f;
     bool      active = true;
-    bool  isBlue = false;
-    bool  isFalling = false;
-    bool  movingLeft = false;
-    float animTimer = 0.0f;
-    int   animFrame = 0;
+    bool      isBlue = false;
+    bool      isFalling = false;
+    bool      movingLeft = false;
+    float     animTimer = 0.0f;
+    int       animFrame = 0;
 };
 
 Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
@@ -181,7 +181,7 @@ int main(void)
     bool       debugPath = false;
 
     Rectangle player = { 100, 150, 60, 60 };
-    float     playerSpeed = 4.0f;
+    float     playerSpeed = 2.0f;
     float     jumpForce = -8.0f;
     float     gravity = 0.4f;
     float     velocityX = 0.0f;
@@ -190,10 +190,10 @@ int main(void)
     bool      facingRight = true;
     bool      isGrounded = false;
 
-    int  lives = 3;
-    bool death = false;
-    bool  invincible = false;
-    float invincibleTimer = 0.0f;
+    int         lives = 3;
+    bool        death = false;
+    bool        invincible = false;
+    float       invincibleTimer = 0.0f;
     const float invincibleDuration = 1.5f;
 
     bool  onLadder = false;
@@ -208,6 +208,10 @@ int main(void)
     float ladderExitTimer = 0.0f;
     float ladderExitFrameDuration = 0.12f;
     float ladderCooldown = 0.0f;
+    // Entry clamp: if player enters a ladder already > 0.65, slide to 0.64 over 1 second
+    bool  ladderEntryClamp = false;
+    float ladderEntryClampTimer = 0.0f;
+    float ladderEntryClampStart = 0.0f;
 
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
@@ -334,36 +338,49 @@ int main(void)
     Texture2D* blueBarrelRoll[4] = { &BlueBarrelMov1, &BlueBarrelMov2, &BlueBarrelMov3, &BlueBarrelMov4 };
     Texture2D* blueBarrelFall[2] = { &BlueBarrelFall1,&BlueBarrelFall2 };
 
+    // ?? Static beam layer ?????????????????????????????????????????????????????
     RenderTexture2D staticLayer = LoadRenderTexture(screenWidth, screenHeight);
     BeginTextureMode(staticLayer);
     ClearBackground(BLANK);
     float beamScale = 4.0f;
     for (auto& pos : beamPositions)
         DrawTexturePro(beam,
-            { 0,0,(float)beam.width,(float)beam.height },
+            { 0, 0, (float)beam.width, (float)beam.height },
             { pos.x, pos.y, beam.width * beamScale, beam.height * beamScale },
-            { 0,0 }, 0.f, WHITE);
+            { 0, 0 }, 0.f, WHITE);
     EndTextureMode();
     UnloadTexture(beam);
 
+    // ?? Ladder layer ??????????????????????????????????????????????????????????
     float ladderScale = 4.0f;
-    float ladderTileH = 16 * ladderScale;
-    float ladderTileW = 16 * ladderScale;
+    float ladderTileH = 16 * ladderScale;   // 64 px
+    float ladderTileW = 16 * ladderScale;   // 64 px
+
+    // Half-tile upward overlap so the top rung sits flush with the platform
+    // instead of being a full tile below it.  Last ladder keeps its full height.
+    const float ladderTopOffset = ladderTileH * 0.3f;  // ~19 px
 
     RenderTexture2D ladderLayer = LoadRenderTexture(screenWidth, screenHeight);
     BeginTextureMode(ladderLayer);
     ClearBackground(BLANK);
-    for (auto& lad : ladders)
+    for (int li = 0; li < (int)ladders.size(); li++)
     {
+        const Ladder& lad = ladders[li];
+        bool  isLast = (li == (int)ladders.size() - 1);
+        bool  isLeftSide = (li == 1 || li == 6);
+        float topOff = isLast ? 0.0f : (isLeftSide ? ladderTileH * 0.42f : ladderTopOffset);
         float drawX = lad.x + lad.width * 0.5f - ladderTileW * 0.5f;
-        float y = lad.y;
-        float bottom = lad.y + lad.height;
+        // Last ladder: full height from lad.y.
+        // Others: start half a tile lower than lad.y so the top rung overlaps
+        // the platform beam above (same idea as beam overlap).
+        float y = lad.y + topOff;
+        float bottom = lad.y + lad.height - (isLast ? 0.0f : (isLeftSide ? 8.0f : topOff));
         while (y < bottom)
         {
             DrawTexturePro(LadderPart,
-                { 0,0,16.0f,16.0f },
+                { 0, 0, 16.0f, 16.0f },
                 { drawX, y, ladderTileW, ladderTileH },
-                { 0,0 }, 0.f, WHITE);
+                { 0, 0 }, 0.f, WHITE);
             y += ladderTileH;
         }
     }
@@ -377,10 +394,12 @@ int main(void)
     float animationSpeed = 0.15f;
     int   walkFrame = 0;
 
+    // ?? Main loop ?????????????????????????????????????????????????????????????
     while (!WindowShouldClose())
     {
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
 
+        // ?? MENU ??????????????????????????????????????????????????????????????
         if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
@@ -396,6 +415,7 @@ int main(void)
             }
         }
 
+        // ?? GAMEPLAY ??????????????????????????????????????????????????????????
         if (currentScreen == GAMEPLAY)
         {
             float dt = GetFrameTime();
@@ -421,16 +441,15 @@ int main(void)
                 minuteTimer = 0.0f;
                 spawnInterval = max(minSpawnInterval, spawnInterval - 3.0f);
             }
-
             if (spawnTimer >= spawnInterval)
             {
                 spawnTimer = 0.0f;
                 SpawnBarrelFromPool(barrels, barrelPath);
             }
-
             if (IsKeyPressed(KEY_E))
                 SpawnBarrelFromPool(barrels, barrelPath);
 
+            // Barrel collision
             if (!invincible)
             {
                 for (const auto& b : barrels)
@@ -446,15 +465,25 @@ int main(void)
                 }
             }
 
+            // ?? Ladder update ????????????????????????????????????????????????
             if (onLadder)
             {
                 const Ladder& lad = ladders[currentLadder];
+
                 if (ladderExitPlaying)
                 {
+                    // Drive progress 0.6 ? 1.0 over 2 animation frames
+                    float exitTotalDuration = 2.0f * ladderExitFrameDuration;
+                    ladderProgress += (0.4f / exitTotalDuration) * dt;
+                    ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
+                    player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                    player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+
                     ladderExitTimer += dt;
                     if (ladderExitTimer >= ladderExitFrameDuration)
                     {
-                        ladderExitTimer = 0.0f; ladderExitStep++;
+                        ladderExitTimer = 0.0f;
+                        ladderExitStep++;
                     }
                     if (ladderExitStep == 0) image = imgMarioClimbEnd1;
                     else if (ladderExitStep == 1) image = imgMarioClimbEnd2;
@@ -462,16 +491,40 @@ int main(void)
                     {
                         image = imgMarioClimbDown;
                         bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
-                            || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S) || IsKeyPressed(KEY_SPACE);
+                            || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
+                            || IsKeyPressed(KEY_SPACE);
                         if (wants)
                         {
-                            onLadder = false; currentLadder = -1; ladderExitPlaying = false;
-                            ladderExitStep = 0; ladderExitTimer = 0; velocityY = 0; isJumping = false;
+                            onLadder = false; currentLadder = -1;
+                            ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
+                            ladderEntryClamp = false;
+                            velocityY = 0; isJumping = false;
                         }
                     }
                 }
+                else if (ladderEntryClamp)
+                {
+                    // Smoothly slide from entry position down to 0.6 over 0.3 seconds
+                    // with the descending climb animation playing
+                    ladderEntryClampTimer += dt;
+                    float t = Clamp(ladderEntryClampTimer / 0.3f, 0.0f, 1.0f);
+                    ladderProgress = ladderEntryClampStart + (0.57f - ladderEntryClampStart) * t;
+                    player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                    player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                    velocityY = 0; velocityX = 0;
+                    // Play climb animation while sliding down
+                    ladderClimbTimer += dt;
+                    if (ladderClimbTimer >= ladderClimbAnimSpeed)
+                    {
+                        ladderClimbFrame = (ladderClimbFrame + 1) % 2;
+                        ladderClimbTimer = 0;
+                    }
+                    image = (ladderClimbFrame == 0) ? imgMarioClimb1 : imgMarioClimb2;
+                    if (t >= 1.0f) ladderEntryClamp = false;
+                }
                 else
                 {
+                    // Normal climbing
                     bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
                     if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
                     if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
@@ -485,19 +538,28 @@ int main(void)
                     {
                         image = imgMarioClimbDown;
                         bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
-                            || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S) || IsKeyPressed(KEY_SPACE);
-                        if (wants) { onLadder = false; currentLadder = -1; isGrounded = true; isJumping = false; ladderCooldown = 0.2f; }
+                            || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
+                            || IsKeyPressed(KEY_SPACE);
+                        if (wants)
+                        {
+                            onLadder = false; currentLadder = -1;
+                            ladderEntryClamp = false;
+                            isGrounded = true; isJumping = false; ladderCooldown = 0.2f;
+                        }
                     }
-                    else if (ladderProgress >= 1.0f)
+                    else if (ladderProgress >= 0.6f)
                     {
-                        ladderExitPlaying = true; ladderExitStep = 0; ladderExitTimer = 0; image = imgMarioClimbEnd1;
+                        ladderExitPlaying = true;
+                        ladderExitStep = 0; ladderExitTimer = 0;
+                        image = imgMarioClimbEnd1;
                     }
                     else if (climbing)
                     {
                         ladderClimbTimer += dt;
                         if (ladderClimbTimer >= ladderClimbAnimSpeed)
                         {
-                            ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0;
+                            ladderClimbFrame = (ladderClimbFrame + 1) % 2;
+                            ladderClimbTimer = 0;
                         }
                         image = (ladderClimbFrame == 0) ? imgMarioClimb1 : imgMarioClimb2;
                     }
@@ -505,6 +567,7 @@ int main(void)
             }
             else
             {
+                // ?? Normal movement ??????????????????????????????????????????
                 if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
                 if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
 
@@ -513,12 +576,28 @@ int main(void)
                     bool entered = false;
                     for (int i = 0; i < (int)ladders.size(); i++)
                     {
-                        if (ladderCooldown <= 0 && CheckCollisionRecs(player, ladders[i].GetHitbox()))
+                        // Narrow hitbox: 50% width, centred on ladder
+                        Rectangle _lhb = ladders[i].GetHitbox();
+                        float     _lnw = _lhb.width * 0.5f;
+                        Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height };
+
+                        if (ladderCooldown <= 0 && CheckCollisionRecs(player, _lnarrow))
                         {
                             float ip = ladders[i].ProgressFromPlayerY(player.y, player.height);
                             ladderProgress = Clamp(ip, 0.01f, 0.99f);
-                            onLadder = true; currentLadder = i; ladderExitPlaying = false;
-                            ladderExitStep = 0; ladderExitTimer = 0; ladderClimbFrame = 0; ladderClimbTimer = 0;
+
+                            // Entry clamp: if already past 0.65, slide back to 0.64 over 1 s
+                            ladderEntryClamp = false;
+                            if (ladderProgress > 0.65f)
+                            {
+                                ladderEntryClamp = true;
+                                ladderEntryClampStart = ladderProgress;
+                                ladderEntryClampTimer = 0.0f;
+                            }
+
+                            onLadder = true; currentLadder = i;
+                            ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
+                            ladderClimbFrame = 0; ladderClimbTimer = 0;
                             player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
                             velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
                             entered = true; break;
@@ -543,24 +622,29 @@ int main(void)
                 isGrounded = col.grounded;
                 if (col.grounded) isJumping = false;
 
-                if (isJumping)           image = imgMarioJump;
+                if (isJumping)        image = imgMarioJump;
                 else if (playerIsMoving)
                 {
                     if (animationTimer >= animationSpeed)
                     {
-                        walkFrame = (walkFrame + 1) % 2; animationTimer = 0;
+                        walkFrame = (walkFrame + 1) % 2;
+                        animationTimer = 0;
                     }
                     image = (walkFrame == 0) ? imgMarioWalk1 : imgMarioWalk2;
                 }
                 else { image = imgMarioIdle; walkFrame = 0; }
             }
 
+            // Fall off bottom
             if (player.y > 900)
             {
-                player.y = 0; player.x = 440; onLadder = false; currentLadder = -1; ladderExitPlaying = false;
+                player.y = 0; player.x = 440;
+                onLadder = false; currentLadder = -1;
+                ladderExitPlaying = false; ladderEntryClamp = false;
             }
         }
 
+        // ?? Draw ??????????????????????????????????????????????????????????????
         BeginDrawing();
         ClearBackground(BLACK);
 
@@ -575,11 +659,30 @@ int main(void)
 
         if (currentScreen == GAMEPLAY)
         {
+            // 1. Background
             DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
+
+            // 2. Ladders  (player appears IN FRONT of ladders)
             DrawTextureRec(ladderLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
+
+            // 3. Beams  (player renders ON TOP of beams)
             DrawTextureRec(staticLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
             CollisionManager::DrawAll(platforms);
 
+            // 4. Player  (in front of both ladders and beams)
+            {
+                bool showPlayer = !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
+                if (showPlayer)
+                {
+                    float     scale = 3.8f;
+                    Rectangle src = { 0, 0, (float)image.width, (float)image.height };
+                    Rectangle dest = { player.x, player.y, image.width * scale, image.height * scale };
+                    if (!facingRight && !onLadder) src.width *= -1;
+                    DrawTexturePro(image, src, dest, {}, 0.f, WHITE);
+                }
+            }
+
+            // 5. Barrels  (drawn on top of everything)
             for (const auto& b : barrels)
             {
                 if (!b.active) continue;
@@ -600,23 +703,14 @@ int main(void)
                 float drawX = b.hitbox.x - (drawW - b.hitbox.width) * 0.5f;
                 float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f;
                 DrawTexturePro(*tex,
-                    { 0,0,(float)tex->width,(float)tex->height },
-                    { drawX,drawY,drawW,drawH },
-                    { 0,0 }, 0.f, WHITE);
+                    { 0, 0, (float)tex->width, (float)tex->height },
+                    { drawX, drawY, drawW, drawH },
+                    { 0, 0 }, 0.f, WHITE);
             }
 
-            bool showPlayer = !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
-            if (showPlayer)
-            {
-                float scale = 3.8f;
-                Rectangle src = { 0,0,(float)image.width,(float)image.height };
-                Rectangle dest = { player.x,player.y,image.width * scale,image.height * scale };
-                if (!facingRight && !onLadder) src.width *= -1;
-                DrawTexturePro(image, src, dest, {}, 0.f, WHITE);
-            }
-
+            // ?? HUD ???????????????????????????????????????????????????????????
             for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
-            if (death)    DrawText("DEATH", 10, 45, 20, ORANGE);
+            if (death)     DrawText("DEATH", 10, 45, 20, ORANGE);
             if (lives <= 0) DrawText("GAME OVER", 270, 450, 50, MAROON);
             DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
             if (onLadder)
@@ -634,17 +728,18 @@ int main(void)
         EndDrawing();
     }
 
-    UnloadTexture(imgMarioIdle);    UnloadTexture(imgMarioWalk1);
-    UnloadTexture(imgMarioWalk2);   UnloadTexture(imgMarioJump);
-    UnloadTexture(imgMarioClimb1);  UnloadTexture(imgMarioClimb2);
+    // ?? Cleanup ???????????????????????????????????????????????????????????????
+    UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
+    UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
+    UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
-    UnloadTexture(BarrelMov1);      UnloadTexture(BarrelMov2);
-    UnloadTexture(BarrelMov3);      UnloadTexture(BarrelMov4);
-    UnloadTexture(BarrelFall1);     UnloadTexture(BarrelFall2);
-    UnloadTexture(BlueBarrelMov1);  UnloadTexture(BlueBarrelMov2);
-    UnloadTexture(BlueBarrelMov3);  UnloadTexture(BlueBarrelMov4);
-    UnloadTexture(BlueBarrelFall1); UnloadTexture(BlueBarrelFall2);
+    UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
+    UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
+    UnloadTexture(BarrelFall1);       UnloadTexture(BarrelFall2);
+    UnloadTexture(BlueBarrelMov1);    UnloadTexture(BlueBarrelMov2);
+    UnloadTexture(BlueBarrelMov3);    UnloadTexture(BlueBarrelMov4);
+    UnloadTexture(BlueBarrelFall1);   UnloadTexture(BlueBarrelFall2);
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
     CloseAudioDevice();
