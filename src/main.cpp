@@ -1,4 +1,4 @@
-#include "raylib.h"
+﻿#include "raylib.h"
 #include "raymath.h"
 #include "Collision.h"
 #include "Ladder.h"
@@ -26,6 +26,12 @@ struct Barrel
     int       animFrame = 0;
 };
 
+struct NukeItem
+{
+    Vector2   pos;
+    bool      active = true;
+};
+
 Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     float spd = 2.5f, float w = 30.0f, float h = 30.0f)
 {
@@ -43,13 +49,14 @@ Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
 }
 
 bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
-    float spd = 2.5f, float w = 30.0f, float h = 30.0f)
+    float spd = 2.5f, float w = 30.0f, float h = 30.0f, bool forceBlue = false)
 {
     for (auto& b : barrels)
     {
         if (!b.active)
         {
             b = SpawnBarrel(path, 0, spd, w, h);
+            if (forceBlue) b.isBlue = true;
             return true;
         }
     }
@@ -80,27 +87,16 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
         {
             int roll = GetRandomValue(0, 9);
             int choice = (roll < node.rollThreshold) ? 0 : 1;
-            if (node.isSplitNode)
-            {
-                b.isFalling = (choice == 0);
-                b.animFrame = 0;
-            }
+            if (node.isSplitNode) { b.isFalling = (choice == 0); b.animFrame = 0; }
             b.currentNode = node.next[choice];
         }
         else if (oneValid)
         {
             int nextNode = (node.next[0] != -1) ? node.next[0] : node.next[1];
-            if (node.isSplitNode)
-            {
-                b.isFalling = false;
-                b.animFrame = 0;
-            }
+            if (node.isSplitNode) { b.isFalling = false; b.animFrame = 0; }
             b.currentNode = nextNode;
         }
-        else
-        {
-            b.active = false;
-        }
+        else { b.active = false; }
     }
     else
     {
@@ -113,11 +109,7 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
     float frameTime = b.isFalling ? 0.12f : 0.10f;
     int   frameCount = b.isFalling ? 2 : 4;
     b.animTimer += delta;
-    if (b.animTimer >= frameTime)
-    {
-        b.animFrame = (b.animFrame + 1) % frameCount;
-        b.animTimer = 0.0f;
-    }
+    if (b.animTimer >= frameTime) { b.animFrame = (b.animFrame + 1) % frameCount; b.animTimer = 0.0f; }
 }
 
 void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& barrels, int screenHeight)
@@ -180,7 +172,7 @@ int main(void)
     Rectangle  btnExit = { 340, 500, 200, 40 };
     bool       debugPath = false;
 
-    Rectangle player = { 100, 150, 60, 60 };
+    Rectangle player = { 35.0f + 64.0f * 3.5f + 10.0f, 820.0f, 60, 60 }; // next to house
     float     playerSpeed = 2.0f;
     float     jumpForce = -8.0f;
     float     gravity = 0.4f;
@@ -208,10 +200,53 @@ int main(void)
     float ladderExitTimer = 0.0f;
     float ladderExitFrameDuration = 0.12f;
     float ladderCooldown = 0.0f;
-    // Entry clamp: if player enters a ladder already > 0.65, slide to 0.64 over 1 second
     bool  ladderEntryClamp = false;
     float ladderEntryClampTimer = 0.0f;
     float ladderEntryClampStart = 0.0f;
+
+    // ── House / explosion state ──────────────────────────────────────────────
+    const float HOUSE_ANIM_FPS = 10.0f;   // EDITABLE: cave anim speed (frames/sec)
+    const int   HOUSE_SWAP_AT_FRAME = 4;        // EDITABLE: 0-based frame that swaps house (4 = cave5)
+    const float HOUSE_DRAW_SCALE = 3.5f;     // EDITABLE: house draw scale (native 64x32)
+    const float CAVE_DRAW_SCALE = 4.335f;  // 5.1 * 0.85     // EDITABLE: explosion draw scale (native 64x32)
+    const float FLOOR_DRAW_SCALE = 4.0f;     // EDITABLE: snow floor tile scale (native 48x16)
+
+    // Native sprite dimensions (do not change unless assets change)
+    const float HOUSE_NATIVE_W = 64.0f;
+    const float HOUSE_NATIVE_H = 32.0f;
+    const float CAVE_NATIVE_W = 64.0f;
+    const float CAVE_NATIVE_H = 32.0f;
+    const float FLOOR_NATIVE_W = 80.0f;
+    const float FLOOR_NATIVE_H = 16.0f;
+
+    float houseW = HOUSE_NATIVE_W * HOUSE_DRAW_SCALE;
+    float houseH = HOUSE_NATIVE_H * HOUSE_DRAW_SCALE;
+    float houseX = 35.0f;
+    float houseY = 880.0f - houseH;   // sits on the bottom platform surface
+
+    Rectangle houseHitbox = { houseX, houseY, houseW, houseH };
+    bool      houseAnimPlaying = false;
+    int       houseAnimFrame = 0;
+    float     houseAnimTimer = 0.0f;
+    bool      houseIsSnowed = false;
+
+    // ── Nuke state ───────────────────────────────────────────────────────────
+    const float NUKE_SCALE = 1.5f;
+    const float NUKE_NATIVE_W = 74.0f;
+    const float NUKE_NATIVE_H = 35.0f;
+    const float NUKE_EXPL_FPS = 10.0f;  // EDITABLE: explosion anim speed
+    const float NUKE_FLASH_IN = 1.0f;   // EDITABLE: seconds to go full white
+    const float NUKE_FLASH_OUT = 4.0f;   // EDITABLE: seconds to fade back
+    const float NUKE_SHAKE_AMOUNT = 12.0f;  // EDITABLE: max shake pixels
+    bool        playerHasNuke = false;
+    float       nukeExtraDelay = 0.0f;
+    bool        nukeExplosionPlaying = false;
+    int         nukeExplosionFrame = 0;
+    float       nukeExplosionTimer = 0.0f;
+    Vector2     nukeExplosionPos = { 0, 0 };
+    float       nukeFlashTimer = 0.0f;  // counts 0 → FLASH_IN+FLASH_OUT
+    Vector2     nukeShakeOffset = { 0, 0 };
+    // ────────────────────────────────────────────────────────────────────────
 
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
@@ -225,14 +260,14 @@ int main(void)
     };
 
     vector<Ladder> ladders = {
-        Ladder::Make(675, 245, 40, 104),
-        Ladder::Make(160, 375, 40, 102),
-        Ladder::Make(300, 365, 40, 117),
-        Ladder::Make(680, 495, 40, 110),
-        Ladder::Make(430, 489, 40, 128),
-        Ladder::Make(380, 621, 40, 124),
-        Ladder::Make(160, 632, 40, 101),
-        Ladder::Make(670, 760, 40, 105),
+        Ladder::Make(675, 245,  40, 104),
+        Ladder::Make(160, 375,  40, 102),
+        Ladder::Make(300, 365,  40, 117),
+        Ladder::Make(680, 495,  40, 110),
+        Ladder::Make(430, 489,  40, 128),
+        Ladder::Make(380, 621,  40, 124),
+        Ladder::Make(160, 632,  40, 101),
+        Ladder::Make(670, 760,  40, 105),
     };
 
     vector<PathNode> barrelPath = {
@@ -268,7 +303,21 @@ int main(void)
 
     vector<Barrel> barrels(100);
     for (auto& b : barrels) b.active = false;
-    SpawnBarrelFromPool(barrels, barrelPath);
+    SpawnBarrelFromPool(barrels, barrelPath, 2.5f, 30.0f, 30.0f, true); // first barrel always blue
+
+    // ── Nuke: one item spawned at a random position from the candidate list ──
+    vector<Vector2> nukeSpawnNodes = {
+        { 150.0f, 845.0f }, { 330.0f, 845.0f },
+        { 180.0f, 693.0f }, { 480.0f, 693.0f }, { 650.0f, 693.0f },
+        { 250.0f, 563.0f }, { 570.0f, 563.0f },
+        { 150.0f, 433.0f }, { 500.0f, 433.0f },
+        { 300.0f, 303.0f },
+    };
+    vector<NukeItem> nukes;
+    {
+        int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+        nukes.push_back({ nukeSpawnNodes[idx], true });
+    }
 
     float spawnTimer = 0.0f;
     float spawnInterval = 10.0f;
@@ -319,6 +368,7 @@ int main(void)
     Texture2D imgMarioClimbEnd2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd2.png");
     Texture2D imgMarioClimbDown = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_IdleBack.png");
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
+    Texture2D SnowFloor = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Floor.png");
 
     Texture2D BarrelMov1 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Mov1.png");
     Texture2D BarrelMov2 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Mov2.png");
@@ -333,32 +383,77 @@ int main(void)
     Texture2D BlueBarrelFall1 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Blue_Fall1.png");
     Texture2D BlueBarrelFall2 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Blue_Fall2.png");
 
+    Texture2D House1 = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_House_1.png");    Texture2D House2 = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_House_Snowed.png");
+    Texture2D cave1 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion.png");
+    Texture2D cave2 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_2.png");
+    Texture2D cave3 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_3.png");
+    Texture2D cave4 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_4.png");
+    Texture2D cave5 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_5.png");
+    Texture2D cave6 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_6.png");
+    Texture2D cave7 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_7.png");
+    Texture2D cave8 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_8.png");
+    Texture2D cave9 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_9.png");
+    Texture2D cave10 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_10.png");
+    Texture2D cave11 = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Explosion_11.png");
+
+    const int CAVE_FRAME_COUNT = 11;
+    Texture2D* caveFrames[CAVE_FRAME_COUNT] = {
+        &cave1, &cave2, &cave3, &cave4, &cave5,
+        &cave6, &cave7, &cave8, &cave9, &cave10, &cave11
+    };
+
+    Texture2D Nuke = LoadTexture("Assets/Textures/Items/Nuke.png");
+    Texture2D imgMarioIdleNuke = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_NukeHold_Idle.png");
+    Texture2D imgMarioWalk1Nuke = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_NukeHold_Walk1.png");
+    Texture2D imgMarioWalk2Nuke = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_NukeHold_Walk2.png");
+    Texture2D imgMarioJumpNuke = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_NukeHold_Jump.png");
+
+    Texture2D Explosion1 = LoadTexture("Assets/Textures/Items/Explosion1.png");
+    Texture2D Explosion2 = LoadTexture("Assets/Textures/Items/Explosion2.png");
+    Texture2D Explosion3 = LoadTexture("Assets/Textures/Items/Explosion3.png");
+    Texture2D Explosion4 = LoadTexture("Assets/Textures/Items/Explosion4.png");
+    Texture2D Explosion5 = LoadTexture("Assets/Textures/Items/Explosion5.png");
+    Texture2D Explosion6 = LoadTexture("Assets/Textures/Items/Explosion6.png");
+
+    const int NUKE_EXPL_FRAME_COUNT = 6;
+    Texture2D* explosionFrames[NUKE_EXPL_FRAME_COUNT] = {
+        &Explosion1, &Explosion2, &Explosion3,
+        &Explosion4, &Explosion5, &Explosion6
+    };
+
     Texture2D* barrelRoll[4] = { &BarrelMov1,     &BarrelMov2,     &BarrelMov3,     &BarrelMov4 };
     Texture2D* barrelFall[2] = { &BarrelFall1,    &BarrelFall2 };
     Texture2D* blueBarrelRoll[4] = { &BlueBarrelMov1, &BlueBarrelMov2, &BlueBarrelMov3, &BlueBarrelMov4 };
     Texture2D* blueBarrelFall[2] = { &BlueBarrelFall1,&BlueBarrelFall2 };
 
-    // ?? Static beam layer ?????????????????????????????????????????????????????
+    // ── Static beam + snow floor layer (baked once) ───────────────────────────
+    float floorTileW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE;  // 48 * 4 = 192
+    float floorTileH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;  // 16 * 4 = 64
+    float floorY = 880.0f - floorTileH;                 // bottom platform surface
+
     RenderTexture2D staticLayer = LoadRenderTexture(screenWidth, screenHeight);
     BeginTextureMode(staticLayer);
     ClearBackground(BLANK);
+
+    // Beam tiles
     float beamScale = 4.0f;
     for (auto& pos : beamPositions)
         DrawTexturePro(beam,
             { 0, 0, (float)beam.width, (float)beam.height },
             { pos.x, pos.y, beam.width * beamScale, beam.height * beamScale },
             { 0, 0 }, 0.f, WHITE);
+
+
+
     EndTextureMode();
     UnloadTexture(beam);
+    // SnowFloor is drawn live each frame, do not unload here
 
-    // ?? Ladder layer ??????????????????????????????????????????????????????????
+    // ── Ladder layer ─────────────────────────────────────────────────────────
     float ladderScale = 4.0f;
-    float ladderTileH = 16 * ladderScale;   // 64 px
-    float ladderTileW = 16 * ladderScale;   // 64 px
-
-    // Half-tile upward overlap so the top rung sits flush with the platform
-    // instead of being a full tile below it.  Last ladder keeps its full height.
-    const float ladderTopOffset = ladderTileH * 0.3f;  // ~19 px
+    float ladderTileH = 16 * ladderScale;
+    float ladderTileW = 16 * ladderScale;
+    const float ladderTopOffset = ladderTileH * 0.3f;
 
     RenderTexture2D ladderLayer = LoadRenderTexture(screenWidth, screenHeight);
     BeginTextureMode(ladderLayer);
@@ -370,9 +465,6 @@ int main(void)
         bool  isLeftSide = (li == 1 || li == 6);
         float topOff = isLast ? 0.0f : (isLeftSide ? ladderTileH * 0.42f : ladderTopOffset);
         float drawX = lad.x + lad.width * 0.5f - ladderTileW * 0.5f;
-        // Last ladder: full height from lad.y.
-        // Others: start half a tile lower than lad.y so the top rung overlaps
-        // the platform beam above (same idea as beam overlap).
         float y = lad.y + topOff;
         float bottom = lad.y + lad.height - (isLast ? 0.0f : (isLeftSide ? 8.0f : topOff));
         while (y < bottom)
@@ -387,19 +479,18 @@ int main(void)
     EndTextureMode();
     UnloadTexture(LadderPart);
 
-    Texture2D image = imgMarioIdle;
+    Texture2D* image = &imgMarioIdle;
     SetTargetFPS(60);
 
     float animationTimer = 0.0f;
     float animationSpeed = 0.15f;
     int   walkFrame = 0;
 
-    // ?? Main loop ?????????????????????????????????????????????????????????????
     while (!WindowShouldClose())
     {
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
 
-        // ?? MENU ??????????????????????????????????????????????????????????????
+        // ── MENU ──────────────────────────────────────────────────────────────
         if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
@@ -415,7 +506,7 @@ int main(void)
             }
         }
 
-        // ?? GAMEPLAY ??????????????????????????????????????????????????????????
+        // ── GAMEPLAY ──────────────────────────────────────────────────────────
         if (currentScreen == GAMEPLAY)
         {
             float dt = GetFrameTime();
@@ -441,7 +532,77 @@ int main(void)
                 minuteTimer = 0.0f;
                 spawnInterval = max(minSpawnInterval, spawnInterval - 3.0f);
             }
-            if (spawnTimer >= spawnInterval)
+            // ── Nuke pickup ────────────────────────────────────────────────
+            if (!playerHasNuke)
+            {
+                float nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                float nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                for (auto& nk : nukes)
+                {
+                    if (!nk.active) continue;
+                    Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
+                    if (CheckCollisionRecs(player, nkRect))
+                    {
+                        nk.active = false;
+                        playerHasNuke = true;
+                        break;
+                    }
+                }
+            }
+
+            // ── Nuke detonation ────────────────────────────────────────────
+            if (playerHasNuke && IsKeyPressed(KEY_F))
+            {
+                // Record nuke position (above player, matching draw code)
+                float scale = 3.8f;
+                float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
+                float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
+                nukeExplosionPos = {
+                    player.x + image->width * scale * 0.5f - nkW * 0.5f,
+                    player.y - nkH - 2.0f
+                };
+                playerHasNuke = false;
+                nukeExplosionPlaying = true;
+                nukeExplosionFrame = 0;
+                nukeExplosionTimer = 0.0f;
+                nukeFlashTimer = 0.0f;
+                for (auto& b : barrels) b.active = false;
+                spawnTimer = 0.0f;
+                nukeExtraDelay = 3.0f;
+            }
+            if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
+
+            // Explosion animation tick
+            if (nukeExplosionPlaying)
+            {
+                nukeExplosionTimer += dt;
+                if (nukeExplosionTimer >= 1.0f / NUKE_EXPL_FPS)
+                {
+                    nukeExplosionTimer -= 1.0f / NUKE_EXPL_FPS;
+                    nukeExplosionFrame++;
+                    if (nukeExplosionFrame >= NUKE_EXPL_FRAME_COUNT)
+                        nukeExplosionPlaying = false;
+                }
+            }
+
+            // Flash + shake tick
+            float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
+            if (nukeFlashTimer < flashTotal) nukeFlashTimer += dt;
+
+            // Shake: only during fade-out, decreases over time
+            if (nukeFlashTimer >= NUKE_FLASH_IN && nukeFlashTimer < flashTotal)
+            {
+                float shakeFade = 1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT;
+                float shakeMag = NUKE_SHAKE_AMOUNT * shakeFade;
+                nukeShakeOffset = {
+                    (float)GetRandomValue((int)-shakeMag, (int)shakeMag),
+                    (float)GetRandomValue((int)-shakeMag, (int)shakeMag)
+                };
+            }
+            else nukeShakeOffset = { 0, 0 };
+
+            // Apply nuke delay on top of normal spawn interval
+            if (spawnTimer >= spawnInterval + max(0.0f, nukeExtraDelay))
             {
                 spawnTimer = 0.0f;
                 SpawnBarrelFromPool(barrels, barrelPath);
@@ -449,7 +610,7 @@ int main(void)
             if (IsKeyPressed(KEY_E))
                 SpawnBarrelFromPool(barrels, barrelPath);
 
-            // Barrel collision
+            // ── Barrel / player collision ──────────────────────────────────
             if (!invincible)
             {
                 for (const auto& b : barrels)
@@ -465,14 +626,48 @@ int main(void)
                 }
             }
 
-            // ?? Ladder update ????????????????????????????????????????????????
+            // ── Barrel / house collision ───────────────────────────────────
+            if (!houseAnimPlaying)
+            {
+                for (auto& b : barrels)
+                {
+                    if (b.active && b.isBlue && CheckCollisionRecs(b.hitbox, houseHitbox))
+                    {
+                        houseAnimPlaying = true;
+                        houseAnimFrame = 0;
+                        houseAnimTimer = 0.0f;
+                        b.active = false;
+                        break;
+                    }
+                }
+            }
+
+            // ── House explosion animation tick ────────────────────────────
+            if (houseAnimPlaying)
+            {
+                houseAnimTimer += dt;
+                float frameDuration = 1.0f / HOUSE_ANIM_FPS;
+                if (houseAnimTimer >= frameDuration)
+                {
+                    houseAnimTimer -= frameDuration;
+                    houseAnimFrame++;
+                    if (houseAnimFrame == HOUSE_SWAP_AT_FRAME)
+                        houseIsSnowed = true;
+                    if (houseAnimFrame >= CAVE_FRAME_COUNT)
+                    {
+                        houseAnimPlaying = false;
+                        houseAnimFrame = CAVE_FRAME_COUNT - 1;
+                    }
+                }
+            }
+
+            // ── Ladder update ─────────────────────────────────────────────
             if (onLadder)
             {
                 const Ladder& lad = ladders[currentLadder];
 
                 if (ladderExitPlaying)
                 {
-                    // Drive progress 0.6 ? 1.0 over 2 animation frames
                     float exitTotalDuration = 2.0f * ladderExitFrameDuration;
                     ladderProgress += (0.4f / exitTotalDuration) * dt;
                     ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
@@ -485,11 +680,11 @@ int main(void)
                         ladderExitTimer = 0.0f;
                         ladderExitStep++;
                     }
-                    if (ladderExitStep == 0) image = imgMarioClimbEnd1;
-                    else if (ladderExitStep == 1) image = imgMarioClimbEnd2;
+                    if (ladderExitStep == 0) image = &imgMarioClimbEnd1;
+                    else if (ladderExitStep == 1) image = &imgMarioClimbEnd2;
                     else
                     {
-                        image = imgMarioClimbDown;
+                        image = &imgMarioClimbDown;
                         bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
                             || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
                             || IsKeyPressed(KEY_SPACE);
@@ -504,27 +699,23 @@ int main(void)
                 }
                 else if (ladderEntryClamp)
                 {
-                    // Smoothly slide from entry position down to 0.6 over 0.3 seconds
-                    // with the descending climb animation playing
                     ladderEntryClampTimer += dt;
                     float t = Clamp(ladderEntryClampTimer / 0.3f, 0.0f, 1.0f);
                     ladderProgress = ladderEntryClampStart + (0.57f - ladderEntryClampStart) * t;
                     player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
                     player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
                     velocityY = 0; velocityX = 0;
-                    // Play climb animation while sliding down
                     ladderClimbTimer += dt;
                     if (ladderClimbTimer >= ladderClimbAnimSpeed)
                     {
                         ladderClimbFrame = (ladderClimbFrame + 1) % 2;
                         ladderClimbTimer = 0;
                     }
-                    image = (ladderClimbFrame == 0) ? imgMarioClimb1 : imgMarioClimb2;
+                    image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
                     if (t >= 1.0f) ladderEntryClamp = false;
                 }
                 else
                 {
-                    // Normal climbing
                     bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
                     if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
                     if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
@@ -536,7 +727,7 @@ int main(void)
 
                     if (ladderProgress <= 0.0f)
                     {
-                        image = imgMarioClimbDown;
+                        image = &imgMarioClimbDown;
                         bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
                             || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
                             || IsKeyPressed(KEY_SPACE);
@@ -551,7 +742,7 @@ int main(void)
                     {
                         ladderExitPlaying = true;
                         ladderExitStep = 0; ladderExitTimer = 0;
-                        image = imgMarioClimbEnd1;
+                        image = &imgMarioClimbEnd1;
                     }
                     else if (climbing)
                     {
@@ -561,13 +752,13 @@ int main(void)
                             ladderClimbFrame = (ladderClimbFrame + 1) % 2;
                             ladderClimbTimer = 0;
                         }
-                        image = (ladderClimbFrame == 0) ? imgMarioClimb1 : imgMarioClimb2;
+                        image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
                     }
                 }
             }
             else
             {
-                // ?? Normal movement ??????????????????????????????????????????
+                // ── Normal movement ─────────────────────────────────────────
                 if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
                 if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
 
@@ -576,7 +767,6 @@ int main(void)
                     bool entered = false;
                     for (int i = 0; i < (int)ladders.size(); i++)
                     {
-                        // Narrow hitbox: 50% width, centred on ladder
                         Rectangle _lhb = ladders[i].GetHitbox();
                         float     _lnw = _lhb.width * 0.5f;
                         Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height };
@@ -586,7 +776,6 @@ int main(void)
                             float ip = ladders[i].ProgressFromPlayerY(player.y, player.height);
                             ladderProgress = Clamp(ip, 0.01f, 0.99f);
 
-                            // Entry clamp: if already past 0.65, slide back to 0.64 over 1 s
                             ladderEntryClamp = false;
                             if (ladderProgress > 0.65f)
                             {
@@ -622,20 +811,22 @@ int main(void)
                 isGrounded = col.grounded;
                 if (col.grounded) isJumping = false;
 
-                if (isJumping)        image = imgMarioJump;
+                if (isJumping)          image = playerHasNuke ? &imgMarioJumpNuke : &imgMarioJump;
                 else if (playerIsMoving)
                 {
                     if (animationTimer >= animationSpeed)
                     {
                         walkFrame = (walkFrame + 1) % 2;
-                        animationTimer = 0;
+                        animationTimer = fmod(animationTimer, animationSpeed); // don't skip frames
                     }
-                    image = (walkFrame == 0) ? imgMarioWalk1 : imgMarioWalk2;
+                    if (playerHasNuke)
+                        image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
+                    else
+                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
                 }
-                else { image = imgMarioIdle; walkFrame = 0; }
+                else { image = playerHasNuke ? &imgMarioIdleNuke : &imgMarioIdle; walkFrame = 0; }
             }
 
-            // Fall off bottom
             if (player.y > 900)
             {
                 player.y = 0; player.x = 440;
@@ -644,7 +835,7 @@ int main(void)
             }
         }
 
-        // ?? Draw ??????????????????????????????????????????????????????????????
+        // ── Draw ─────────────────────────────────────────────────────────────
         BeginDrawing();
         ClearBackground(BLACK);
 
@@ -659,30 +850,100 @@ int main(void)
 
         if (currentScreen == GAMEPLAY)
         {
+            // Apply screen shake via camera
+            Camera2D cam = { 0 };
+            cam.zoom = 1.0f;
+            cam.offset = nukeShakeOffset;
+            BeginMode2D(cam);
+
             // 1. Background
             DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
 
-            // 2. Ladders  (player appears IN FRONT of ladders)
+            // 2. Ladders
             DrawTextureRec(ladderLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
 
-            // 3. Beams  (player renders ON TOP of beams)
+            // 3. Beams + snow floor (baked)
             DrawTextureRec(staticLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
             CollisionManager::DrawAll(platforms);
 
-            // 4. Player  (in front of both ladders and beams)
+            // 4. House (64x32 native, sits on bottom-left platform)
+            {
+                Texture2D& houseTex = houseIsSnowed ? House2 : House1;
+                DrawTexturePro(houseTex,
+                    { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H },
+                    { houseX, houseY, houseW, houseH },
+                    { 0, 0 }, 0.f, WHITE);
+
+                // Snow floor — appears over the house only after it turns snowed
+                if (houseIsSnowed)
+                {
+                    float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE;
+                    float sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
+                    float sfY = 865.0f;  // aligned to bottom beam row
+                    DrawTexturePro(SnowFloor,
+                        { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H },
+                        { houseX, sfY, sfW, sfH }, { 0,0 }, 0.f, WHITE);
+                }
+
+                // Explosion to the right of the house, vertically centred on it
+                if (houseAnimPlaying && houseAnimFrame < CAVE_FRAME_COUNT)
+                {
+                    Texture2D* caveTex = caveFrames[houseAnimFrame];
+                    float caveW = CAVE_NATIVE_W * CAVE_DRAW_SCALE;
+                    float caveH = CAVE_NATIVE_H * CAVE_DRAW_SCALE;
+                    float caveX = houseX + houseW - caveW * 0.65f;           // centred just inside the right edge
+                    float animProgress = houseAnimFrame / (float)(CAVE_FRAME_COUNT - 1);
+                    float caveY = houseY + houseH * 0.5f - caveH * 0.7f + 10.0f * animProgress; // drifts 10px down over full anim
+                    DrawTexturePro(*caveTex,
+                        { 0, 0, CAVE_NATIVE_W, CAVE_NATIVE_H },
+                        { caveX, caveY, caveW, caveH },
+                        { 0, 0 }, 0.f, WHITE);
+                }
+            }
+
+            // 4.5 Nuke items on map
+            {
+                float nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                float nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                for (const auto& nk : nukes)
+                {
+                    if (!nk.active) continue;
+                    float bobY = nk.pos.y + sinf((float)GetTime() * 3.0f) * 4.0f; // ±4px bob
+                    DrawTexturePro(Nuke,
+                        { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
+                        { nk.pos.x, bobY, nkW, nkH },
+                        { 0, 0 }, 0.f, WHITE);
+                }
+            }
+
+            // 5. Player
             {
                 bool showPlayer = !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
                 if (showPlayer)
                 {
                     float     scale = 3.8f;
-                    Rectangle src = { 0, 0, (float)image.width, (float)image.height };
-                    Rectangle dest = { player.x, player.y, image.width * scale, image.height * scale };
+                    Rectangle src = { 0, 0, (float)image->width, (float)image->height };
+                    Rectangle dest = { player.x, player.y, image->width * scale, image->height * scale };
                     if (!facingRight && !onLadder) src.width *= -1;
-                    DrawTexturePro(image, src, dest, {}, 0.f, WHITE);
+                    DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
+
+                    // Nuke held above player
+                    if (playerHasNuke)
+                    {
+                        float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
+                        float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
+                        float nkX = player.x + dest.width * 0.5f - nkW * 0.5f;
+                        float nkY = player.y - nkH - 2.0f;
+                        Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
+                        if (!facingRight) nukeSrc.width *= -1; // mirror with player
+                        DrawTexturePro(Nuke, nukeSrc,
+                            { nkX, nkY, nkW, nkH },
+                            { 0, 0 }, 0.f, WHITE);
+                    }
                 }
             }
 
-            // 5. Barrels  (drawn on top of everything)
+            // 6. Barrels
             for (const auto& b : barrels)
             {
                 if (!b.active) continue;
@@ -690,9 +951,7 @@ int main(void)
                 Texture2D** fallSet = b.isBlue ? blueBarrelFall : barrelFall;
                 Texture2D* tex;
                 if (b.isFalling)
-                {
                     tex = fallSet[b.animFrame % 2];
-                }
                 else
                 {
                     int frame = b.movingLeft ? (3 - b.animFrame % 4) : (b.animFrame % 4);
@@ -708,9 +967,9 @@ int main(void)
                     { 0, 0 }, 0.f, WHITE);
             }
 
-            // ?? HUD ???????????????????????????????????????????????????????????
+            // ── HUD ──────────────────────────────────────────────────────────
             for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
-            if (death)     DrawText("DEATH", 10, 45, 20, ORANGE);
+            if (death)      DrawText("DEATH", 10, 45, 20, ORANGE);
             if (lives <= 0) DrawText("GAME OVER", 270, 450, 50, MAROON);
             DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
             if (onLadder)
@@ -723,12 +982,42 @@ int main(void)
                 10, screenHeight - 80, 16, GRAY);
 
             if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
+
+            // 8. Nuke explosion animation (drawn in world space before EndMode2D)
+            if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT)
+            {
+                Texture2D* exTex = explosionFrames[nukeExplosionFrame];
+                float exScale = 4.0f;  // EDITABLE: explosion draw size
+                float exW = exTex->width * exScale;
+                float exH = exTex->height * exScale;
+                DrawTexturePro(*exTex,
+                    { 0, 0, (float)exTex->width, (float)exTex->height },
+                    { nukeExplosionPos.x - exW * 0.5f,
+                      nukeExplosionPos.y - exH * 0.5f, exW, exH },
+                    { 0, 0 }, 0.f, WHITE);
+            }
+
+            EndMode2D();
+
+            // 9. Flash overlay — drawn outside camera so it covers full screen cleanly
+            {
+                float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
+                if (nukeFlashTimer < flashTotal)
+                {
+                    unsigned char alpha = 0;
+                    if (nukeFlashTimer < NUKE_FLASH_IN)
+                        alpha = (unsigned char)(255.0f * (nukeFlashTimer / NUKE_FLASH_IN));
+                    else
+                        alpha = (unsigned char)(255.0f * (1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT));
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
+                }
+            }
         }
 
         EndDrawing();
     }
 
-    // ?? Cleanup ???????????????????????????????????????????????????????????????
+    // ── Cleanup ───────────────────────────────────────────────────────────────
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
     UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
@@ -740,6 +1029,19 @@ int main(void)
     UnloadTexture(BlueBarrelMov1);    UnloadTexture(BlueBarrelMov2);
     UnloadTexture(BlueBarrelMov3);    UnloadTexture(BlueBarrelMov4);
     UnloadTexture(BlueBarrelFall1);   UnloadTexture(BlueBarrelFall2);
+    UnloadTexture(House1);            UnloadTexture(House2);
+    UnloadTexture(SnowFloor);
+    UnloadTexture(Nuke);
+    UnloadTexture(imgMarioIdleNuke);  UnloadTexture(imgMarioWalk1Nuke);
+    UnloadTexture(imgMarioWalk2Nuke); UnloadTexture(imgMarioJumpNuke);
+    UnloadTexture(Explosion1); UnloadTexture(Explosion2); UnloadTexture(Explosion3);
+    UnloadTexture(Explosion4); UnloadTexture(Explosion5); UnloadTexture(Explosion6);
+    UnloadTexture(cave1);             UnloadTexture(cave2);
+    UnloadTexture(cave3);             UnloadTexture(cave4);
+    UnloadTexture(cave5);             UnloadTexture(cave6);
+    UnloadTexture(cave7);             UnloadTexture(cave8);
+    UnloadTexture(cave9);             UnloadTexture(cave10);
+    UnloadTexture(cave11);
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
     CloseAudioDevice();
