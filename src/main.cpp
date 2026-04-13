@@ -257,6 +257,28 @@ int main(void)
     float       nukeFlashTimer = 0.0f;
     Vector2     nukeShakeOffset = { 0, 0 };
 
+    // ── Regulus state ─────────────────────────────────────────────────────────
+    // Regulus sits on the top-left structure and animates before each barrel throw.
+    // Position: just above the top platform (y~240), left side of screen.
+    const float REGULUS_SCALE = 3.5f * 0.7f;  // 70% size
+    const float REGULUS_X = 22.0f;   // adjust to taste
+
+    // Idle animation  (3 frames, slowed to 0.6x -> ~3.6 fps)
+    const float REGULUS_IDLE_FPS = 3.6f;
+    int         regulusIdleFrame = 0;
+    float       regulusIdleTimer = 0.0f;
+
+    // Throw animation (3 frames: Grab1 → Grab2 → Grab3, ~7 fps)
+    // Barrel spawns the moment the last frame is reached.
+    const float REGULUS_THROW_FPS = 2.35f;  // 3 frames in ~1.3s (~0.43s each)
+    int         regulusThrowFrame = 0;       // 0-2
+    float       regulusThrowTimer = 0.0f;
+
+    // State: false = idle, true = throwing
+    bool        regulusThrowing = false;
+    bool        regulusSpawnPending = false;   // spawn barrel when throw finishes
+    bool        regulusForceBlue = false;   // force the next barrel to be blue
+
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
         Platform::Make(430, 870, 420, 0, -3.0f),
@@ -312,7 +334,13 @@ int main(void)
 
     vector<Barrel> barrels(100);
     for (auto& b : barrels) b.active = false;
-    SpawnBarrelFromPool(barrels, barrelPath, 2.5f, 30.0f, 30.0f, true);
+
+    // ── First barrel: Regulus plays throw anim, then spawns a forced-blue barrel.
+    regulusThrowing = true;
+    regulusSpawnPending = true;
+    regulusForceBlue = true;
+    regulusThrowFrame = 0;
+    regulusThrowTimer = 0.0f;
 
     // ── Nuke spawn ────────────────────────────────────────────────────────────
     vector<Vector2> nukeSpawnNodes = {
@@ -441,6 +469,20 @@ int main(void)
 
     Texture2D Rain = LoadTexture("Assets/Textures/Architecture/Rain.png");
     Texture2D Rain2 = LoadTexture("Assets/Textures/Architecture/Rain2.png");
+
+    // ── Regulus textures ──────────────────────────────────────────────────────
+    Texture2D RegulusGrab1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Grab1.png");
+    Texture2D RegulusGrab2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Grab2.png");
+    Texture2D RegulusGrab3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Grab3.png");
+    Texture2D RegulusIdle1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle1.png");
+    Texture2D RegulusIdle2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle2.png");
+    Texture2D RegulusIdle3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle3.png");
+    Texture2D RegulusStairs1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stairs1.png");
+    Texture2D RegulusStairs2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stairs2.png");
+
+    // Convenience arrays
+    Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,  &RegulusIdle2,  &RegulusIdle3 };
+    Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,  &RegulusGrab2,  &RegulusGrab3 };
 
     const int NUKE_EXPL_FRAME_COUNT = 6;
     Texture2D* explosionFrames[NUKE_EXPL_FRAME_COUNT] = {
@@ -580,6 +622,44 @@ int main(void)
                 spawnInterval = max(minSpawnInterval, spawnInterval - 3.0f);
             }
 
+            // ── Regulus animation update ──────────────────────────────────────
+            if (!regulusThrowing)
+            {
+                // Idle: cycle through 3 frames
+                regulusIdleTimer += dt;
+                if (regulusIdleTimer >= 1.0f / REGULUS_IDLE_FPS)
+                {
+                    regulusIdleTimer -= 1.0f / REGULUS_IDLE_FPS;
+                    regulusIdleFrame = (regulusIdleFrame + 1) % 3;
+                }
+            }
+            else
+            {
+                // Throw sequence: Grab1 → Grab2 → Grab3 → spawn barrel → return to idle
+                regulusThrowTimer += dt;
+                if (regulusThrowTimer >= 1.0f / REGULUS_THROW_FPS)
+                {
+                    regulusThrowTimer -= 1.0f / REGULUS_THROW_FPS;
+                    regulusThrowFrame++;
+
+                    if (regulusThrowFrame >= 3) // all throw frames played (Grab1+Grab2+Grab3)
+                    {
+                        // Spawn the barrel now (end of throw animation)
+                        if (regulusSpawnPending)
+                        {
+                            SpawnBarrelFromPool(barrels, barrelPath, 2.5f, 30.0f, 30.0f, regulusForceBlue);
+                            regulusSpawnPending = false;
+                            regulusForceBlue = false;
+                        }
+                        // Return to idle
+                        regulusThrowing = false;
+                        regulusThrowFrame = 0;
+                        regulusIdleFrame = 0;
+                        regulusIdleTimer = 0.0f;
+                    }
+                }
+            }
+
             // ── Nuke pickup ───────────────────────────────────────────────────
             if (!playerHasNuke)
             {
@@ -611,6 +691,15 @@ int main(void)
                 for (auto& b : barrels) b.active = false;
                 spawnTimer = 0.0f;
                 nukeExtraDelay = 3.0f;
+
+                // Also cancel any pending Regulus throw so it doesn't immediately
+                // re-spawn a barrel during the nuke cooldown.
+                regulusThrowing = false;
+                regulusSpawnPending = false;
+                regulusForceBlue = false;
+                regulusThrowFrame = 0;
+                regulusIdleFrame = 0;
+                regulusIdleTimer = 0.0f;
             }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
 
@@ -642,13 +731,31 @@ int main(void)
             }
             else nukeShakeOffset = { 0, 0 };
 
+            // ── Barrel spawn timer ────────────────────────────────────────────
+            // When the timer fires, trigger Regulus throw animation instead of
+            // spawning directly. The barrel is released on the last throw frame.
             if (spawnTimer >= spawnInterval + max(0.0f, nukeExtraDelay))
             {
                 spawnTimer = 0.0f;
-                SpawnBarrelFromPool(barrels, barrelPath);
+                if (!regulusThrowing) // don't interrupt an ongoing throw
+                {
+                    regulusThrowing = true;
+                    regulusThrowFrame = 0;
+                    regulusThrowTimer = 0.0f;
+                    regulusSpawnPending = true;
+                    regulusForceBlue = false;
+                }
             }
-            if (IsKeyPressed(KEY_E))
-                SpawnBarrelFromPool(barrels, barrelPath);
+
+            // ── Debug: manual barrel (KEY_E) also goes through Regulus ────────
+            if (IsKeyPressed(KEY_E) && !regulusThrowing)
+            {
+                regulusThrowing = true;
+                regulusThrowFrame = 0;
+                regulusThrowTimer = 0.0f;
+                regulusSpawnPending = true;
+                regulusForceBlue = false;
+            }
 
             // ── Barrel / player collision ─────────────────────────────────────
             if (!invincible)
@@ -660,13 +767,12 @@ int main(void)
                         lives--;
                         death = true;
 
-                        // ── Iniciar secuencia de muerte con audio ─────────────
                         isDying = true;
                         deathTimer = 0.0f;
                         hitPlayed = false;
                         deathPlayed = false;
 
-                        PauseMusicStream(music); // pausa la música durante el golpe
+                        PauseMusicStream(music);
 
                         invincible = true;
                         invincibleTimer = invincibleDuration;
@@ -680,21 +786,18 @@ int main(void)
             {
                 deathTimer += dt;
 
-                // Sonido de golpe inmediato
                 if (!hitPlayed)
                 {
                     PlaySound(HitSound);
                     hitPlayed = true;
                 }
 
-                // Sonido de muerte a los 0.5s
                 if (deathTimer > 0.5f && !deathPlayed)
                 {
                     PlaySound(deathSound);
                     deathPlayed = true;
                 }
 
-                // Reanudar música cuando termina la secuencia
                 if (deathTimer >= deathDuration)
                 {
                     isDying = false;
@@ -914,7 +1017,7 @@ int main(void)
                 deathTimer = 0.0f;
                 hitPlayed = false;
                 deathPlayed = false;
-                ResumeMusicStream(music); // por si estaba pausada al morir
+                ResumeMusicStream(music);
 
                 // Player
                 player.x = 35.0f + 64.0f * 3.5f + 10.0f;
@@ -937,7 +1040,6 @@ int main(void)
 
                 // Barriles
                 for (auto& b : barrels) b.active = false;
-                SpawnBarrelFromPool(barrels, barrelPath, 2.5f, 30.0f, 30.0f, true);
                 spawnTimer = 0.0f;
                 spawnInterval = 10.0f;
                 minuteTimer = 0.0f;
@@ -963,7 +1065,16 @@ int main(void)
                     nukes.push_back({ nukeSpawnNodes[idx], true });
                 }
 
-                // Animación
+                // Regulus: start with blue barrel throw, same as first launch
+                regulusThrowing = true;
+                regulusThrowFrame = 0;
+                regulusThrowTimer = 0.0f;
+                regulusSpawnPending = true;
+                regulusForceBlue = true;
+                regulusIdleFrame = 0;
+                regulusIdleTimer = 0.0f;
+
+                // Animación Mario
                 walkFrame = 0;
                 animationTimer = 0.0f;
                 image = &imgMarioIdle;
@@ -1102,6 +1213,54 @@ int main(void)
                     DrawTexturePro(Nuke, { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
                         { nk.pos.x, bobY, nkW, nkH }, { 0, 0 }, 0.f, WHITE);
                 }
+            }
+
+            // 4.7 Regulus ─────────────────────────────────────────────────────
+            // Drawn before the player so it sits behind Mario if they overlap.
+            {
+                int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                Texture2D* regTex = regulusThrowing
+                    ? regulusThrowFrames[throwIdx]
+                    : regulusIdleFrames[regulusIdleFrame];
+
+                float regW = regTex->width * REGULUS_SCALE;
+                float regH = regTex->height * REGULUS_SCALE;
+
+                // Feet on beam (y=225), shifted right by one sprite-width, nudged down 10px
+                float regY = 225.0f - regH + 10.0f;
+                float regX = REGULUS_X + regW * 0.5f;   // half-width right of anchor
+                // ── Barrel-in-hand (throw frames only) ───────────────────────
+                // Hand pixel coords on the 59x52 source image, per frame
+                const float handOffX[3] = { 11.0f, 29.0f, 47.0f };
+                const float handOffY[3] = { 40.0f, 19.0f, 40.0f };
+
+                // Match barrel colour to what will be spawned
+                Texture2D* barrelHandTex = regulusForceBlue ? &BlueBarrelMov1 : &BarrelMov1;
+                float barrelHandScale = REGULUS_SCALE * 0.55f;
+                float barrelHandW = barrelHandTex->width * barrelHandScale;
+                float barrelHandH = barrelHandTex->height * barrelHandScale;
+                float handScrX = regX + handOffX[throwIdx] * REGULUS_SCALE - barrelHandW * 0.5f;
+                float handScrY = regY + handOffY[throwIdx] * REGULUS_SCALE - barrelHandH * 0.5f;
+
+                // Frames 0 and 2: barrel BEHIND Regulus
+                if (regulusThrowing && (throwIdx == 0 || throwIdx == 2))
+                    DrawTexturePro(*barrelHandTex,
+                        { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                        { handScrX, handScrY, barrelHandW, barrelHandH },
+                        { 0, 0 }, 0.f, WHITE);
+
+                // Draw Regulus sprite
+                DrawTexturePro(*regTex,
+                    { 0, 0, (float)regTex->width, (float)regTex->height },
+                    { regX, regY, regW, regH },
+                    { 0, 0 }, 0.f, WHITE);
+
+                // Frame 1: barrel IN FRONT of Regulus
+                if (regulusThrowing && throwIdx == 1)
+                    DrawTexturePro(*barrelHandTex,
+                        { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                        { handScrX, handScrY, barrelHandW, barrelHandH },
+                        { 0, 0 }, 0.f, WHITE);
             }
 
             // 5. Player
@@ -1245,6 +1404,12 @@ int main(void)
     UnloadTexture(cave7);  UnloadTexture(cave8);  UnloadTexture(cave9);
     UnloadTexture(cave10); UnloadTexture(cave11);
     UnloadTexture(Rain);   UnloadTexture(Rain2);
+
+    // Regulus
+    UnloadTexture(RegulusGrab1);   UnloadTexture(RegulusGrab2);  UnloadTexture(RegulusGrab3);
+    UnloadTexture(RegulusIdle1);   UnloadTexture(RegulusIdle2);  UnloadTexture(RegulusIdle3);
+    UnloadTexture(RegulusStairs1); UnloadTexture(RegulusStairs2);
+
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
 
