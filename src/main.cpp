@@ -5,6 +5,9 @@
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, GAMEPLAY, GAME_OVER, HOW_HIGH };
 
+
+// Barrel x0.8 speed, barrel *1.25 size, player *1.05 size, adjust player and barrel height so that it matches previous height since they float now over the collisions
+
 struct PathNode
 {
     Vector2 pos;
@@ -33,7 +36,7 @@ struct NukeItem
 };
 
 Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
-    float spd = 2.5f, float w = 30.0f, float h = 30.0f)
+    float spd = 5.0f, float w = 21.0f, float h = 21.0f)
 {
     Barrel b;
     b.currentNode = startNode;
@@ -49,7 +52,7 @@ Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
 }
 
 bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
-    float spd = 2.5f, float w = 30.0f, float h = 30.0f, bool forceBlue = false)
+    float spd = 5.0f, float w = 21.0f, float h = 21.0f, bool forceBlue = false)
 {
     for (auto& b : barrels)
     {
@@ -260,7 +263,7 @@ int main(void)
     // ── Regulus state ─────────────────────────────────────────────────────────
     // Regulus sits on the top-left structure and animates before each barrel throw.
     // Position: just above the top platform (y~240), left side of screen.
-    const float REGULUS_SCALE = 3.5f * 0.7f;  // 70% size
+    const float REGULUS_SCALE = 3.5f * 0.7f * 1.2f;  // 70% * 1.2 = 84%
     const float REGULUS_X = 22.0f;   // adjust to taste
 
     // Idle animation  (3 frames, slowed to 0.6x -> ~3.6 fps)
@@ -357,9 +360,22 @@ int main(void)
     }
 
     float spawnTimer = 0.0f;
-    float spawnInterval = 10.0f;
+    float spawnInterval = 10.0f;  // used only during inactive mode (first barrel)
     float minuteTimer = 0.0f;
     const float minSpawnInterval = 1.0f;
+
+    // ── Regulus active / inactive state machine ───────────────────────────────
+    // Active  : throws barrels fast every ACTIVE_SPAWN_INTERVAL seconds.
+    //           Every second rolls to go inactive: starts at 20%, +20% per fail.
+    // Inactive: no throws. Rolls every second (first roll 3s after entering) to
+    //           reactivate: starts at 30%, +15% per fail.
+    const float ACTIVE_SPAWN_INTERVAL = 2.0f;   // fast throw rate in active mode
+    bool        regulusIsActive = true;
+    float       regulusStateTickTimer = 0.0f;   // counts up to 1s for state rolls
+    float       regulusInactiveTime = 0.0f;   // total time spent in inactive mode
+    int         regulusActiveFails = 0;      // consecutive fails to deactivate
+    int         regulusInactiveFails = 0;      // consecutive fails to activate
+    float       regulusActiveSpawnTimer = 0.0f;   // spawn timer for active mode
 
     vector<Vector2> beamPositions = {
         {  50, 225 }, { 114, 225 }, { 178, 225 }, { 212, 225 },
@@ -616,11 +632,8 @@ int main(void)
             spawnTimer += dt;
             minuteTimer += dt;
 
-            if (minuteTimer >= 60.0f)
-            {
-                minuteTimer = 0.0f;
-                spawnInterval = max(minSpawnInterval, spawnInterval - 3.0f);
-            }
+            // (minuteTimer-based speed ramp removed; active/inactive state machine
+            //  controls throw frequency instead.)
 
             // ── Regulus animation update ──────────────────────────────────────
             if (!regulusThrowing)
@@ -647,7 +660,7 @@ int main(void)
                         // Spawn the barrel now (end of throw animation)
                         if (regulusSpawnPending)
                         {
-                            SpawnBarrelFromPool(barrels, barrelPath, 2.5f, 30.0f, 30.0f, regulusForceBlue);
+                            SpawnBarrelFromPool(barrels, barrelPath, 5.0f, 21.0f, 21.0f, regulusForceBlue);
                             regulusSpawnPending = false;
                             regulusForceBlue = false;
                         }
@@ -692,14 +705,14 @@ int main(void)
                 spawnTimer = 0.0f;
                 nukeExtraDelay = 3.0f;
 
-                // Also cancel any pending Regulus throw so it doesn't immediately
-                // re-spawn a barrel during the nuke cooldown.
+                // Cancel Regulus throw and pause spawning during nuke cooldown.
                 regulusThrowing = false;
                 regulusSpawnPending = false;
                 regulusForceBlue = false;
                 regulusThrowFrame = 0;
                 regulusIdleFrame = 0;
                 regulusIdleTimer = 0.0f;
+                regulusActiveSpawnTimer = 0.0f;
             }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
 
@@ -731,19 +744,64 @@ int main(void)
             }
             else nukeShakeOffset = { 0, 0 };
 
-            // ── Barrel spawn timer ────────────────────────────────────────────
-            // When the timer fires, trigger Regulus throw animation instead of
-            // spawning directly. The barrel is released on the last throw frame.
-            if (spawnTimer >= spawnInterval + max(0.0f, nukeExtraDelay))
+            // ── Regulus active / inactive state machine ───────────────────────
+            if (nukeExtraDelay <= 0.0f)
             {
-                spawnTimer = 0.0f;
-                if (!regulusThrowing) // don't interrupt an ongoing throw
+                regulusStateTickTimer += dt;
+                if (regulusStateTickTimer >= 1.0f)
                 {
-                    regulusThrowing = true;
-                    regulusThrowFrame = 0;
-                    regulusThrowTimer = 0.0f;
-                    regulusSpawnPending = true;
-                    regulusForceBlue = false;
+                    regulusStateTickTimer -= 1.0f;
+                    if (regulusIsActive)
+                    {
+                        // Roll to go inactive: 20% base +20% per consecutive fail
+                        int threshold = 20 + regulusActiveFails * 20; // 20..100
+                        if (threshold > 100) threshold = 100;
+                        if (GetRandomValue(1, 100) <= threshold)
+                        {
+                            regulusIsActive = false;
+                            regulusInactiveTime = 0.0f;
+                            regulusInactiveFails = 0;
+                            regulusActiveFails = 0;
+                        }
+                        else { regulusActiveFails++; }
+                    }
+                    else
+                    {
+                        // Roll to go active: first roll only after 3s in inactive,
+                        // 30% base +15% per consecutive fail
+                        if (regulusInactiveTime >= 3.0f)
+                        {
+                            int threshold = 30 + regulusInactiveFails * 15;
+                            if (threshold > 100) threshold = 100;
+                            if (GetRandomValue(1, 100) <= threshold)
+                            {
+                                regulusIsActive = true;
+                                regulusActiveFails = 0;
+                                regulusInactiveFails = 0;
+                                regulusActiveSpawnTimer = 0.0f;
+                            }
+                            else { regulusInactiveFails++; }
+                        }
+                    }
+                }
+                if (!regulusIsActive) regulusInactiveTime += dt;
+            }
+
+            // ── Barrel spawn (active mode only) ───────────────────────────────
+            if (regulusIsActive && nukeExtraDelay <= 0.0f)
+            {
+                regulusActiveSpawnTimer += dt;
+                if (regulusActiveSpawnTimer >= ACTIVE_SPAWN_INTERVAL)
+                {
+                    regulusActiveSpawnTimer -= ACTIVE_SPAWN_INTERVAL;
+                    if (!regulusThrowing)
+                    {
+                        regulusThrowing = true;
+                        regulusThrowFrame = 0;
+                        regulusThrowTimer = 0.0f;
+                        regulusSpawnPending = true;
+                        regulusForceBlue = false;
+                    }
                 }
             }
 
@@ -1043,6 +1101,13 @@ int main(void)
                 spawnTimer = 0.0f;
                 spawnInterval = 10.0f;
                 minuteTimer = 0.0f;
+                // State machine reset
+                regulusIsActive = true;
+                regulusStateTickTimer = 0.0f;
+                regulusInactiveTime = 0.0f;
+                regulusActiveFails = 0;
+                regulusInactiveFails = 0;
+                regulusActiveSpawnTimer = 0.0f;
 
                 // Casa
                 houseAnimPlaying = false;
@@ -1268,7 +1333,7 @@ int main(void)
                 bool showPlayer = !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
                 if (showPlayer)
                 {
-                    float     scale = 3.8f;
+                    float     scale = 3.8f * 0.85f;  // *0.85 player size
                     Rectangle src = { 0, 0, (float)image->width, (float)image->height };
                     Rectangle dest = { player.x, player.y, image->width * scale, image->height * scale };
                     if (!facingRight && !onLadder) src.width *= -1;
