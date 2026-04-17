@@ -36,7 +36,7 @@ struct NukeItem
 };
 
 Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
-    float spd = 5.0f, float w = 21.0f, float h = 21.0f)
+    float spd = 4.0f, float w = 26.25f, float h = 26.25f)
 {
     Barrel b;
     b.currentNode = startNode;
@@ -52,7 +52,7 @@ Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
 }
 
 bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
-    float spd = 5.0f, float w = 21.0f, float h = 21.0f, bool forceBlue = false)
+    float spd = 4.0f, float w = 26.25f, float h = 26.25f, bool forceBlue = false)
 {
     for (auto& b : barrels)
     {
@@ -179,7 +179,7 @@ int main(void)
     Rectangle  btnExit = { 340, 500, 200, 40 };
     bool       debugPath = false;
 
-    Rectangle player = { 35.0f + 64.0f * 3.5f + 10.0f, 820.0f, 60, 60 };
+    Rectangle player = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f, 63, 63 };
     float     playerSpeed = 2.0f;
     float     jumpForce = -8.0f;
     float     gravity = 0.4f;
@@ -217,6 +217,12 @@ int main(void)
     const float deathDuration = 2.0f;
     bool  hitPlayed = false;
     bool  deathPlayed = false;
+
+    // ── Death-sequence state (fall + fade-to-black + per-round reset) ─────────
+    float deathFallVelY = 0.0f;
+    float deathFadeAlpha = 0.0f;
+    bool  deathReachedBlack = false;
+    float deathBlackTimer = 0.0f;
 
     // ── House / explosion state ───────────────────────────────────────────────
     const float HOUSE_ANIM_FPS = 10.0f;
@@ -257,7 +263,7 @@ int main(void)
     int         nukeExplosionFrame = 0;
     float       nukeExplosionTimer = 0.0f;
     Vector2     nukeExplosionPos = { 0, 0 };
-    float       nukeFlashTimer = 0.0f;
+    float       nukeFlashTimer = 5.0f;  // init past flashTotal so no flash on start
     Vector2     nukeShakeOffset = { 0, 0 };
 
     // ── Regulus state ─────────────────────────────────────────────────────────
@@ -273,7 +279,7 @@ int main(void)
 
     // Throw animation (3 frames: Grab1 → Grab2 → Grab3, ~7 fps)
     // Barrel spawns the moment the last frame is reached.
-    const float REGULUS_THROW_FPS = 2.35f;  // 3 frames in ~1.3s (~0.43s each)
+    const float REGULUS_THROW_FPS = 4.7f;  // 3 frames in ~0.64s (~0.21s each) — 2x speed
     int         regulusThrowFrame = 0;       // 0-2
     float       regulusThrowTimer = 0.0f;
 
@@ -427,6 +433,7 @@ int main(void)
     Texture2D imgMarioWalk1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk1.png");
     Texture2D imgMarioWalk2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk2.png");
     Texture2D imgMarioJump = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Jump.png");
+    Texture2D imgMarioFalling = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Falling.png");
     Texture2D background = LoadTexture("Wiki/SubaruStairs.png");
     Texture2D beam = LoadTexture("Assets/Textures/Architecture/Dk_FloorPart.png");
     Texture2D imgMarioClimb1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder1.png");
@@ -596,6 +603,12 @@ int main(void)
         else if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
+            // Keyboard shortcut: TAB or ENTER starts the game (as if Play is selected)
+            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER))
+            {
+                selectedOption = 0;
+                currentScreen = GAMEPLAY;
+            }
             if (CheckCollisionPointRec(mouse, btnPlay))
             {
                 selectedOption = 0;
@@ -627,10 +640,13 @@ int main(void)
             float prevX = player.x, prevY = player.y;
             bool  playerIsMoving = false;
 
-            for (auto& b : barrels) UpdateBarrel(b, barrelPath, dt);
+            if (!isDying)
+            {
+                for (auto& b : barrels) UpdateBarrel(b, barrelPath, dt);
 
-            spawnTimer += dt;
-            minuteTimer += dt;
+                spawnTimer += dt;
+                minuteTimer += dt;
+            }
 
             // (minuteTimer-based speed ramp removed; active/inactive state machine
             //  controls throw frequency instead.)
@@ -660,7 +676,7 @@ int main(void)
                         // Spawn the barrel now (end of throw animation)
                         if (regulusSpawnPending)
                         {
-                            SpawnBarrelFromPool(barrels, barrelPath, 5.0f, 21.0f, 21.0f, regulusForceBlue);
+                            SpawnBarrelFromPool(barrels, barrelPath, 4.0f, 26.25f, 26.25f, regulusForceBlue);
                             regulusSpawnPending = false;
                             regulusForceBlue = false;
                         }
@@ -674,7 +690,7 @@ int main(void)
             }
 
             // ── Nuke pickup ───────────────────────────────────────────────────
-            if (!playerHasNuke)
+            if (!isDying && !playerHasNuke)
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE;
                 float nkH = NUKE_NATIVE_H * NUKE_SCALE;
@@ -687,7 +703,7 @@ int main(void)
             }
 
             // ── Nuke detonation ───────────────────────────────────────────────
-            if (playerHasNuke && IsKeyPressed(KEY_F))
+            if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
             {
                 float scale = 3.8f;
                 float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
@@ -745,7 +761,7 @@ int main(void)
             else nukeShakeOffset = { 0, 0 };
 
             // ── Regulus active / inactive state machine ───────────────────────
-            if (nukeExtraDelay <= 0.0f)
+            if (!isDying && nukeExtraDelay <= 0.0f)
             {
                 regulusStateTickTimer += dt;
                 if (regulusStateTickTimer >= 1.0f)
@@ -788,7 +804,7 @@ int main(void)
             }
 
             // ── Barrel spawn (active mode only) ───────────────────────────────
-            if (regulusIsActive && nukeExtraDelay <= 0.0f)
+            if (!isDying && regulusIsActive && nukeExtraDelay <= 0.0f)
             {
                 regulusActiveSpawnTimer += dt;
                 if (regulusActiveSpawnTimer >= ACTIVE_SPAWN_INTERVAL)
@@ -806,7 +822,7 @@ int main(void)
             }
 
             // ── Debug: manual barrel (KEY_E) also goes through Regulus ────────
-            if (IsKeyPressed(KEY_E) && !regulusThrowing)
+            if (!isDying && IsKeyPressed(KEY_E) && !regulusThrowing)
             {
                 regulusThrowing = true;
                 regulusThrowFrame = 0;
@@ -816,7 +832,7 @@ int main(void)
             }
 
             // ── Barrel / player collision ─────────────────────────────────────
-            if (!invincible)
+            if (!isDying && !invincible)
             {
                 for (const auto& b : barrels)
                 {
@@ -839,7 +855,7 @@ int main(void)
                 }
             }
 
-            // ── Lógica de audio muerte / reanudar música ──────────────────────
+            // ── Death sequence: fall + fade → black → reset (or GAME_OVER) ────
             if (isDying)
             {
                 deathTimer += dt;
@@ -856,16 +872,95 @@ int main(void)
                     deathPlayed = true;
                 }
 
-                if (deathTimer >= deathDuration)
+                const float DEATH_FALL_DURATION = 0.9f;
+                const float DEATH_BLACK_DURATION = 0.5f;
+
+                if (!deathReachedBlack)
                 {
-                    isDying = false;
-                    ResumeMusicStream(music);
+                    // Phase A: Mario falls off the screen while everything fades to black
+                    deathFallVelY += 0.9f;  // gravity-like accel
+                    player.y += deathFallVelY;
+
+                    float t = deathTimer / DEATH_FALL_DURATION;
+                    if (t > 1.0f) t = 1.0f;
+                    deathFadeAlpha = t * 255.0f;
+
+                    if (deathTimer >= DEATH_FALL_DURATION)
+                    {
+                        deathReachedBlack = true;
+                        deathBlackTimer = 0.0f;
+                        deathFadeAlpha = 255.0f;
+                    }
+                }
+                else
+                {
+                    // Phase B: hold pure black for DEATH_BLACK_DURATION
+                    deathBlackTimer += dt;
+                    if (deathBlackTimer >= DEATH_BLACK_DURATION)
+                    {
+                        if (lives <= 0)
+                        {
+                            // Out of lives → GAME_OVER screen (then MENU via existing reset)
+                            currentScreen = GAME_OVER;
+                            // Death flags will be cleared inside the GAME_OVER reset block
+                        }
+                        else
+                        {
+                            // Per-round reset: keep current lives, start a fresh round
+                            player.x = 35.0f + 64.0f * 3.5f + 10.0f;
+                            player.y = 817.0f;
+                            velocityX = 0.0f; velocityY = 0.0f;
+                            isJumping = false; isGrounded = false; facingRight = true;
+
+                            onLadder = false; currentLadder = -1;
+                            ladderProgress = 0.0f; ladderCooldown = 0.0f;
+                            ladderExitPlaying = false; ladderExitStep = 0;
+                            ladderExitTimer = 0.0f; ladderEntryClamp = false;
+
+                            for (auto& b : barrels) b.active = false;
+                            spawnTimer = 0.0f;
+
+                            // Regulus: back to idle, no pending throw
+                            regulusThrowing = false;
+                            regulusThrowFrame = 0;
+                            regulusThrowTimer = 0.0f;
+                            regulusSpawnPending = false;
+                            regulusForceBlue = false;
+                            regulusIdleFrame = 0;
+                            regulusIdleTimer = 0.0f;
+                            regulusActiveSpawnTimer = 0.0f;
+                            regulusIsActive = true;
+                            regulusStateTickTimer = 0.0f;
+                            regulusInactiveTime = 0.0f;
+
+                            // Clear death flags
+                            isDying = false;
+                            deathFallVelY = 0.0f;
+                            deathFadeAlpha = 0.0f;
+                            deathReachedBlack = false;
+                            deathBlackTimer = 0.0f;
+                            deathTimer = 0.0f;
+                            hitPlayed = false;
+                            deathPlayed = false;
+
+                            // Brief invincibility on respawn
+                            invincible = true;
+                            invincibleTimer = invincibleDuration;
+
+                            // Animation reset
+                            walkFrame = 0;
+                            animationTimer = 0.0f;
+                            image = &imgMarioIdle;
+
+                            ResumeMusicStream(music);
+                        }
+                    }
                 }
             }
             // ─────────────────────────────────────────────────────────────────
 
             // ── Barrel / house collision ──────────────────────────────────────
-            if (!houseAnimPlaying)
+            if (!isDying && !houseAnimPlaying)
             {
                 for (auto& b : barrels)
                 {
@@ -898,163 +993,168 @@ int main(void)
                 }
             }
 
-            // ── Ladder update ─────────────────────────────────────────────────
-            if (onLadder)
+            // ── Player input & movement (paused during death sequence) ────────
+            if (!isDying)
             {
-                const Ladder& lad = ladders[currentLadder];
-
-                if (ladderExitPlaying)
+                // ── Ladder update ─────────────────────────────────────────────────
+                if (onLadder)
                 {
-                    float exitTotalDuration = 2.0f * ladderExitFrameDuration;
-                    ladderProgress += (0.4f / exitTotalDuration) * dt;
-                    ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
-                    player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
-                    player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                    const Ladder& lad = ladders[currentLadder];
 
-                    ladderExitTimer += dt;
-                    if (ladderExitTimer >= ladderExitFrameDuration) { ladderExitTimer = 0.0f; ladderExitStep++; }
-
-                    if (ladderExitStep == 0)      image = &imgMarioClimbEnd1;
-                    else if (ladderExitStep == 1) image = &imgMarioClimbEnd2;
-                    else
+                    if (ladderExitPlaying)
                     {
-                        image = &imgMarioClimbDown;
-                        bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
-                            || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
-                            || IsKeyPressed(KEY_SPACE);
-                        if (wants)
+                        float exitTotalDuration = 2.0f * ladderExitFrameDuration;
+                        ladderProgress += (0.4f / exitTotalDuration) * dt;
+                        ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
+                        player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                        player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+
+                        ladderExitTimer += dt;
+                        if (ladderExitTimer >= ladderExitFrameDuration) { ladderExitTimer = 0.0f; ladderExitStep++; }
+
+                        if (ladderExitStep == 0)      image = &imgMarioClimbEnd1;
+                        else if (ladderExitStep == 1) image = &imgMarioClimbEnd2;
+                        else
                         {
-                            onLadder = false; currentLadder = -1;
-                            ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                            ladderEntryClamp = false;
-                            velocityY = 0; isJumping = false;
+                            image = &imgMarioClimbDown;
+                            bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
+                                || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
+                                || IsKeyPressed(KEY_SPACE);
+                            if (wants)
+                            {
+                                onLadder = false; currentLadder = -1;
+                                ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
+                                ladderEntryClamp = false;
+                                velocityY = 0; isJumping = false;
+                            }
                         }
                     }
-                }
-                else if (ladderEntryClamp)
-                {
-                    ladderEntryClampTimer += dt;
-                    float t = Clamp(ladderEntryClampTimer / 0.3f, 0.0f, 1.0f);
-                    ladderProgress = ladderEntryClampStart + (0.57f - ladderEntryClampStart) * t;
-                    player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
-                    player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
-                    velocityY = 0; velocityX = 0;
-                    ladderClimbTimer += dt;
-                    if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
-                    image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
-                    if (t >= 1.0f) ladderEntryClamp = false;
-                }
-                else
-                {
-                    bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
-                    if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
-                    if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
-                    ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
-
-                    player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
-                    player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
-                    velocityY = 0; velocityX = 0;
-
-                    if (ladderProgress <= 0.0f)
+                    else if (ladderEntryClamp)
                     {
-                        image = &imgMarioClimbDown;
-                        bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
-                            || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
-                            || IsKeyPressed(KEY_SPACE);
-                        if (wants)
-                        {
-                            onLadder = false; currentLadder = -1;
-                            ladderEntryClamp = false;
-                            isGrounded = true; isJumping = false; ladderCooldown = 0.2f;
-                        }
-                    }
-                    else if (ladderProgress >= 0.6f)
-                    {
-                        ladderExitPlaying = true;
-                        ladderExitStep = 0; ladderExitTimer = 0;
-                        image = &imgMarioClimbEnd1;
-                    }
-                    else if (climbing)
-                    {
+                        ladderEntryClampTimer += dt;
+                        float t = Clamp(ladderEntryClampTimer / 0.3f, 0.0f, 1.0f);
+                        ladderProgress = ladderEntryClampStart + (0.57f - ladderEntryClampStart) * t;
+                        player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                        player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                        velocityY = 0; velocityX = 0;
                         ladderClimbTimer += dt;
                         if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
                         image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
+                        if (t >= 1.0f) ladderEntryClamp = false;
                     }
-                }
-            }
-            else
-            {
-                // ── Normal movement ───────────────────────────────────────────
-                if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
-                if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
-
-                if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
-                {
-                    bool entered = false;
-                    for (int i = 0; i < (int)ladders.size(); i++)
+                    else
                     {
-                        Rectangle _lhb = ladders[i].GetHitbox();
-                        float     _lnw = _lhb.width * 0.5f;
-                        Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height };
+                        bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
+                        if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
+                        if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
+                        ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
 
-                        if (ladderCooldown <= 0 && CheckCollisionRecs(player, _lnarrow))
+                        player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                        player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                        velocityY = 0; velocityX = 0;
+
+                        if (ladderProgress <= 0.0f)
                         {
-                            float ip = ladders[i].ProgressFromPlayerY(player.y, player.height);
-                            ladderProgress = Clamp(ip, 0.01f, 0.99f);
-
-                            ladderEntryClamp = false;
-                            if (ladderProgress > 0.65f)
+                            image = &imgMarioClimbDown;
+                            bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
+                                || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
+                                || IsKeyPressed(KEY_SPACE);
+                            if (wants)
                             {
-                                ladderEntryClamp = true;
-                                ladderEntryClampStart = ladderProgress;
-                                ladderEntryClampTimer = 0.0f;
+                                onLadder = false; currentLadder = -1;
+                                ladderEntryClamp = false;
+                                isGrounded = true; isJumping = false; ladderCooldown = 0.2f;
                             }
-
-                            onLadder = true; currentLadder = i;
-                            ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                            ladderClimbFrame = 0; ladderClimbTimer = 0;
-                            player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
-                            velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
-                            entered = true; break;
+                        }
+                        else if (ladderProgress >= 0.6f)
+                        {
+                            ladderExitPlaying = true;
+                            ladderExitStep = 0; ladderExitTimer = 0;
+                            image = &imgMarioClimbEnd1;
+                        }
+                        else if (climbing)
+                        {
+                            ladderClimbTimer += dt;
+                            if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
+                            image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
                         }
                     }
-                    if (!entered && IsKeyPressed(KEY_W) && !isJumping)
+                }
+                else
+                {
+                    // ── Normal movement ───────────────────────────────────────────
+                    if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
+                    if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
+
+                    if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
+                    {
+                        bool entered = false;
+                        for (int i = 0; i < (int)ladders.size(); i++)
+                        {
+                            Rectangle _lhb = ladders[i].GetHitbox();
+                            float     _lnw = _lhb.width * 0.5f;
+                            Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height };
+
+                            if (ladderCooldown <= 0 && CheckCollisionRecs(player, _lnarrow))
+                            {
+                                float ip = ladders[i].ProgressFromPlayerY(player.y, player.height);
+                                ladderProgress = Clamp(ip, 0.01f, 0.99f);
+
+                                ladderEntryClamp = false;
+                                if (ladderProgress > 0.65f)
+                                {
+                                    ladderEntryClamp = true;
+                                    ladderEntryClampStart = ladderProgress;
+                                    ladderEntryClampTimer = 0.0f;
+                                }
+
+                                onLadder = true; currentLadder = i;
+                                ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
+                                ladderClimbFrame = 0; ladderClimbTimer = 0;
+                                player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
+                                velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
+                                entered = true; break;
+                            }
+                        }
+                        if (!entered && IsKeyPressed(KEY_W) && !isJumping)
+                        {
+                            velocityY = jumpForce; isJumping = true; isGrounded = false;
+                        }
+                    }
+
+                    if (IsKeyPressed(KEY_SPACE) && !isJumping)
                     {
                         velocityY = jumpForce; isJumping = true; isGrounded = false;
                     }
+
+                    if (!isGrounded) velocityY += gravity;
+                    player.y += velocityY;
+
+                    CollisionResult col = CollisionManager::ResolveAll(
+                        player, velocityX, velocityY, platforms, prevX, prevY);
+                    isGrounded = col.grounded;
+                    if (col.grounded) isJumping = false;
+
+                    if (isJumping)        image = playerHasNuke ? &imgMarioJumpNuke : &imgMarioJump;
+                    else if (playerIsMoving)
+                    {
+                        if (animationTimer >= animationSpeed) { walkFrame = (walkFrame + 1) % 2; animationTimer = fmod(animationTimer, animationSpeed); }
+                        if (playerHasNuke) image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
+                        else               image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
+                    }
+                    else { image = playerHasNuke ? &imgMarioIdleNuke : &imgMarioIdle; walkFrame = 0; }
                 }
 
-                if (IsKeyPressed(KEY_SPACE) && !isJumping)
+                if (player.y > 900)
                 {
-                    velocityY = jumpForce; isJumping = true; isGrounded = false;
+                    player.y = 0; player.x = 440;
+                    onLadder = false; currentLadder = -1;
+                    ladderExitPlaying = false; ladderEntryClamp = false;
                 }
+            } // end if (!isDying) — player input/movement gate
 
-                if (!isGrounded) velocityY += gravity;
-                player.y += velocityY;
-
-                CollisionResult col = CollisionManager::ResolveAll(
-                    player, velocityX, velocityY, platforms, prevX, prevY);
-                isGrounded = col.grounded;
-                if (col.grounded) isJumping = false;
-
-                if (isJumping)        image = playerHasNuke ? &imgMarioJumpNuke : &imgMarioJump;
-                else if (playerIsMoving)
-                {
-                    if (animationTimer >= animationSpeed) { walkFrame = (walkFrame + 1) % 2; animationTimer = fmod(animationTimer, animationSpeed); }
-                    if (playerHasNuke) image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
-                    else               image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
-                }
-                else { image = playerHasNuke ? &imgMarioIdleNuke : &imgMarioIdle; walkFrame = 0; }
-            }
-
-            if (player.y > 900)
-            {
-                player.y = 0; player.x = 440;
-                onLadder = false; currentLadder = -1;
-                ladderExitPlaying = false; ladderEntryClamp = false;
-            }
-
-            if (lives == 0) currentScreen = GAME_OVER;
+            // Force falling sprite while dying
+            if (isDying) image = &imgMarioFalling;
 
         } // ← cierra else if (currentScreen == GAMEPLAY)
 
@@ -1075,11 +1175,15 @@ int main(void)
                 deathTimer = 0.0f;
                 hitPlayed = false;
                 deathPlayed = false;
+                deathFallVelY = 0.0f;
+                deathFadeAlpha = 0.0f;
+                deathReachedBlack = false;
+                deathBlackTimer = 0.0f;
                 ResumeMusicStream(music);
 
                 // Player
                 player.x = 35.0f + 64.0f * 3.5f + 10.0f;
-                player.y = 820.0f;
+                player.y = 817.0f;
                 velocityX = 0.0f;
                 velocityY = 0.0f;
                 isJumping = false;
@@ -1121,7 +1225,7 @@ int main(void)
                 nukeExplosionPlaying = false;
                 nukeExplosionFrame = 0;
                 nukeExplosionTimer = 0.0f;
-                nukeFlashTimer = 0.0f;
+                nukeFlashTimer = 5.0f;  // past flashTotal so no flash after reset
                 nukeShakeOffset = { 0, 0 };
                 for (auto& nk : nukes) nk.active = false;
                 nukes.clear();
@@ -1291,8 +1395,8 @@ int main(void)
                 float regW = regTex->width * REGULUS_SCALE;
                 float regH = regTex->height * REGULUS_SCALE;
 
-                // Feet on beam (y=225), shifted right by one sprite-width, nudged down 10px
-                float regY = 225.0f - regH + 10.0f;
+                // Feet on beam, nudged down 20px (was 10) to sit on collision
+                float regY = 225.0f - regH + 20.0f;
                 float regX = REGULUS_X + regW * 0.5f;   // half-width right of anchor
                 // ── Barrel-in-hand (throw frames only) ───────────────────────
                 // Hand pixel coords on the 59x52 source image, per frame
@@ -1330,12 +1434,12 @@ int main(void)
 
             // 5. Player
             {
-                bool showPlayer = !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
+                bool showPlayer = isDying || !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
                 if (showPlayer)
                 {
-                    float     scale = 3.8f * 0.85f;  // *0.85 player size
+                    float     scale = 3.8f * 0.85f * 1.05f;  // *0.85 player size *1.05 enlarge
                     Rectangle src = { 0, 0, (float)image->width, (float)image->height };
-                    Rectangle dest = { player.x, player.y, image->width * scale, image->height * scale };
+                    Rectangle dest = { player.x, player.y + 10.0f, image->width * scale, image->height * scale };
                     if (!facingRight && !onLadder) src.width *= -1;
                     DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
 
@@ -1347,7 +1451,7 @@ int main(void)
                         float nukeOffsetY = 5.0f;
                         bool moving = (!onLadder && !isJumping && walkFrame != 0);
                         if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
-                        float nkY = player.y - nkH - 2.0f + nukeOffsetY;
+                        float nkY = player.y + 10.0f - nkH - 2.0f + nukeOffsetY;
                         Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
                         if (!facingRight) nukeSrc.width *= -1;
                         DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, { 0, 0 }, 0.f, WHITE);
@@ -1371,7 +1475,7 @@ int main(void)
                 float drawW = b.hitbox.width * 2.0f;
                 float drawH = b.hitbox.height * 2.0f;
                 float drawX = b.hitbox.x - (drawW - b.hitbox.width) * 0.5f;
-                float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f;
+                float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f - 2.625f;
                 DrawTexturePro(*tex,
                     { 0, 0, (float)tex->width, (float)tex->height },
                     { drawX, drawY, drawW, drawH },
@@ -1432,6 +1536,13 @@ int main(void)
                     DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
                 }
             }
+
+            // 11. Death fade-to-black overlay (drawn on top of everything)
+            if (isDying && deathFadeAlpha > 0.0f)
+            {
+                unsigned char a = (unsigned char)(deathFadeAlpha > 255.0f ? 255 : deathFadeAlpha);
+                DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, a });
+            }
         }
         else if (currentScreen == GAME_OVER)
         {
@@ -1448,6 +1559,7 @@ int main(void)
 
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
+    UnloadTexture(imgMarioFalling);
     UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
