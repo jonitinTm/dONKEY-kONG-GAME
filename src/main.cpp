@@ -443,6 +443,8 @@ int main(void)
     Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
     Sound deathSound = LoadSound("Assets/Nuevo audio/po.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/yamete kudasay.mp3");
+    Sound NukeSound = LoadSound("Assets/Nuevo audio/mp3/Yame.mp3");
+
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
@@ -603,6 +605,8 @@ int main(void)
     float animationTimer = 0.0f;
     float animationSpeed = 0.15f;
     int   walkFrame = 0;
+    bool nukeMusicWaiting = false;
+    float nukeMusicResumeTimer = 0.0f;
 
     // Rain scroll
     float rainScrollY = 0.0f;
@@ -907,7 +911,7 @@ int main(void)
             }
 
             // ── Nuke pickup ───────────────────────────────────────────────────
-            if (!isDying && !playerHasNuke)
+            if (!playerHasNuke)
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE;
                 float nkH = NUKE_NATIVE_H * NUKE_SCALE;
@@ -919,8 +923,9 @@ int main(void)
                 }
             }
 
+
             // ── Nuke detonation ───────────────────────────────────────────────
-            if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
+            if (playerHasNuke && IsKeyPressed(KEY_F))
             {
                 float scale = 3.8f;
                 float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
@@ -934,28 +939,21 @@ int main(void)
                 nukeExplosionFrame = 0;
                 nukeExplosionTimer = 0.0f;
                 nukeFlashTimer = 0.0f;
+                //Nuevas variables`para la musica
+                PauseMusicStream(music);
+                PlaySound(NukeSound);
+
+                for (auto& b : barrels) b.active = false;
+                spawnTimer = 0.0f;
                 nukeExtraDelay = 3.0f;
 
-                // Score: 100 pts per barrel destroyed by nuke
-                for (auto& b : barrels)
-                {
-                    if (b.active) { score += 100; b.active = false; }
-                }
-                spawnTimer = 0.0f;
-
-                // Stun Regulus
-                regulusIsStunned = true;
-                regulusStunEnding = false;
-                regulusStunFrame = 0;
-                regulusStunTimer = 0.0f;
-                regulusStunLoops = 0;
-                regulusStunEndFrame = 0;
-                regulusStunEndTimer = 0.0f;
-                // Cancel any ongoing throw
+                // Cancel Regulus throw and pause spawning during nuke cooldown.
                 regulusThrowing = false;
                 regulusSpawnPending = false;
                 regulusForceBlue = false;
                 regulusThrowFrame = 0;
+                regulusIdleFrame = 0;
+                regulusIdleTimer = 0.0f;
                 regulusActiveSpawnTimer = 0.0f;
             }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
@@ -964,14 +962,31 @@ int main(void)
             if (nukeExplosionPlaying)
             {
                 nukeExplosionTimer += dt;
+
                 if (nukeExplosionTimer >= 1.0f / NUKE_EXPL_FPS)
                 {
                     nukeExplosionTimer -= 1.0f / NUKE_EXPL_FPS;
                     nukeExplosionFrame++;
                     if (nukeExplosionFrame >= NUKE_EXPL_FRAME_COUNT)
+                    {
                         nukeExplosionPlaying = false;
+                        nukeMusicWaiting = true;      // ← empieza la espera
+                        nukeMusicResumeTimer = 0.0f;
+                    }
+
                 }
             }
+
+            if (nukeMusicWaiting)
+            {
+                nukeMusicResumeTimer += dt;
+                if (nukeMusicResumeTimer >= 0.1f)  //lo que deberia tardar
+                {
+                    nukeMusicWaiting = false;
+                    ResumeMusicStream(music);
+                }
+            }
+
 
             // Flash + shake tick
             {
@@ -1147,6 +1162,19 @@ int main(void)
                     }
                 }
             } // end isDying
+
+
+
+
+
+    // ── Audio state ───────────────────────────────────────────────────────────
+            bool  isDying = false;
+            float deathTimer = 0.0f;
+            const float deathDuration = 2.0f;
+            bool  hitPlayed = false;
+            bool  deathPlayed = false;
+            //---------
+
 
             // ── Barrel / house collision ──────────────────────────────────────
             if (!isDying && !houseAnimPlaying)
