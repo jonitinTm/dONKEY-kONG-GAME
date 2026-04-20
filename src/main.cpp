@@ -451,8 +451,6 @@ int main(void)
     Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
     Sound deathSound = LoadSound("Assets/Nuevo audio/po.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/yamete kudasay.mp3");
-    Sound NukeSound = LoadSound("Assets/Nuevo audio/mp3/Yame.mp3");
-
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
@@ -606,8 +604,6 @@ int main(void)
     float animationTimer = 0.0f;
     float animationSpeed = 0.15f;
     int   walkFrame = 0;
-    bool nukeMusicWaiting = false;
-    float nukeMusicResumeTimer = 0.0f;
 
     float rainScrollY = 0.0f;
     float rain2ScrollY = 0.0f;
@@ -906,7 +902,7 @@ int main(void)
             }
 
             // ── Nuke pickup ───────────────────────────────────────────────────
-            if (!playerHasNuke)
+            if (!isDying && !playerHasNuke)
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE;
                 float nkH = NUKE_NATIVE_H * NUKE_SCALE;
@@ -918,15 +914,12 @@ int main(void)
                 }
             }
 
-<<<<<<< HEAD
             // ── Drop nuke with G ──────────────────────────────────────────────
             if (playerHasNuke && IsKeyPressed(KEY_G))
                 playerHasNuke = false;
-=======
->>>>>>> c0892ff87e6d40977ec00c56ee0ca69042602f8c
 
             // ── Nuke detonation ───────────────────────────────────────────────
-            if (playerHasNuke && IsKeyPressed(KEY_F))
+            if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
             {
                 float scale = 3.8f * 0.85f * 1.05f;
                 float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
@@ -940,15 +933,8 @@ int main(void)
                 nukeExplosionFrame = 0;
                 nukeExplosionTimer = 0.0f;
                 nukeFlashTimer = 0.0f;
-                //Nuevas variables`para la musica
-                PauseMusicStream(music);
-                PlaySound(NukeSound);
-
-                for (auto& b : barrels) b.active = false;
-                spawnTimer = 0.0f;
                 nukeExtraDelay = 3.0f;
 
-<<<<<<< HEAD
                 for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
                 spawnTimer = 0.0f;
 
@@ -959,15 +945,10 @@ int main(void)
                 regulusStunLoops = 0;
                 regulusStunEndFrame = 0;
                 regulusStunEndTimer = 0.0f;
-=======
-                // Cancel Regulus throw and pause spawning during nuke cooldown.
->>>>>>> c0892ff87e6d40977ec00c56ee0ca69042602f8c
                 regulusThrowing = false;
                 regulusSpawnPending = false;
                 regulusForceBlue = false;
                 regulusThrowFrame = 0;
-                regulusIdleFrame = 0;
-                regulusIdleTimer = 0.0f;
                 regulusActiveSpawnTimer = 0.0f;
             }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
@@ -975,40 +956,14 @@ int main(void)
             if (nukeExplosionPlaying)
             {
                 nukeExplosionTimer += dt;
-
                 if (nukeExplosionTimer >= 1.0f / NUKE_EXPL_FPS)
                 {
                     nukeExplosionTimer -= 1.0f / NUKE_EXPL_FPS;
                     nukeExplosionFrame++;
-<<<<<<< HEAD
                     if (nukeExplosionFrame >= NUKE_EXPL_FRAME_COUNT) nukeExplosionPlaying = false;
                 }
             }
 
-=======
-                    if (nukeExplosionFrame >= NUKE_EXPL_FRAME_COUNT)
-                    {
-                        nukeExplosionPlaying = false;
-                        nukeMusicWaiting = true;      // ← empieza la espera
-                        nukeMusicResumeTimer = 0.0f;
-                    }
-
-                }
-            }
-
-            if (nukeMusicWaiting)
-            {
-                nukeMusicResumeTimer += dt;
-                if (nukeMusicResumeTimer >= 0.1f)  //lo que deberia tardar
-                {
-                    nukeMusicWaiting = false;
-                    ResumeMusicStream(music);
-                }
-            }
-
-
-            // Flash + shake tick
->>>>>>> c0892ff87e6d40977ec00c56ee0ca69042602f8c
             {
                 float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
                 if (nukeFlashTimer < flashTotal) nukeFlashTimer += dt;
@@ -1119,16 +1074,7 @@ int main(void)
                         b.hitbox.y - zoneH,
                         zoneW, zoneH
                     };
-<<<<<<< HEAD
                     if (CheckCollisionRecs(player, jumpZone)) { score += 100; b.jumpScored = true; }
-=======
-                    if (CheckCollisionRecs(player, jumpZone))
-                    {
-                        score += 100;
-                        b.jumpScored = true;
-                        //meter el texto flotante
-                    }
->>>>>>> c0892ff87e6d40977ec00c56ee0ca69042602f8c
                 }
             }
 
@@ -1171,11 +1117,6 @@ int main(void)
                     }
                 }
             }
-
-
-
-
-
 
             // ── Barrel / house collision ──────────────────────────────────────
             if (!isDying && !houseAnimPlaying)
