@@ -5,8 +5,20 @@
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, GAMEPLAY, GAME_OVER, HOW_HIGH };
 
+// ── Death timing constants ────────────────────────────────────────────────────
+static constexpr float DEATH_FLASH_DURATION = 0.40f;   // white-flash hold
+static constexpr float DEATH_FADE_DURATION = 1.10f;   // black fade after flash
+static constexpr float DEATH_TOTAL_FALL = DEATH_FLASH_DURATION + DEATH_FADE_DURATION;
+static constexpr float DEATH_BLACK_HOLD = 0.50f;   // pure black before reset
+static constexpr float DEATH_FALL_GRAVITY = 0.50f;   // px/frame² acceleration
+static constexpr float DEATH_FALL_INITIAL_VY = -5.0f;   // upward kick on death
 
-// Barrel x0.8 speed, barrel *1.25 size, player *1.05 size, adjust player and barrel height so that it matches previous height since they float now over the collisions
+// ── Shake constants ───────────────────────────────────────────────────────────
+static constexpr float DEATH_SHAKE_DURATION = 0.80f;
+static constexpr float DEATH_SHAKE_AMOUNT = 9.0f;
+
+// ── Regulus throw pacing ──────────────────────────────────────────────────────
+static constexpr float ACTIVE_SPAWN_INTERVAL = 1.2f;   // was 2.0 — faster throws
 
 struct PathNode
 {
@@ -27,14 +39,16 @@ struct Barrel
     bool      movingLeft = false;
     float     animTimer = 0.0f;
     int       animFrame = 0;
+    bool      jumpScored = false;   // NEW: awarded 100pts for jumping over
 };
 
 struct NukeItem
 {
-    Vector2   pos;
-    bool      active = true;
+    Vector2 pos;
+    bool    active = true;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
 Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f)
 {
@@ -47,12 +61,14 @@ Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     b.animFrame = 0;
     b.animTimer = 0.0f;
     b.active = true;
+    b.jumpScored = false;
     b.hitbox = { path[startNode].pos.x, path[startNode].pos.y, w, h };
     return b;
 }
 
 bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
-    float spd = 4.0f, float w = 26.25f, float h = 26.25f, bool forceBlue = false)
+    float spd = 4.0f, float w = 26.25f, float h = 26.25f,
+    bool forceBlue = false)
 {
     for (auto& b : barrels)
     {
@@ -79,9 +95,7 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
     {
         b.hitbox.x = target.x;
         b.hitbox.y = target.y;
-
-        if (!node.isSplitNode)
-            b.isFalling = false;
+        if (!node.isSplitNode) b.isFalling = false;
 
         bool bothValid = (node.next[0] != -1 && node.next[1] != -1);
         bool oneValid = (node.next[0] != -1 || node.next[1] != -1);
@@ -112,7 +126,11 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
     float frameTime = b.isFalling ? 0.12f : 0.10f;
     int   frameCount = b.isFalling ? 2 : 4;
     b.animTimer += delta;
-    if (b.animTimer >= frameTime) { b.animFrame = (b.animFrame + 1) % frameCount; b.animTimer = 0.0f; }
+    if (b.animTimer >= frameTime)
+    {
+        b.animFrame = (b.animFrame + 1) % frameCount;
+        b.animTimer = 0.0f;
+    }
 }
 
 void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& barrels, int screenHeight)
@@ -164,12 +182,12 @@ void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& bar
     DrawText("Dot=barrel", lx, ly + 113, 9, GRAY);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 int main(void)
 {
     const int screenWidth = 875;
     const int screenHeight = 950;
 
-    // ── Pantallas iniciales ───────────────────────────────────────────────────
     GameScreen currentScreen = SPLASH_SCREEN;
     float      splashTimer = 0.0f;
     const float splashDuration = 5.0f;
@@ -179,6 +197,10 @@ int main(void)
     Rectangle  btnExit = { 340, 500, 200, 40 };
     bool       debugPath = false;
 
+    // ── Score ─────────────────────────────────────────────────────────────────
+    int score = 0;
+
+    // ── Player ───────────────────────────────────────────────────────────────
     Rectangle player = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f, 63, 63 };
     float     playerSpeed = 2.0f;
     float     jumpForce = -8.0f;
@@ -195,6 +217,7 @@ int main(void)
     float       invincibleTimer = 0.0f;
     const float invincibleDuration = 1.5f;
 
+    // ── Ladder ───────────────────────────────────────────────────────────────
     bool  onLadder = false;
     int   currentLadder = -1;
     float ladderProgress = 0.0f;
@@ -211,18 +234,18 @@ int main(void)
     float ladderEntryClampTimer = 0.0f;
     float ladderEntryClampStart = 0.0f;
 
-    // ── Audio state ───────────────────────────────────────────────────────────
+    // ── Death sequence state ─────────────────────────────────────────────────
     bool  isDying = false;
     float deathTimer = 0.0f;
-    const float deathDuration = 2.0f;
     bool  hitPlayed = false;
     bool  deathPlayed = false;
-
-    // ── Death-sequence state (fall + fade-to-black + per-round reset) ─────────
     float deathFallVelY = 0.0f;
-    float deathFadeAlpha = 0.0f;
     bool  deathReachedBlack = false;
     float deathBlackTimer = 0.0f;
+
+    // Death shake
+    float   deathShakeTimer = 0.0f;
+    Vector2 deathShakeOffset = { 0, 0 };
 
     // ── House / explosion state ───────────────────────────────────────────────
     const float HOUSE_ANIM_FPS = 10.0f;
@@ -230,7 +253,6 @@ int main(void)
     const float HOUSE_DRAW_SCALE = 3.5f;
     const float CAVE_DRAW_SCALE = 4.335f;
     const float FLOOR_DRAW_SCALE = 4.0f;
-
     const float HOUSE_NATIVE_W = 64.0f;
     const float HOUSE_NATIVE_H = 32.0f;
     const float CAVE_NATIVE_W = 64.0f;
@@ -242,7 +264,6 @@ int main(void)
     float houseH = HOUSE_NATIVE_H * HOUSE_DRAW_SCALE;
     float houseX = 35.0f;
     float houseY = 880.0f - houseH;
-
     Rectangle houseHitbox = { houseX, houseY, houseW, houseH };
     bool      houseAnimPlaying = false;
     int       houseAnimFrame = 0;
@@ -263,40 +284,53 @@ int main(void)
     int         nukeExplosionFrame = 0;
     float       nukeExplosionTimer = 0.0f;
     Vector2     nukeExplosionPos = { 0, 0 };
-    float       nukeFlashTimer = 5.0f;  // init past flashTotal so no flash on start
+    float       nukeFlashTimer = 5.0f;
     Vector2     nukeShakeOffset = { 0, 0 };
 
     // ── Regulus state ─────────────────────────────────────────────────────────
-    // Regulus sits on the top-left structure and animates before each barrel throw.
-    // Position: just above the top platform (y~240), left side of screen.
-    const float REGULUS_SCALE = 3.5f * 0.7f * 1.2f;  // 70% * 1.2 = 84%
-    const float REGULUS_X = 22.0f;   // adjust to taste
-
-    // Idle animation  (3 frames, slowed to 0.6x -> ~3.6 fps)
+    const float REGULUS_SCALE = 3.5f * 0.7f * 1.2f;
+    const float REGULUS_X = 22.0f;
     const float REGULUS_IDLE_FPS = 3.6f;
-    int         regulusIdleFrame = 0;
-    float       regulusIdleTimer = 0.0f;
+    const float REGULUS_THROW_FPS = 4.7f;
 
-    // Throw animation (3 frames: Grab1 → Grab2 → Grab3, ~7 fps)
-    // Barrel spawns the moment the last frame is reached.
-    const float REGULUS_THROW_FPS = 4.7f;  // 3 frames in ~0.64s (~0.21s each) — 2x speed
-    int         regulusThrowFrame = 0;       // 0-2
-    float       regulusThrowTimer = 0.0f;
+    int   regulusIdleFrame = 0;
+    float regulusIdleTimer = 0.0f;
+    int   regulusThrowFrame = 0;
+    float regulusThrowTimer = 0.0f;
+    bool  regulusThrowing = false;
+    bool  regulusSpawnPending = false;
+    bool  regulusForceBlue = false;
 
-    // State: false = idle, true = throwing
-    bool        regulusThrowing = false;
-    bool        regulusSpawnPending = false;   // spawn barrel when throw finishes
-    bool        regulusForceBlue = false;   // force the next barrel to be blue
+    // Stun state
+    const float REGULUS_STUN_FPS = 6.0f;
+    const float REGULUS_STUN_END_FPS = 5.0f;
+    const int   REGULUS_STUN_LOOPS = 2;    // loops of Stun1-3 before StunEnd
+    bool  regulusIsStunned = false;
+    bool  regulusStunEnding = false;
+    int   regulusStunFrame = 0;
+    float regulusStunTimer = 0.0f;
+    int   regulusStunLoops = 0;
+    int   regulusStunEndFrame = 0;
+    float regulusStunEndTimer = 0.0f;
 
+    // Active / inactive machine
+    bool  regulusIsActive = true;
+    float regulusStateTickTimer = 0.0f;
+    float regulusInactiveTime = 0.0f;
+    int   regulusActiveFails = 0;
+    int   regulusInactiveFails = 0;
+    float regulusActiveSpawnTimer = 0.0f;
+
+    // ── Platforms & ladders ───────────────────────────────────────────────────
     vector<Platform> platforms = {
-        Platform::Make(27,  880, 412, 0,  0.0f),
+        Platform::Make(27, 880, 412, 0,  0.0f),
         Platform::Make(430, 870, 420, 0, -3.0f),
-        Platform::Make(60,  750, 720, 0,  3.0f),
+        Platform::Make(60, 750, 720, 0,  3.0f),
         Platform::Make(110, 620, 720, 0, -3.0f),
-        Platform::Make(60,  490, 720, 0,  3.0f),
+        Platform::Make(60, 490, 720, 0,  3.0f),
         Platform::Make(110, 360, 720, 0, -3.0f),
         Platform::Make(460, 246, 320, 0,  3.0f),
-        Platform::Make(60,  240, 400, 0,  0.0f),
+        Platform::Make(60, 240, 400, 0,  0.0f),
     };
 
     vector<Ladder> ladders = {
@@ -310,6 +344,7 @@ int main(void)
         Ladder::Make(670, 760,  40, 105),
     };
 
+    // ── Barrel path ───────────────────────────────────────────────────────────
     vector<PathNode> barrelPath = {
         /*  0 */ { {125, 210},  {  1, -1 },  9, false },
         /*  1 */ { {438, 210},  {  2, -1 },  5, false },
@@ -344,13 +379,6 @@ int main(void)
     vector<Barrel> barrels(100);
     for (auto& b : barrels) b.active = false;
 
-    // ── First barrel: Regulus plays throw anim, then spawns a forced-blue barrel.
-    regulusThrowing = true;
-    regulusSpawnPending = true;
-    regulusForceBlue = true;
-    regulusThrowFrame = 0;
-    regulusThrowTimer = 0.0f;
-
     // ── Nuke spawn ────────────────────────────────────────────────────────────
     vector<Vector2> nukeSpawnNodes = {
         { 150.0f, 845.0f }, { 330.0f, 845.0f },
@@ -366,23 +394,10 @@ int main(void)
     }
 
     float spawnTimer = 0.0f;
-    float spawnInterval = 10.0f;  // used only during inactive mode (first barrel)
+    float spawnInterval = 10.0f;
     float minuteTimer = 0.0f;
-    const float minSpawnInterval = 1.0f;
 
-    // ── Regulus active / inactive state machine ───────────────────────────────
-    // Active  : throws barrels fast every ACTIVE_SPAWN_INTERVAL seconds.
-    //           Every second rolls to go inactive: starts at 20%, +20% per fail.
-    // Inactive: no throws. Rolls every second (first roll 3s after entering) to
-    //           reactivate: starts at 30%, +15% per fail.
-    const float ACTIVE_SPAWN_INTERVAL = 2.0f;   // fast throw rate in active mode
-    bool        regulusIsActive = true;
-    float       regulusStateTickTimer = 0.0f;   // counts up to 1s for state rolls
-    float       regulusInactiveTime = 0.0f;   // total time spent in inactive mode
-    int         regulusActiveFails = 0;      // consecutive fails to deactivate
-    int         regulusInactiveFails = 0;      // consecutive fails to activate
-    float       regulusActiveSpawnTimer = 0.0f;   // spawn timer for active mode
-
+    // ── Beam positions ────────────────────────────────────────────────────────
     vector<Vector2> beamPositions = {
         {  50, 225 }, { 114, 225 }, { 178, 225 }, { 212, 225 },
         { 276, 225 }, { 340, 225 }, { 372, 225 }, { 436, 230 },
@@ -412,10 +427,17 @@ int main(void)
         { 296, 150 }, { 264, 150 },
     };
 
+    // ── Initial Regulus throw ─────────────────────────────────────────────────
+    regulusThrowing = true;
+    regulusSpawnPending = true;
+    regulusForceBlue = true;
+    regulusThrowFrame = 0;
+    regulusThrowTimer = 0.0f;
+
+    // ── Window / audio / textures ─────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
     InitAudioDevice();
 
-    // ── Audio ─────────────────────────────────────────────────────────────────
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
     Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
@@ -425,9 +447,7 @@ int main(void)
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
     SetMusicPan(music, 0.0f);
-
     PlayMusicStream(music);
-    // ─────────────────────────────────────────────────────────────────────────
 
     Texture2D imgMarioIdle = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
     Texture2D imgMarioWalk1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk1.png");
@@ -473,8 +493,8 @@ int main(void)
 
     const int CAVE_FRAME_COUNT = 11;
     Texture2D* caveFrames[CAVE_FRAME_COUNT] = {
-        &cave1, &cave2, &cave3, &cave4, &cave5,
-        &cave6, &cave7, &cave8, &cave9, &cave10, &cave11
+        &cave1,&cave2,&cave3,&cave4,&cave5,
+        &cave6,&cave7,&cave8,&cave9,&cave10,&cave11
     };
 
     Texture2D Nuke = LoadTexture("Assets/Textures/Items/Nuke.png");
@@ -502,15 +522,28 @@ int main(void)
     Texture2D RegulusIdle3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle3.png");
     Texture2D RegulusStairs1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stairs1.png");
     Texture2D RegulusStairs2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stairs2.png");
+    // Stun frames
+    Texture2D Regulus_Stun1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stun1.png");
+    Texture2D Regulus_Stun2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stun2.png");
+    Texture2D Regulus_Stun3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stun3.png");
+    // Stun-end frames
+    Texture2D Regulus_StunEnd1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd1.png");
+    Texture2D Regulus_StunEnd2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd2.png");
+    Texture2D Regulus_StunEnd3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd3.png");
+    Texture2D Regulus_StunEnd4 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd4.png");
+    Texture2D Regulus_StunEnd5 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd5.png");
 
     // Convenience arrays
-    Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,  &RegulusIdle2,  &RegulusIdle3 };
-    Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,  &RegulusGrab2,  &RegulusGrab3 };
+    Texture2D* regulusIdleFrames[3] = { &RegulusIdle1, &RegulusIdle2,  &RegulusIdle3 };
+    Texture2D* regulusThrowFrames[3] = { &RegulusGrab1, &RegulusGrab2,  &RegulusGrab3 };
+    Texture2D* regulusStunFrames[3] = { &Regulus_Stun1, &Regulus_Stun2, &Regulus_Stun3 };
+    Texture2D* regulusStunEndFrames[5] = { &Regulus_StunEnd1, &Regulus_StunEnd2, &Regulus_StunEnd3,
+                                           &Regulus_StunEnd4, &Regulus_StunEnd5 };
 
     const int NUKE_EXPL_FRAME_COUNT = 6;
     Texture2D* explosionFrames[NUKE_EXPL_FRAME_COUNT] = {
-        &Explosion1, &Explosion2, &Explosion3,
-        &Explosion4, &Explosion5, &Explosion6
+        &Explosion1,&Explosion2,&Explosion3,
+        &Explosion4,&Explosion5,&Explosion6
     };
 
     Texture2D* barrelRoll[4] = { &BarrelMov1,     &BarrelMov2,     &BarrelMov3,     &BarrelMov4 };
@@ -518,10 +551,9 @@ int main(void)
     Texture2D* blueBarrelRoll[4] = { &BlueBarrelMov1, &BlueBarrelMov2, &BlueBarrelMov3, &BlueBarrelMov4 };
     Texture2D* blueBarrelFall[2] = { &BlueBarrelFall1,&BlueBarrelFall2 };
 
-    // ── Static beam layer (baked once) ────────────────────────────────────────
+    // ── Bake static beam layer ────────────────────────────────────────────────
     float floorTileW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE;
     float floorTileH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
-    float floorY = 880.0f - floorTileH;
 
     RenderTexture2D staticLayer = LoadRenderTexture(screenWidth, screenHeight);
     BeginTextureMode(staticLayer);
@@ -535,7 +567,7 @@ int main(void)
     EndTextureMode();
     UnloadTexture(beam);
 
-    // ── Ladder layer (baked once) ─────────────────────────────────────────────
+    // ── Bake ladder layer ─────────────────────────────────────────────────────
     float ladderScale = 4.0f;
     float ladderTileH = 16 * ladderScale;
     float ladderTileW = 16 * ladderScale;
@@ -565,22 +597,174 @@ int main(void)
     EndTextureMode();
     UnloadTexture(LadderPart);
 
+    // ── Animation state ───────────────────────────────────────────────────────
     Texture2D* image = &imgMarioIdle;
     SetTargetFPS(60);
-
     float animationTimer = 0.0f;
     float animationSpeed = 0.15f;
     int   walkFrame = 0;
 
-    // Rain scroll state
+    // Rain scroll
     float rainScrollY = 0.0f;
     float rain2ScrollY = 0.0f;
     float rainSpeed = -1230.0f;
     float rain2Speed = rainSpeed * 0.8f;
-    Color rainTint = { 255, 255, 255, 80 };
-    Color rain2Tint = { 255, 255, 255, 50 };
+    Color rainTint = { 255, 255, 255,  80 };
+    Color rain2Tint = { 255, 255, 255,  50 };
 
-    // ── Main loop ─────────────────────────────────────────────────────────────
+    // ── Helper lambdas (capture everything by ref) ────────────────────────────
+
+    // Resets Regulus to idle, clearing all throw/stun state
+    auto ResetRegulus = [&]()
+        {
+            regulusThrowing = false;
+            regulusThrowFrame = 0;
+            regulusThrowTimer = 0.0f;
+            regulusSpawnPending = false;
+            regulusForceBlue = false;
+            regulusIdleFrame = 0;
+            regulusIdleTimer = 0.0f;
+            regulusActiveSpawnTimer = 0.0f;
+            regulusIsActive = true;
+            regulusStateTickTimer = 0.0f;
+            regulusInactiveTime = 0.0f;
+            regulusActiveFails = 0;
+            regulusInactiveFails = 0;
+            regulusIsStunned = false;
+            regulusStunEnding = false;
+            regulusStunFrame = 0;
+            regulusStunTimer = 0.0f;
+            regulusStunLoops = 0;
+            regulusStunEndFrame = 0;
+            regulusStunEndTimer = 0.0f;
+        };
+
+    // Clears the "active round" entities (barrels, nuke)
+    auto ClearRoundEntities = [&]()
+        {
+            for (auto& b : barrels) b.active = false;
+            spawnTimer = 0.0f;
+            playerHasNuke = false;
+        };
+
+    // Teleports Mario to start position, resets physics
+    auto ResetPlayerPos = [&]()
+        {
+            player.x = 35.0f + 64.0f * 3.5f + 10.0f;
+            player.y = 817.0f;
+            velocityX = 0.0f;
+            velocityY = 0.0f;
+            isJumping = false;
+            isGrounded = false;
+            facingRight = true;
+            onLadder = false;
+            currentLadder = -1;
+            ladderProgress = 0.0f;
+            ladderCooldown = 0.0f;
+            ladderExitPlaying = false;
+            ladderExitStep = 0;
+            ladderExitTimer = 0.0f;
+            ladderEntryClamp = false;
+            walkFrame = 0;
+            animationTimer = 0.0f;
+            image = &imgMarioIdle;
+        };
+
+    // Clears death-sequence variables
+    auto ClearDeathState = [&]()
+        {
+            isDying = false;
+            deathTimer = 0.0f;
+            hitPlayed = false;
+            deathPlayed = false;
+            deathFallVelY = 0.0f;
+            deathReachedBlack = false;
+            deathBlackTimer = 0.0f;
+            deathShakeTimer = 0.0f;
+            deathShakeOffset = { 0, 0 };
+        };
+
+    // ── TriggerDeath: the single place that starts a death sequence ───────────
+    auto TriggerDeath = [&]()
+        {
+            if (isDying) return;          // already dying – ignore re-trigger
+            lives--;
+            isDying = true;
+            deathTimer = 0.0f;
+            hitPlayed = false;
+            deathPlayed = false;
+            deathFallVelY = DEATH_FALL_INITIAL_VY;   // upward kick
+            deathReachedBlack = false;
+            deathBlackTimer = 0.0f;
+            deathShakeTimer = DEATH_SHAKE_DURATION;
+            deathShakeOffset = { 0, 0 };
+            playerHasNuke = false;     // clear nuke immediately on death
+            invincible = true;
+            invincibleTimer = invincibleDuration;
+            PauseMusicStream(music);
+        };
+
+    // ── ResetRound: called after the black screen when lives remain ───────────
+    auto ResetRound = [&]()
+        {
+            ClearDeathState();
+            ClearRoundEntities();
+            ResetPlayerPos();
+            ResetRegulus();
+            invincible = true;
+            invincibleTimer = invincibleDuration;
+            ResumeMusicStream(music);
+        };
+
+    // ── FullReset: called when returning to menu after game over ──────────────
+    auto FullReset = [&]()
+        {
+            ClearDeathState();
+            ClearRoundEntities();
+            ResetPlayerPos();
+            ResetRegulus();
+
+            lives = 3;
+            death = false;
+            invincible = false;
+            invincibleTimer = 0.0f;
+            score = 0;         // score resets only on full game over
+            spawnInterval = 10.0f;
+            minuteTimer = 0.0f;
+
+            houseAnimPlaying = false;
+            houseAnimFrame = 0;
+            houseAnimTimer = 0.0f;
+            houseIsSnowed = false;
+
+            nukeExtraDelay = 0.0f;
+            nukeExplosionPlaying = false;
+            nukeExplosionFrame = 0;
+            nukeExplosionTimer = 0.0f;
+            nukeFlashTimer = 5.0f;
+            nukeShakeOffset = { 0, 0 };
+            for (auto& nk : nukes) nk.active = false;
+            nukes.clear();
+            {
+                int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+                nukes.push_back({ nukeSpawnNodes[idx], true });
+            }
+
+            // Start with the blue-barrel throw just like the very beginning
+            regulusThrowing = true;
+            regulusThrowFrame = 0;
+            regulusThrowTimer = 0.0f;
+            regulusSpawnPending = true;
+            regulusForceBlue = true;
+            regulusIdleFrame = 0;
+            regulusIdleTimer = 0.0f;
+
+            ResumeMusicStream(music);
+        };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MAIN LOOP
+    // ─────────────────────────────────────────────────────────────────────────
     while (!WindowShouldClose())
     {
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
@@ -603,7 +787,6 @@ int main(void)
         else if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
-            // Keyboard shortcut: TAB or ENTER starts the game (as if Play is selected)
             if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER))
             {
                 selectedOption = 0;
@@ -624,10 +807,7 @@ int main(void)
         else if (currentScreen == GAMEPLAY)
         {
             float dt = GetFrameTime();
-
-            // ── Actualizar música ─────────────────────────────────────────────
             UpdateMusicStream(music);
-
             animationTimer += dt;
             if (ladderCooldown > 0.0f) ladderCooldown -= dt;
 
@@ -640,21 +820,61 @@ int main(void)
             float prevX = player.x, prevY = player.y;
             bool  playerIsMoving = false;
 
+            // ── Update barrels / timers when alive ────────────────────────────
             if (!isDying)
             {
                 for (auto& b : barrels) UpdateBarrel(b, barrelPath, dt);
-
                 spawnTimer += dt;
                 minuteTimer += dt;
             }
 
-            // (minuteTimer-based speed ramp removed; active/inactive state machine
-            //  controls throw frequency instead.)
-
             // ── Regulus animation update ──────────────────────────────────────
-            if (!regulusThrowing)
+            if (regulusIsStunned)
             {
-                // Idle: cycle through 3 frames
+                // Priority: stun plays over everything else
+                if (regulusStunEnding)
+                {
+                    regulusStunEndTimer += dt;
+                    if (regulusStunEndTimer >= 1.0f / REGULUS_STUN_END_FPS)
+                    {
+                        regulusStunEndTimer -= 1.0f / REGULUS_STUN_END_FPS;
+                        regulusStunEndFrame++;
+                        if (regulusStunEndFrame >= 5)
+                        {
+                            // Back to idle
+                            regulusIsStunned = false;
+                            regulusStunEnding = false;
+                            regulusStunEndFrame = 0;
+                            regulusIdleFrame = 0;
+                            regulusIdleTimer = 0.0f;
+                        }
+                    }
+                }
+                else
+                {
+                    // Loop through Stun1→2→3 REGULUS_STUN_LOOPS times
+                    regulusStunTimer += dt;
+                    if (regulusStunTimer >= 1.0f / REGULUS_STUN_FPS)
+                    {
+                        regulusStunTimer -= 1.0f / REGULUS_STUN_FPS;
+                        regulusStunFrame++;
+                        if (regulusStunFrame >= 3)
+                        {
+                            regulusStunFrame = 0;
+                            regulusStunLoops++;
+                            if (regulusStunLoops >= REGULUS_STUN_LOOPS)
+                            {
+                                // Move to stun-ending animation
+                                regulusStunEnding = true;
+                                regulusStunEndFrame = 0;
+                                regulusStunEndTimer = 0.0f;
+                            }
+                        }
+                    }
+                }
+            }
+            else if (!regulusThrowing)
+            {
                 regulusIdleTimer += dt;
                 if (regulusIdleTimer >= 1.0f / REGULUS_IDLE_FPS)
                 {
@@ -664,23 +884,20 @@ int main(void)
             }
             else
             {
-                // Throw sequence: Grab1 → Grab2 → Grab3 → spawn barrel → return to idle
+                // Throw: Grab1 → Grab2 → Grab3 → spawn → back to idle
                 regulusThrowTimer += dt;
                 if (regulusThrowTimer >= 1.0f / REGULUS_THROW_FPS)
                 {
                     regulusThrowTimer -= 1.0f / REGULUS_THROW_FPS;
                     regulusThrowFrame++;
-
-                    if (regulusThrowFrame >= 3) // all throw frames played (Grab1+Grab2+Grab3)
+                    if (regulusThrowFrame >= 3)
                     {
-                        // Spawn the barrel now (end of throw animation)
                         if (regulusSpawnPending)
                         {
                             SpawnBarrelFromPool(barrels, barrelPath, 4.0f, 26.25f, 26.25f, regulusForceBlue);
                             regulusSpawnPending = false;
                             regulusForceBlue = false;
                         }
-                        // Return to idle
                         regulusThrowing = false;
                         regulusThrowFrame = 0;
                         regulusIdleFrame = 0;
@@ -717,17 +934,28 @@ int main(void)
                 nukeExplosionFrame = 0;
                 nukeExplosionTimer = 0.0f;
                 nukeFlashTimer = 0.0f;
-                for (auto& b : barrels) b.active = false;
-                spawnTimer = 0.0f;
                 nukeExtraDelay = 3.0f;
 
-                // Cancel Regulus throw and pause spawning during nuke cooldown.
+                // Score: 100 pts per barrel destroyed by nuke
+                for (auto& b : barrels)
+                {
+                    if (b.active) { score += 100; b.active = false; }
+                }
+                spawnTimer = 0.0f;
+
+                // Stun Regulus
+                regulusIsStunned = true;
+                regulusStunEnding = false;
+                regulusStunFrame = 0;
+                regulusStunTimer = 0.0f;
+                regulusStunLoops = 0;
+                regulusStunEndFrame = 0;
+                regulusStunEndTimer = 0.0f;
+                // Cancel any ongoing throw
                 regulusThrowing = false;
                 regulusSpawnPending = false;
                 regulusForceBlue = false;
                 regulusThrowFrame = 0;
-                regulusIdleFrame = 0;
-                regulusIdleTimer = 0.0f;
                 regulusActiveSpawnTimer = 0.0f;
             }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
@@ -746,22 +974,23 @@ int main(void)
             }
 
             // Flash + shake tick
-            float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
-            if (nukeFlashTimer < flashTotal) nukeFlashTimer += dt;
-
-            if (nukeFlashTimer >= NUKE_FLASH_IN && nukeFlashTimer < flashTotal)
             {
-                float shakeFade = 1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT;
-                float shakeMag = NUKE_SHAKE_AMOUNT * shakeFade;
-                nukeShakeOffset = {
-                    (float)GetRandomValue((int)-shakeMag, (int)shakeMag),
-                    (float)GetRandomValue((int)-shakeMag, (int)shakeMag)
-                };
+                float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
+                if (nukeFlashTimer < flashTotal) nukeFlashTimer += dt;
+                if (nukeFlashTimer >= NUKE_FLASH_IN && nukeFlashTimer < flashTotal)
+                {
+                    float shakeFade = 1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT;
+                    float shakeMag = NUKE_SHAKE_AMOUNT * shakeFade;
+                    nukeShakeOffset = {
+                        (float)GetRandomValue((int)-shakeMag, (int)shakeMag),
+                        (float)GetRandomValue((int)-shakeMag, (int)shakeMag)
+                    };
+                }
+                else nukeShakeOffset = { 0, 0 };
             }
-            else nukeShakeOffset = { 0, 0 };
 
-            // ── Regulus active / inactive state machine ───────────────────────
-            if (!isDying && nukeExtraDelay <= 0.0f)
+            // ── Regulus active/inactive machine (skip if stunned) ─────────────
+            if (!isDying && nukeExtraDelay <= 0.0f && !regulusIsStunned)
             {
                 regulusStateTickTimer += dt;
                 if (regulusStateTickTimer >= 1.0f)
@@ -769,8 +998,7 @@ int main(void)
                     regulusStateTickTimer -= 1.0f;
                     if (regulusIsActive)
                     {
-                        // Roll to go inactive: 20% base +20% per consecutive fail
-                        int threshold = 20 + regulusActiveFails * 20; // 20..100
+                        int threshold = 20 + regulusActiveFails * 20;
                         if (threshold > 100) threshold = 100;
                         if (GetRandomValue(1, 100) <= threshold)
                         {
@@ -783,8 +1011,6 @@ int main(void)
                     }
                     else
                     {
-                        // Roll to go active: first roll only after 3s in inactive,
-                        // 30% base +15% per consecutive fail
                         if (regulusInactiveTime >= 3.0f)
                         {
                             int threshold = 30 + regulusInactiveFails * 15;
@@ -803,8 +1029,8 @@ int main(void)
                 if (!regulusIsActive) regulusInactiveTime += dt;
             }
 
-            // ── Barrel spawn (active mode only) ───────────────────────────────
-            if (!isDying && regulusIsActive && nukeExtraDelay <= 0.0f)
+            // ── Barrel spawn (active mode, not stunned) ───────────────────────
+            if (!isDying && regulusIsActive && nukeExtraDelay <= 0.0f && !regulusIsStunned)
             {
                 regulusActiveSpawnTimer += dt;
                 if (regulusActiveSpawnTimer >= ACTIVE_SPAWN_INTERVAL)
@@ -821,8 +1047,8 @@ int main(void)
                 }
             }
 
-            // ── Debug: manual barrel (KEY_E) also goes through Regulus ────────
-            if (!isDying && IsKeyPressed(KEY_E) && !regulusThrowing)
+            // Debug manual barrel
+            if (!isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
             {
                 regulusThrowing = true;
                 regulusThrowFrame = 0;
@@ -831,133 +1057,96 @@ int main(void)
                 regulusForceBlue = false;
             }
 
-            // ── Barrel / player collision ─────────────────────────────────────
+            // ── Barrel / player collision (direction-aware) ───────────────────
             if (!isDying && !invincible)
             {
                 for (const auto& b : barrels)
                 {
-                    if (b.active && CheckCollisionRecs(player, b.hitbox))
+                    if (!b.active) continue;
+                    if (!CheckCollisionRecs(player, b.hitbox)) continue;
+
+                    // Skip if the player is jumping upward and the barrel is entirely
+                    // above the player's center → barrel just peeking through a
+                    // platform from above, don't punish the player.
+                    bool fromBelow = (!b.isFalling &&
+                        velocityY < 0.0f &&
+                        (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
+                    if (fromBelow) continue;
+
+                    TriggerDeath();
+                    break;
+                }
+            }
+
+            // ── Jump-over-barrel scoring ──────────────────────────────────────
+            if (!isDying && !onLadder && !isGrounded)
+            {
+                for (auto& b : barrels)
+                {
+                    if (!b.active || b.jumpScored) continue;
+                    // Score zone: same width as barrel, one barrel-height above it
+                    Rectangle jumpZone = {
+                        b.hitbox.x - 5.0f,
+                        b.hitbox.y - b.hitbox.height,
+                        b.hitbox.width + 10.0f,
+                        b.hitbox.height
+                    };
+                    if (CheckCollisionRecs(player, jumpZone))
                     {
-                        lives--;
-                        death = true;
-
-                        isDying = true;
-                        deathTimer = 0.0f;
-                        hitPlayed = false;
-                        deathPlayed = false;
-
-                        PauseMusicStream(music);
-
-                        invincible = true;
-                        invincibleTimer = invincibleDuration;
-                        break;
+                        score += 100;
+                        b.jumpScored = true;
                     }
                 }
             }
 
-            // ── Death sequence: fall + fade → black → reset (or GAME_OVER) ────
+            // ── Death sequence update ─────────────────────────────────────────
             if (isDying)
             {
                 deathTimer += dt;
 
-                if (!hitPlayed)
-                {
-                    PlaySound(HitSound);
-                    hitPlayed = true;
-                }
+                if (!hitPlayed) { PlaySound(HitSound);   hitPlayed = true; }
+                if (deathTimer > 0.5f && !deathPlayed) { PlaySound(deathSound); deathPlayed = true; }
 
-                if (deathTimer > 0.5f && !deathPlayed)
+                // Death-shake update
+                if (deathShakeTimer > 0.0f)
                 {
-                    PlaySound(deathSound);
-                    deathPlayed = true;
+                    deathShakeTimer -= dt;
+                    float mag = DEATH_SHAKE_AMOUNT * (deathShakeTimer / DEATH_SHAKE_DURATION);
+                    deathShakeOffset = {
+                        (float)GetRandomValue((int)-mag, (int)mag),
+                        (float)GetRandomValue((int)-mag, (int)mag)
+                    };
                 }
-
-                const float DEATH_FALL_DURATION = 0.9f;
-                const float DEATH_BLACK_DURATION = 0.5f;
+                else deathShakeOffset = { 0, 0 };
 
                 if (!deathReachedBlack)
                 {
-                    // Phase A: Mario falls off the screen while everything fades to black
-                    deathFallVelY += 0.9f;  // gravity-like accel
+                    // Realistic fall: initial upward velocity, gravity pulls down
+                    deathFallVelY += DEATH_FALL_GRAVITY;
                     player.y += deathFallVelY;
 
-                    float t = deathTimer / DEATH_FALL_DURATION;
-                    if (t > 1.0f) t = 1.0f;
-                    deathFadeAlpha = t * 255.0f;
-
-                    if (deathTimer >= DEATH_FALL_DURATION)
+                    if (deathTimer >= DEATH_TOTAL_FALL)
                     {
                         deathReachedBlack = true;
                         deathBlackTimer = 0.0f;
-                        deathFadeAlpha = 255.0f;
                     }
                 }
                 else
                 {
-                    // Phase B: hold pure black for DEATH_BLACK_DURATION
                     deathBlackTimer += dt;
-                    if (deathBlackTimer >= DEATH_BLACK_DURATION)
+                    if (deathBlackTimer >= DEATH_BLACK_HOLD)
                     {
                         if (lives <= 0)
                         {
-                            // Out of lives → GAME_OVER screen (then MENU via existing reset)
                             currentScreen = GAME_OVER;
-                            // Death flags will be cleared inside the GAME_OVER reset block
                         }
                         else
                         {
-                            // Per-round reset: keep current lives, start a fresh round
-                            player.x = 35.0f + 64.0f * 3.5f + 10.0f;
-                            player.y = 817.0f;
-                            velocityX = 0.0f; velocityY = 0.0f;
-                            isJumping = false; isGrounded = false; facingRight = true;
-
-                            onLadder = false; currentLadder = -1;
-                            ladderProgress = 0.0f; ladderCooldown = 0.0f;
-                            ladderExitPlaying = false; ladderExitStep = 0;
-                            ladderExitTimer = 0.0f; ladderEntryClamp = false;
-
-                            for (auto& b : barrels) b.active = false;
-                            spawnTimer = 0.0f;
-
-                            // Regulus: back to idle, no pending throw
-                            regulusThrowing = false;
-                            regulusThrowFrame = 0;
-                            regulusThrowTimer = 0.0f;
-                            regulusSpawnPending = false;
-                            regulusForceBlue = false;
-                            regulusIdleFrame = 0;
-                            regulusIdleTimer = 0.0f;
-                            regulusActiveSpawnTimer = 0.0f;
-                            regulusIsActive = true;
-                            regulusStateTickTimer = 0.0f;
-                            regulusInactiveTime = 0.0f;
-
-                            // Clear death flags
-                            isDying = false;
-                            deathFallVelY = 0.0f;
-                            deathFadeAlpha = 0.0f;
-                            deathReachedBlack = false;
-                            deathBlackTimer = 0.0f;
-                            deathTimer = 0.0f;
-                            hitPlayed = false;
-                            deathPlayed = false;
-
-                            // Brief invincibility on respawn
-                            invincible = true;
-                            invincibleTimer = invincibleDuration;
-
-                            // Animation reset
-                            walkFrame = 0;
-                            animationTimer = 0.0f;
-                            image = &imgMarioIdle;
-
-                            ResumeMusicStream(music);
+                            ResetRound();
                         }
                     }
                 }
-            }
-            // ─────────────────────────────────────────────────────────────────
+            } // end isDying
 
             // ── Barrel / house collision ──────────────────────────────────────
             if (!isDying && !houseAnimPlaying)
@@ -974,8 +1163,6 @@ int main(void)
                     }
                 }
             }
-
-            // ── House explosion animation tick ────────────────────────────────
             if (houseAnimPlaying)
             {
                 houseAnimTimer += dt;
@@ -993,10 +1180,9 @@ int main(void)
                 }
             }
 
-            // ── Player input & movement (paused during death sequence) ────────
+            // ── Player input & movement (gated by isDying) ────────────────────
             if (!isDying)
             {
-                // ── Ladder update ─────────────────────────────────────────────────
                 if (onLadder)
                 {
                     const Ladder& lad = ladders[currentLadder];
@@ -1082,7 +1268,7 @@ int main(void)
                 }
                 else
                 {
-                    // ── Normal movement ───────────────────────────────────────────
+                    // Normal movement
                     if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
                     if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
 
@@ -1093,7 +1279,14 @@ int main(void)
                         {
                             Rectangle _lhb = ladders[i].GetHitbox();
                             float     _lnw = _lhb.width * 0.5f;
-                            Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height };
+                            // FIX: trim 20px from the bottom of the ladder entry zone
+                            // so players can't grab a ladder from too far below
+                            Rectangle _lnarrow = {
+                                _lhb.x + (_lhb.width - _lnw) * 0.5f,
+                                _lhb.y,
+                                _lnw,
+                                _lhb.height - 20.0f
+                            };
 
                             if (ladderCooldown <= 0 && CheckCollisionRecs(player, _lnarrow))
                             {
@@ -1108,9 +1301,10 @@ int main(void)
                                     ladderEntryClampTimer = 0.0f;
                                 }
 
-                                onLadder = true; currentLadder = i;
+                                onLadder = true;
+                                currentLadder = i;
                                 ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                                ladderClimbFrame = 0; ladderClimbTimer = 0;
+                                ladderClimbFrame = 0;     ladderClimbTimer = 0;
                                 player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
                                 velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
                                 entered = true; break;
@@ -1135,7 +1329,8 @@ int main(void)
                     isGrounded = col.grounded;
                     if (col.grounded) isJumping = false;
 
-                    if (isJumping)        image = playerHasNuke ? &imgMarioJumpNuke : &imgMarioJump;
+                    // Animation
+                    if (isJumping) image = playerHasNuke ? &imgMarioJumpNuke : &imgMarioJump;
                     else if (playerIsMoving)
                     {
                         if (animationTimer >= animationSpeed) { walkFrame = (walkFrame + 1) % 2; animationTimer = fmod(animationTimer, animationSpeed); }
@@ -1143,20 +1338,22 @@ int main(void)
                         else               image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
                     }
                     else { image = playerHasNuke ? &imgMarioIdleNuke : &imgMarioIdle; walkFrame = 0; }
+
+                    // ── Fall off map → trigger death (no more teleport) ────────
+                    if (player.y > screenHeight + 40)
+                    {
+                        TriggerDeath();
+                    }
                 }
+            } // end !isDying player input
 
-                if (player.y > 900)
-                {
-                    player.y = 0; player.x = 440;
-                    onLadder = false; currentLadder = -1;
-                    ladderExitPlaying = false; ladderEntryClamp = false;
-                }
-            } // end if (!isDying) — player input/movement gate
+            // While dying: pick jump vs fall sprite based on current velocity
+            if (isDying)
+            {
+                image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
+            }
 
-            // Force falling sprite while dying
-            if (isDying) image = &imgMarioFalling;
-
-        } // ← cierra else if (currentScreen == GAMEPLAY)
+        } // ── end GAMEPLAY update
 
         // ── GAME_OVER ─────────────────────────────────────────────────────────
         else if (currentScreen == GAME_OVER)
@@ -1165,99 +1362,20 @@ int main(void)
             if (splashTimer >= splashDuration)
             {
                 splashTimer = 0.0f;
-                lives = 3;
-                death = false;
-                invincible = false;
-                invincibleTimer = 0.0f;
-
-                // Reiniciar audio
-                isDying = false;
-                deathTimer = 0.0f;
-                hitPlayed = false;
-                deathPlayed = false;
-                deathFallVelY = 0.0f;
-                deathFadeAlpha = 0.0f;
-                deathReachedBlack = false;
-                deathBlackTimer = 0.0f;
-                ResumeMusicStream(music);
-
-                // Player
-                player.x = 35.0f + 64.0f * 3.5f + 10.0f;
-                player.y = 817.0f;
-                velocityX = 0.0f;
-                velocityY = 0.0f;
-                isJumping = false;
-                isGrounded = false;
-                facingRight = true;
-
-                // Ladder
-                onLadder = false;
-                currentLadder = -1;
-                ladderProgress = 0.0f;
-                ladderCooldown = 0.0f;
-                ladderExitPlaying = false;
-                ladderExitStep = 0;
-                ladderExitTimer = 0.0f;
-                ladderEntryClamp = false;
-
-                // Barriles
-                for (auto& b : barrels) b.active = false;
-                spawnTimer = 0.0f;
-                spawnInterval = 10.0f;
-                minuteTimer = 0.0f;
-                // State machine reset
-                regulusIsActive = true;
-                regulusStateTickTimer = 0.0f;
-                regulusInactiveTime = 0.0f;
-                regulusActiveFails = 0;
-                regulusInactiveFails = 0;
-                regulusActiveSpawnTimer = 0.0f;
-
-                // Casa
-                houseAnimPlaying = false;
-                houseAnimFrame = 0;
-                houseAnimTimer = 0.0f;
-                houseIsSnowed = false;
-
-                // Nuke
-                playerHasNuke = false;
-                nukeExtraDelay = 0.0f;
-                nukeExplosionPlaying = false;
-                nukeExplosionFrame = 0;
-                nukeExplosionTimer = 0.0f;
-                nukeFlashTimer = 5.0f;  // past flashTotal so no flash after reset
-                nukeShakeOffset = { 0, 0 };
-                for (auto& nk : nukes) nk.active = false;
-                nukes.clear();
-                {
-                    int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
-                    nukes.push_back({ nukeSpawnNodes[idx], true });
-                }
-
-                // Regulus: start with blue barrel throw, same as first launch
-                regulusThrowing = true;
-                regulusThrowFrame = 0;
-                regulusThrowTimer = 0.0f;
-                regulusSpawnPending = true;
-                regulusForceBlue = true;
-                regulusIdleFrame = 0;
-                regulusIdleTimer = 0.0f;
-
-                // Animación Mario
-                walkFrame = 0;
-                animationTimer = 0.0f;
-                image = &imgMarioIdle;
+                FullReset();
                 currentScreen = MENU;
             }
         }
 
-        // Rain scroll (siempre activo)
+        // ── Rain scroll (always active) ───────────────────────────────────────
         rainScrollY += rainSpeed * GetFrameTime();
         rain2ScrollY += rain2Speed * GetFrameTime();
         if (rainScrollY >= Rain.height)  rainScrollY = 0.0f;
         if (rain2ScrollY >= Rain2.height) rain2ScrollY = 0.0f;
 
-        // ── DRAW ──────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
+        // DRAW
+        // ─────────────────────────────────────────────────────────────────────
         BeginDrawing();
         ClearBackground(BLACK);
 
@@ -1278,9 +1396,9 @@ int main(void)
         // ── MENU ──────────────────────────────────────────────────────────────
         else if (currentScreen == MENU)
         {
-            int titleFont = 60, menuFont = 28, smallFont = 20, spacing = 30;
-            Color dkRed = { 255, 60, 0, 255 };
-            Color dkOrange = { 255, 140, 0, 255 };
+            int   titleFont = 60, menuFont = 28, smallFont = 20, spacing = 30;
+            Color dkRed = { 255,  60,   0, 255 };
+            Color dkOrange = { 255, 140,   0, 255 };
             Color dkWhite = WHITE;
 
             const char* title = "DONKEY KONG";
@@ -1293,21 +1411,16 @@ int main(void)
             int exitW = MeasureText(exitText, menuFont);
             int subW = MeasureText(subtitle, smallFont);
 
-            int totalHeight = titleFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
-            int startY = (GetScreenHeight() - totalHeight) / 2;
-            int titleX = (GetScreenWidth() - titleW) / 2;
-            int titleY = startY;
-            int playX = (GetScreenWidth() - playW) / 2;
-            int playY = titleY + titleFont + spacing;
-            int exitX = (GetScreenWidth() - exitW) / 2;
-            int exitY = playY + menuFont + spacing;
-            int subX = (GetScreenWidth() - subW) / 2;
-            int subY = exitY + menuFont + spacing;
+            int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
+            int startY = (screenHeight - totalH) / 2;
+            int titleX = (screenWidth - titleW) / 2, titleY = startY;
+            int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
+            int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
+            int subX = (screenWidth - subW) / 2, subY = exitY + menuFont + spacing;
 
             const char* arrow = ">";
-            int arrowOffset = 40;
-            if (selectedOption == 0) DrawText(arrow, playX - arrowOffset, playY, menuFont, dkOrange);
-            else if (selectedOption == 1) DrawText(arrow, exitX - arrowOffset, exitY, menuFont, dkOrange);
+            if (selectedOption == 0) DrawText(arrow, playX - 40, playY, menuFont, dkOrange);
+            else if (selectedOption == 1) DrawText(arrow, exitX - 40, exitY, menuFont, dkOrange);
 
             DrawText(title, titleX, titleY, titleFont, dkRed);
             DrawText(playText, playX, playY, menuFont, dkWhite);
@@ -1317,47 +1430,47 @@ int main(void)
         // ── GAMEPLAY ──────────────────────────────────────────────────────────
         else if (currentScreen == GAMEPLAY)
         {
+            // Combine nuke shake + death shake
             Camera2D cam = { 0 };
             cam.zoom = 1.0f;
-            cam.offset = nukeShakeOffset;
+            cam.offset = {
+                nukeShakeOffset.x + deathShakeOffset.x,
+                nukeShakeOffset.y + deathShakeOffset.y
+            };
             BeginMode2D(cam);
 
             // 1. Background
             DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
 
-            // 1.5 Rain2 (behind ladders, above background)
+            // 1.5 Rain2 (behind ladders)
             {
                 float scaleX = (float)screenWidth / Rain2.width;
                 float scaleY = (float)screenHeight / Rain2.height;
-                float scaledW = Rain2.width * scaleX;
-                float scaledH = Rain2.height * scaleY;
-                DrawTexturePro(Rain2, { 0, rain2ScrollY, (float)Rain2.width, (float)Rain2.height },
-                    { 0, 0, scaledW, scaledH }, { 0, 0 }, 0.f, rain2Tint);
-                DrawTexturePro(Rain2, { 0, 0, (float)Rain2.width, (float)Rain2.height },
-                    { 0, -scaledH + rain2ScrollY, scaledW, scaledH }, { 0, 0 }, 0.f, rain2Tint);
+                float sW = Rain2.width * scaleX, sH = Rain2.height * scaleY;
+                DrawTexturePro(Rain2, { 0, rain2ScrollY, (float)Rain2.width, (float)Rain2.height }, { 0, 0, sW, sH }, {}, 0.f, rain2Tint);
+                DrawTexturePro(Rain2, { 0, 0, (float)Rain2.width, (float)Rain2.height }, { 0, -sH + rain2ScrollY, sW, sH }, {}, 0.f, rain2Tint);
             }
 
             // 2. Ladders
-            DrawTextureRec(ladderLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
+            DrawTextureRec(ladderLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
 
-            // 3. Beams (baked)
-            DrawTextureRec(staticLayer.texture, { 0,0,(float)screenWidth,-(float)screenHeight }, { 0,0 }, WHITE);
+            // 3. Beams
+            DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
             CollisionManager::DrawAll(platforms);
 
             // 4. House
             {
                 Texture2D& houseTex = houseIsSnowed ? House2 : House1;
                 DrawTexturePro(houseTex, { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H },
-                    { houseX, houseY, houseW, houseH }, { 0, 0 }, 0.f, WHITE);
+                    { houseX, houseY, houseW, houseH }, {}, 0.f, WHITE);
 
                 if (houseIsSnowed)
                 {
                     float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE;
                     float sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
                     DrawTexturePro(SnowFloor, { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H },
-                        { houseX, 865.0f, sfW, sfH }, { 0,0 }, 0.f, WHITE);
+                        { houseX, 865.0f, sfW, sfH }, {}, 0.f, WHITE);
                 }
-
                 if (houseAnimPlaying && houseAnimFrame < CAVE_FRAME_COUNT)
                 {
                     Texture2D* caveTex = caveFrames[houseAnimFrame];
@@ -1367,11 +1480,11 @@ int main(void)
                     float animProgress = houseAnimFrame / (float)(CAVE_FRAME_COUNT - 1);
                     float caveY = houseY + houseH * 0.5f - caveH * 0.7f + 10.0f * animProgress;
                     DrawTexturePro(*caveTex, { 0, 0, CAVE_NATIVE_W, CAVE_NATIVE_H },
-                        { caveX, caveY, caveW, caveH }, { 0, 0 }, 0.f, WHITE);
+                        { caveX, caveY, caveW, caveH }, {}, 0.f, WHITE);
                 }
             }
 
-            // 4.5 Nuke items on map
+            // 4.5 Nuke items
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE;
                 float nkH = NUKE_NATIVE_H * NUKE_SCALE;
@@ -1380,56 +1493,71 @@ int main(void)
                     if (!nk.active) continue;
                     float bobY = nk.pos.y + sinf((float)GetTime() * 3.0f) * 4.0f;
                     DrawTexturePro(Nuke, { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
-                        { nk.pos.x, bobY, nkW, nkH }, { 0, 0 }, 0.f, WHITE);
+                        { nk.pos.x, bobY, nkW, nkH }, {}, 0.f, WHITE);
                 }
             }
 
             // 4.7 Regulus ─────────────────────────────────────────────────────
-            // Drawn before the player so it sits behind Mario if they overlap.
             {
-                int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
-                Texture2D* regTex = regulusThrowing
-                    ? regulusThrowFrames[throwIdx]
-                    : regulusIdleFrames[regulusIdleFrame];
+                Texture2D* regTex = nullptr;
+
+                if (regulusIsStunned)
+                {
+                    if (regulusStunEnding)
+                    {
+                        int idx = regulusStunEndFrame < 5 ? regulusStunEndFrame : 4;
+                        regTex = regulusStunEndFrames[idx];
+                    }
+                    else
+                    {
+                        int idx = regulusStunFrame < 3 ? regulusStunFrame : 0;
+                        regTex = regulusStunFrames[idx];
+                    }
+                }
+                else
+                {
+                    int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                    regTex = regulusThrowing ? regulusThrowFrames[throwIdx] : regulusIdleFrames[regulusIdleFrame];
+                }
 
                 float regW = regTex->width * REGULUS_SCALE;
                 float regH = regTex->height * REGULUS_SCALE;
-
-                // Feet on beam, nudged down 20px (was 10) to sit on collision
                 float regY = 225.0f - regH + 20.0f;
-                float regX = REGULUS_X + regW * 0.5f;   // half-width right of anchor
-                // ── Barrel-in-hand (throw frames only) ───────────────────────
-                // Hand pixel coords on the 59x52 source image, per frame
-                const float handOffX[3] = { 11.0f, 29.0f, 47.0f };
-                const float handOffY[3] = { 40.0f, 19.0f, 40.0f };
+                float regX = REGULUS_X + regW * 0.5f;
 
-                // Match barrel colour to what will be spawned
-                Texture2D* barrelHandTex = regulusForceBlue ? &BlueBarrelMov1 : &BarrelMov1;
-                float barrelHandScale = REGULUS_SCALE * 0.55f;
-                float barrelHandW = barrelHandTex->width * barrelHandScale;
-                float barrelHandH = barrelHandTex->height * barrelHandScale;
-                float handScrX = regX + handOffX[throwIdx] * REGULUS_SCALE - barrelHandW * 0.5f;
-                float handScrY = regY + handOffY[throwIdx] * REGULUS_SCALE - barrelHandH * 0.5f;
+                // Barrel-in-hand (throw frames only, not during stun)
+                if (!regulusIsStunned && regulusThrowing)
+                {
+                    int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                    const float handOffX[3] = { 11.0f, 29.0f, 47.0f };
+                    const float handOffY[3] = { 40.0f, 19.0f, 40.0f };
+                    Texture2D* barrelHandTex = regulusForceBlue ? &BlueBarrelMov1 : &BarrelMov1;
+                    float barrelHandScale = REGULUS_SCALE * 0.55f;
+                    float barrelHandW = barrelHandTex->width * barrelHandScale;
+                    float barrelHandH = barrelHandTex->height * barrelHandScale;
+                    float handScrX = regX + handOffX[throwIdx] * REGULUS_SCALE - barrelHandW * 0.5f;
+                    float handScrY = regY + handOffY[throwIdx] * REGULUS_SCALE - barrelHandH * 0.5f;
 
-                // Frames 0 and 2: barrel BEHIND Regulus
-                if (regulusThrowing && (throwIdx == 0 || throwIdx == 2))
-                    DrawTexturePro(*barrelHandTex,
-                        { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
-                        { handScrX, handScrY, barrelHandW, barrelHandH },
-                        { 0, 0 }, 0.f, WHITE);
+                    if (throwIdx == 0 || throwIdx == 2)
+                        DrawTexturePro(*barrelHandTex,
+                            { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                            { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
 
-                // Draw Regulus sprite
-                DrawTexturePro(*regTex,
-                    { 0, 0, (float)regTex->width, (float)regTex->height },
-                    { regX, regY, regW, regH },
-                    { 0, 0 }, 0.f, WHITE);
+                    DrawTexturePro(*regTex,
+                        { 0, 0, (float)regTex->width, (float)regTex->height },
+                        { regX, regY, regW, regH }, {}, 0.f, WHITE);
 
-                // Frame 1: barrel IN FRONT of Regulus
-                if (regulusThrowing && throwIdx == 1)
-                    DrawTexturePro(*barrelHandTex,
-                        { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
-                        { handScrX, handScrY, barrelHandW, barrelHandH },
-                        { 0, 0 }, 0.f, WHITE);
+                    if (throwIdx == 1)
+                        DrawTexturePro(*barrelHandTex,
+                            { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                            { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
+                }
+                else
+                {
+                    DrawTexturePro(*regTex,
+                        { 0, 0, (float)regTex->width, (float)regTex->height },
+                        { regX, regY, regW, regH }, {}, 0.f, WHITE);
+                }
             }
 
             // 5. Player
@@ -1437,24 +1565,24 @@ int main(void)
                 bool showPlayer = isDying || !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
                 if (showPlayer)
                 {
-                    float     scale = 3.8f * 0.85f * 1.05f;  // *0.85 player size *1.05 enlarge
+                    float     scale = 3.8f * 0.85f * 1.05f;
                     Rectangle src = { 0, 0, (float)image->width, (float)image->height };
                     Rectangle dest = { player.x, player.y + 10.0f, image->width * scale, image->height * scale };
                     if (!facingRight && !onLadder) src.width *= -1;
                     DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
 
-                    if (playerHasNuke)
+                    if (playerHasNuke && !isDying)
                     {
                         float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
                         float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
                         float nkX = player.x + dest.width * 0.5f - nkW * 0.5f;
                         float nukeOffsetY = 5.0f;
-                        bool moving = (!onLadder && !isJumping && walkFrame != 0);
+                        bool  moving = (!onLadder && !isJumping && walkFrame != 0);
                         if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
                         float nkY = player.y + 10.0f - nkH - 2.0f + nukeOffsetY;
                         Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
                         if (!facingRight) nukeSrc.width *= -1;
-                        DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, { 0, 0 }, 0.f, WHITE);
+                        DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, {}, 0.f, WHITE);
                     }
                 }
             }
@@ -1478,25 +1606,33 @@ int main(void)
                 float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f - 2.625f;
                 DrawTexturePro(*tex,
                     { 0, 0, (float)tex->width, (float)tex->height },
-                    { drawX, drawY, drawW, drawH },
-                    { 0, 0 }, 0.f, WHITE);
+                    { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
             }
 
             // 7. HUD
             for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
+
+            // Score display (centered top)
+            {
+                const char* scoreTxt = TextFormat("SCORE: %d", score);
+                int sw = MeasureText(scoreTxt, 26);
+                DrawText(scoreTxt, screenWidth / 2 - sw / 2, 10, 26, YELLOW);
+            }
+
             DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
             if (onLadder)
                 DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
 
-            int activeCount = 0;
-            for (const auto& b : barrels) if (b.active) activeCount++;
-            DrawText(TextFormat("Barrels: %d  Next: %.1fs  Interval: %.1fs",
-                activeCount, spawnInterval - spawnTimer, spawnInterval),
-                10, screenHeight - 80, 16, GRAY);
+            {
+                int activeCount = 0;
+                for (const auto& b : barrels) if (b.active) activeCount++;
+                DrawText(TextFormat("Barrels: %d  Interval: %.1fs", activeCount, (float)ACTIVE_SPAWN_INTERVAL),
+                    10, screenHeight - 80, 16, GRAY);
+            }
 
             if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
 
-            // 8. Nuke explosion animation
+            // 8. Nuke explosion
             if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT)
             {
                 Texture2D* exTex = explosionFrames[nukeExplosionFrame];
@@ -1506,24 +1642,21 @@ int main(void)
                 DrawTexturePro(*exTex,
                     { 0, 0, (float)exTex->width, (float)exTex->height },
                     { nukeExplosionPos.x - exW * 0.5f, nukeExplosionPos.y - exH * 0.5f, exW, exH },
-                    { 0, 0 }, 0.f, WHITE);
+                    {}, 0.f, WHITE);
             }
 
             EndMode2D();
 
-            // 9. Rain overlay (front layer, outside camera)
+            // 9. Rain overlay (screen-space, outside camera)
             {
                 float scaleX = (float)screenWidth / Rain.width;
                 float scaleY = (float)screenHeight / Rain.height;
-                float scaledW = Rain.width * scaleX;
-                float scaledH = Rain.height * scaleY;
-                DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height },
-                    { 0, 0, scaledW, scaledH }, { 0, 0 }, 0.f, rainTint);
-                DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height },
-                    { 0, -scaledH + rainScrollY, scaledW, scaledH }, { 0, 0 }, 0.f, rainTint);
+                float sW = Rain.width * scaleX, sH = Rain.height * scaleY;
+                DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height }, { 0, 0, sW, sH }, {}, 0.f, rainTint);
+                DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height }, { 0, -sH + rainScrollY, sW, sH }, {}, 0.f, rainTint);
             }
 
-            // 10. Flash overlay
+            // 10. Nuke flash overlay
             {
                 float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
                 if (nukeFlashTimer < flashTotal)
@@ -1537,16 +1670,38 @@ int main(void)
                 }
             }
 
-            // 11. Death fade-to-black overlay (drawn on top of everything)
-            if (isDying && deathFadeAlpha > 0.0f)
+            // 11. Death overlay (drawn on top of everything, screen-space)
+            if (isDying || deathReachedBlack)
             {
-                unsigned char a = (unsigned char)(deathFadeAlpha > 255.0f ? 255 : deathFadeAlpha);
-                DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, a });
+                if (deathReachedBlack)
+                {
+                    // Pure black hold
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, 255 });
+                }
+                else if (deathTimer < DEATH_FLASH_DURATION)
+                {
+                    // White flash: fade in over 0.4 s
+                    float t = deathTimer / DEATH_FLASH_DURATION;
+                    unsigned char alpha = (unsigned char)(200.0f * t);
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
+                }
+                else
+                {
+                    // Fade to black
+                    float t = (deathTimer - DEATH_FLASH_DURATION) / DEATH_FADE_DURATION;
+                    if (t > 1.0f) t = 1.0f;
+                    unsigned char alpha = (unsigned char)(t * 255.0f);
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, alpha });
+                }
             }
         }
+        // ── GAME_OVER screen ──────────────────────────────────────────────────
         else if (currentScreen == GAME_OVER)
         {
-            DrawText("GAME OVER", 300, 400, 50, RED);
+            DrawText("GAME OVER", 300, 380, 50, RED);
+            const char* scoreTxt = TextFormat("SCORE: %d", score);
+            int sw = MeasureText(scoreTxt, 32);
+            DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
         }
 
         EndDrawing();
@@ -1557,25 +1712,25 @@ int main(void)
     UnloadSound(deathSound);
     UnloadSound(HitSound);
 
-    UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
-    UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
+    UnloadTexture(imgMarioIdle);       UnloadTexture(imgMarioWalk1);
+    UnloadTexture(imgMarioWalk2);      UnloadTexture(imgMarioJump);
     UnloadTexture(imgMarioFalling);
-    UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
-    UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
-    UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
-    UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
-    UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
-    UnloadTexture(BarrelFall1);       UnloadTexture(BarrelFall2);
-    UnloadTexture(BlueBarrelMov1);    UnloadTexture(BlueBarrelMov2);
-    UnloadTexture(BlueBarrelMov3);    UnloadTexture(BlueBarrelMov4);
-    UnloadTexture(BlueBarrelFall1);   UnloadTexture(BlueBarrelFall2);
-    UnloadTexture(House1);            UnloadTexture(House2);
+    UnloadTexture(imgMarioClimb1);     UnloadTexture(imgMarioClimb2);
+    UnloadTexture(imgMarioClimbEnd1);  UnloadTexture(imgMarioClimbEnd2);
+    UnloadTexture(imgMarioClimbDown);  UnloadTexture(background);
+    UnloadTexture(BarrelMov1);         UnloadTexture(BarrelMov2);
+    UnloadTexture(BarrelMov3);         UnloadTexture(BarrelMov4);
+    UnloadTexture(BarrelFall1);        UnloadTexture(BarrelFall2);
+    UnloadTexture(BlueBarrelMov1);     UnloadTexture(BlueBarrelMov2);
+    UnloadTexture(BlueBarrelMov3);     UnloadTexture(BlueBarrelMov4);
+    UnloadTexture(BlueBarrelFall1);    UnloadTexture(BlueBarrelFall2);
+    UnloadTexture(House1);             UnloadTexture(House2);
     UnloadTexture(SnowFloor);
     UnloadTexture(Nuke);
-    UnloadTexture(imgMarioIdleNuke);  UnloadTexture(imgMarioWalk1Nuke);
-    UnloadTexture(imgMarioWalk2Nuke); UnloadTexture(imgMarioJumpNuke);
-    UnloadTexture(Explosion1); UnloadTexture(Explosion2); UnloadTexture(Explosion3);
-    UnloadTexture(Explosion4); UnloadTexture(Explosion5); UnloadTexture(Explosion6);
+    UnloadTexture(imgMarioIdleNuke);   UnloadTexture(imgMarioWalk1Nuke);
+    UnloadTexture(imgMarioWalk2Nuke);  UnloadTexture(imgMarioJumpNuke);
+    UnloadTexture(Explosion1);  UnloadTexture(Explosion2);  UnloadTexture(Explosion3);
+    UnloadTexture(Explosion4);  UnloadTexture(Explosion5);  UnloadTexture(Explosion6);
     UnloadTexture(cave1);  UnloadTexture(cave2);  UnloadTexture(cave3);
     UnloadTexture(cave4);  UnloadTexture(cave5);  UnloadTexture(cave6);
     UnloadTexture(cave7);  UnloadTexture(cave8);  UnloadTexture(cave9);
@@ -1583,9 +1738,12 @@ int main(void)
     UnloadTexture(Rain);   UnloadTexture(Rain2);
 
     // Regulus
-    UnloadTexture(RegulusGrab1);   UnloadTexture(RegulusGrab2);  UnloadTexture(RegulusGrab3);
-    UnloadTexture(RegulusIdle1);   UnloadTexture(RegulusIdle2);  UnloadTexture(RegulusIdle3);
-    UnloadTexture(RegulusStairs1); UnloadTexture(RegulusStairs2);
+    UnloadTexture(RegulusGrab1);    UnloadTexture(RegulusGrab2);   UnloadTexture(RegulusGrab3);
+    UnloadTexture(RegulusIdle1);    UnloadTexture(RegulusIdle2);   UnloadTexture(RegulusIdle3);
+    UnloadTexture(RegulusStairs1);  UnloadTexture(RegulusStairs2);
+    UnloadTexture(Regulus_Stun1);   UnloadTexture(Regulus_Stun2);  UnloadTexture(Regulus_Stun3);
+    UnloadTexture(Regulus_StunEnd1); UnloadTexture(Regulus_StunEnd2); UnloadTexture(Regulus_StunEnd3);
+    UnloadTexture(Regulus_StunEnd4); UnloadTexture(Regulus_StunEnd5);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
