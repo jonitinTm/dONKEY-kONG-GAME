@@ -1110,6 +1110,7 @@ int main(void)
                     {
                         score += 100;
                         b.jumpScored = true;
+                        //meter el texto flotante
                     }
                 }
             }
@@ -1166,14 +1167,6 @@ int main(void)
 
 
 
-
-    // ── Audio state ───────────────────────────────────────────────────────────
-            bool  isDying = false;
-            float deathTimer = 0.0f;
-            const float deathDuration = 2.0f;
-            bool  hitPlayed = false;
-            bool  deathPlayed = false;
-            //---------
 
 
             // ── Barrel / house collision ──────────────────────────────────────
