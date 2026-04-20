@@ -539,6 +539,15 @@ int main(void)
     Texture2D Regulus_StunEnd4 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd4.png");
     Texture2D Regulus_StunEnd5 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd5.png");
 
+    Texture2D Dk_Mario_Idle1_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1_Beatrice.png");
+    Texture2D Dk_Mario_Idle2_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle2_Beatrice.png");
+    Texture2D Dk_Mario_Jump_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Jump_Beatrice.png");
+    Texture2D Dk_Mario_Walk1_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk1_Beatrice.png");
+    Texture2D Dk_Mario_Walk2_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk2_Beatrice.png");
+
+    Texture2D Beatrice_Idle1 = LoadTexture("Assets/Textures/Characters/Mario/Beatrice_Idle1.png");
+    Texture2D Beatrice_Idle2 = LoadTexture("Assets/Textures/Characters/Mario/Beatrice_Idle2.png");
+
     Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,  &RegulusIdle2,  &RegulusIdle3 };
     Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,  &RegulusGrab2,  &RegulusGrab3 };
     Texture2D* regulusStunFrames[3] = { &Regulus_Stun1, &Regulus_Stun2, &Regulus_Stun3 };
