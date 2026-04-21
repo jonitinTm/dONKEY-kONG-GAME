@@ -206,6 +206,8 @@ int main(void)
 
     int score = 0;
 
+    Rectangle wincondition = { 400, 150, 40, 40 };
+
     // ── Player ────────────────────────────────────────────────────────────────
     Rectangle player = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f, 63, 63 };
     float     playerSpeed = 2.0f * 0.9f;
@@ -850,10 +852,18 @@ int main(void)
         else if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
-            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = GAMEPLAY; }
-            if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = GAMEPLAY; }
+            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; }
+            if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = HOW_HIGH; }
             if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
         }
+        else if (currentScreen == HOW_HIGH)
+        {
+            DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
+            DrawText("25", 200, 800, 30, WHITE);
+
+
+        }
+
         // ── GAMEPLAY ──────────────────────────────────────────────────────────
         else if (currentScreen == GAMEPLAY)
         {
@@ -1457,7 +1467,18 @@ int main(void)
 
             if (isDying) image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
 
+            // Win Condition
+
+            if (CheckCollisionRecs(wincondition, player))
+            {
+                splashTimer = 0.0f;
+                currentScreen = GAME_OVER;
+
+            }
+
+
         } // end GAMEPLAY update
+
 
         else if (currentScreen == GAME_OVER)
         {
@@ -1514,6 +1535,17 @@ int main(void)
             DrawText(playText, playX, playY, menuFont, dkWhite);
             DrawText(exitText, exitX, exitY, menuFont, dkWhite);
             DrawText(subtitle, subX, subY, smallFont, dkOrange);
+        }
+        else if (currentScreen == HOW_HIGH)
+        {
+            splashTimer += GetFrameTime();
+
+            if (splashTimer >= splashDuration)
+            {
+                currentScreen = GAMEPLAY;
+
+            }
+
         }
         else if (currentScreen == GAMEPLAY)
         {
@@ -1793,10 +1825,26 @@ int main(void)
         }
         else if (currentScreen == GAME_OVER)
         {
-            DrawText("GAME OVER", 300, 380, 50, RED);
-            const char* scoreTxt = TextFormat("SCORE: %d", score);
-            int sw = MeasureText(scoreTxt, 32);
-            DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
+            
+
+            if (lives > 0)
+            {
+                DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
+                DrawText("25", 200, 800, 30, WHITE);
+                DrawText("50", 200, 700, 30, WHITE);
+
+
+            }
+            else
+            {
+                DrawText("GAME OVER", 300, 380, 50, RED);
+                const char* scoreTxt = TextFormat("SCORE: %d", score);
+                int sw = MeasureText(scoreTxt, 32);
+                DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
+
+            }
+
+
         }
 
         EndDrawing();
