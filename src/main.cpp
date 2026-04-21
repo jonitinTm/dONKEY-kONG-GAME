@@ -208,6 +208,12 @@ int main(void)
 
     Rectangle wincondition = { 400, 150, 40, 40 };
 
+    // ── Subaru animation state ────────────────────────────────────────────────
+    const float SUBARU_ANIM_FPS = 5.0f;
+    const int   SUBARU_FRAME_COUNT = 5;
+    int         subaruFrame = 0;
+    float       subaruTimer = 0.0f;
+
     // ── Player ────────────────────────────────────────────────────────────────
     Rectangle player = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f, 63, 63 };
     float     playerSpeed = 2.0f * 0.9f;
@@ -479,8 +485,8 @@ int main(void)
     Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
     Sound deathSound = LoadSound("Assets/Nuevo audio/po.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/yamete kudasay.mp3");
-    Sound nukeSound = LoadSound("Assets/Nuevo audio/nuke.mp3");       // reemplazar ruta
-    Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/jump_brl.mp3");   // reemplazar ruta
+    Sound nukeSound = LoadSound("Assets/Nuevo audio/nuke.mp3");
+    Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/jump_brl.mp3");
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
@@ -578,6 +584,19 @@ int main(void)
     Texture2D Beatrice_Idle1 = LoadTexture("Assets/Textures/Characters/Beatrice/Beatrice_Idle1.png");
     Texture2D Beatrice_Idle2 = LoadTexture("Assets/Textures/Characters/Beatrice/Beatrice_Idle2.png");
     Texture2D texBeaBullet = LoadTexture("Assets/Textures/Characters/Beatrice/BeaBullet.png");
+
+    // ── Subaru textures ───────────────────────────────────────────────────────
+    Texture2D Subaru1 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru1.png");
+    Texture2D Subaru2 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru2.png");
+    Texture2D Subaru3 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru3.png");
+    Texture2D Subaru4 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru4.png");
+    Texture2D Subaru5 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru5.png");
+    Texture2D Subaru_Background = LoadTexture("Assets/Textures/Characters/Subaru/Subaru_Background.png");
+
+    // Array for easy indexed access
+    Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = {
+        &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5
+    };
 
     Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,  &RegulusIdle2,  &RegulusIdle3 };
     Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,  &RegulusGrab2,  &RegulusGrab3 };
@@ -827,6 +846,10 @@ int main(void)
             regulusIdleFrame = 0;
             regulusIdleTimer = 0.0f;
 
+            // Reset Subaru animation
+            subaruFrame = 0;
+            subaruTimer = 0.0f;
+
             ResumeMusicStream(music);
         };
 
@@ -835,40 +858,51 @@ int main(void)
     // ─────────────────────────────────────────────────────────────────────────
     while (!WindowShouldClose())
     {
+        float dt = GetFrameTime();
+
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
 
         if (currentScreen == SPLASH_SCREEN)
         {
             if (IsKeyPressed(KEY_ENTER)) currentScreen = SPLASH_SCREEN2;
-            splashTimer += GetFrameTime();
+            splashTimer += dt;
             if (splashTimer >= splashDuration) { splashTimer = 0.0f; currentScreen = SPLASH_SCREEN2; }
         }
         else if (currentScreen == SPLASH_SCREEN2)
         {
             if (IsKeyPressed(KEY_ENTER)) currentScreen = MENU;
-            splashTimer += GetFrameTime();
+            splashTimer += dt;
             if (splashTimer >= splashDuration) { splashTimer = 0.0f; currentScreen = MENU; }
         }
         else if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
-            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; }
-            if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = HOW_HIGH; }
+            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
+            if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
             if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
         }
+        // ── HOW HIGH screen (update) ──────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
         {
-            
-            DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
-            DrawText("25", 200, 800, 30, WHITE);
+            splashTimer += dt;
 
+            // Advance Subaru animation at 5 fps
+            subaruTimer += dt;
+            if (subaruTimer >= 1.0f / SUBARU_ANIM_FPS)
+            {
+                subaruTimer -= 1.0f / SUBARU_ANIM_FPS;
+                subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
+            }
 
+            if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
+            {
+                splashTimer = 0.0f;
+                currentScreen = GAMEPLAY;
+            }
         }
-
         // ── GAMEPLAY ──────────────────────────────────────────────────────────
         else if (currentScreen == GAMEPLAY)
         {
-            float dt = GetFrameTime();
             UpdateMusicStream(music);
             animationTimer += dt;
             if (ladderCooldown > 0.0f) ladderCooldown -= dt;
@@ -1468,28 +1502,23 @@ int main(void)
 
             if (isDying) image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
 
-            // Win Condition
-
+            // ── Win Condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
                 splashTimer = 0.0f;
                 currentScreen = GAME_OVER;
-
             }
-
 
         } // end GAMEPLAY update
 
-
         else if (currentScreen == GAME_OVER)
         {
-            splashTimer += GetFrameTime();
-          
+            splashTimer += dt;
             if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER)) { splashTimer = 0.0f; FullReset(); currentScreen = MENU; }
         }
 
-        rainScrollY += rainSpeed * GetFrameTime();
-        rain2ScrollY += rain2Speed * GetFrameTime();
+        rainScrollY += rainSpeed * dt;
+        rain2ScrollY += rain2Speed * dt;
         if (rainScrollY >= Rain.height)  rainScrollY = 0.0f;
         if (rain2ScrollY >= Rain2.height) rain2ScrollY = 0.0f;
 
@@ -1538,16 +1567,30 @@ int main(void)
             DrawText(exitText, exitX, exitY, menuFont, dkWhite);
             DrawText(subtitle, subX, subY, smallFont, dkOrange);
         }
+        // ── HOW HIGH screen (draw) ────────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
         {
-            splashTimer += GetFrameTime();
-            if (IsKeyPressed(KEY_ENTER)) currentScreen = GAMEPLAY;
-            if (splashTimer >= splashDuration)
-            {
-                currentScreen = GAMEPLAY;
+            // 1. Background stretched to fill screen
+            DrawTexturePro(Subaru_Background,
+                { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
+                { 0, 0, (float)screenWidth, (float)screenHeight },
+                { 0, 0 }, 0.f, WHITE);
 
-            }
+            // 2. Current Subaru animation frame, also full-screen
+            Texture2D* subTex = subaruFrames[subaruFrame];
+            DrawTexturePro(*subTex,
+                { 0, 0, (float)subTex->width, (float)subTex->height },
+                { 0, 0, (float)screenWidth, (float)screenHeight },
+                { 0, 0 }, 0.f, WHITE);
 
+            // 3. Text on top
+            const char* howHighTxt = "HOW HIGH CAN YOU GET?";
+            int hwW = MeasureText(howHighTxt, 50);
+            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
+
+            const char* pressEnter = "PRESS ENTER TO PLAY";
+            int peW = MeasureText(pressEnter, 28);
+            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
         }
         else if (currentScreen == GAMEPLAY)
         {
@@ -1615,7 +1658,6 @@ int main(void)
                 for (const auto& bc : beatrices)
                 {
                     if (!bc.active) continue;
-                    // pos.y is bottom edge, matching nuke convention — drawn above beam surface
                     float bobY = bc.pos.y - bcH + sinf((float)GetTime() * 2.5f) * 4.0f;
                     DrawTexturePro(*bcTex,
                         { 0, 0, (float)bcTex->width, (float)bcTex->height },
@@ -1689,7 +1731,7 @@ int main(void)
                 if (showPlayer)
                 {
                     float scale = 3.8f * 0.85f * 1.05f;
-                    // Feet-aligned draw: offset up so bottom of sprite matches regardless of sprite height
+                    // Feet-aligned: shift Beatrice sprites up so feet stay at same Y
                     float baseH = imgMarioIdle.height * scale;
                     float thisH = image->height * scale;
                     float drawY = player.y + 10.0f + (baseH - thisH);
@@ -1827,15 +1869,11 @@ int main(void)
         }
         else if (currentScreen == GAME_OVER)
         {
-            
-
             if (lives > 0)
             {
                 DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
                 DrawText("25", 200, 800, 30, WHITE);
                 DrawText("50", 200, 700, 30, WHITE);
-
-
             }
             else
             {
@@ -1843,10 +1881,7 @@ int main(void)
                 const char* scoreTxt = TextFormat("SCORE: %d", score);
                 int sw = MeasureText(scoreTxt, 32);
                 DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
-
             }
-
-
         }
 
         EndDrawing();
@@ -1896,6 +1931,9 @@ int main(void)
     UnloadTexture(Dk_Mario_Walk1_Beatrice); UnloadTexture(Dk_Mario_Walk2_Beatrice);
     UnloadTexture(Beatrice_Idle1);          UnloadTexture(Beatrice_Idle2);
     UnloadTexture(texBeaBullet);
+
+    UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
+    UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
