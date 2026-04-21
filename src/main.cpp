@@ -858,6 +858,7 @@ int main(void)
         }
         else if (currentScreen == HOW_HIGH)
         {
+            
             DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
             DrawText("25", 200, 800, 30, WHITE);
 
@@ -1483,7 +1484,8 @@ int main(void)
         else if (currentScreen == GAME_OVER)
         {
             splashTimer += GetFrameTime();
-            if (splashTimer >= splashDuration) { splashTimer = 0.0f; FullReset(); currentScreen = MENU; }
+          
+            if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER)) { splashTimer = 0.0f; FullReset(); currentScreen = MENU; }
         }
 
         rainScrollY += rainSpeed * GetFrameTime();
@@ -1539,7 +1541,7 @@ int main(void)
         else if (currentScreen == HOW_HIGH)
         {
             splashTimer += GetFrameTime();
-
+            if (IsKeyPressed(KEY_ENTER)) currentScreen = GAMEPLAY;
             if (splashTimer >= splashDuration)
             {
                 currentScreen = GAMEPLAY;
