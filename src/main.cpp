@@ -5,7 +5,6 @@
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, GAMEPLAY, GAME_OVER, HOW_HIGH };
 
-// ── Death timing constants ────────────────────────────────────────────────────
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
 static constexpr float DEATH_TOTAL_FALL = DEATH_FLASH_DURATION + DEATH_FADE_DURATION;
@@ -13,11 +12,9 @@ static constexpr float DEATH_BLACK_HOLD = 0.50f;
 static constexpr float DEATH_FALL_GRAVITY = 0.50f;
 static constexpr float DEATH_FALL_INITIAL_VY = -5.0f;
 
-// ── Shake constants ───────────────────────────────────────────────────────────
 static constexpr float DEATH_SHAKE_DURATION = 0.80f;
 static constexpr float DEATH_SHAKE_AMOUNT = 9.0f;
 
-// ── Regulus throw pacing ──────────────────────────────────────────────────────
 static constexpr float ACTIVE_SPAWN_INTERVAL = 1.2f;
 
 struct PathNode
@@ -51,6 +48,14 @@ struct NukeItem
 struct BeatriceItem
 {
     Vector2 pos;
+    bool    active = false;
+};
+
+struct BeaBullet
+{
+    Vector2 pos = { 0, 0 };
+    Vector2 vel = { 0, 0 };
+    float   lifetime = 0.0f;
     bool    active = false;
 };
 
@@ -406,7 +411,6 @@ int main(void)
         { 310.0f, 325.0f }, { 560.0f, 325.0f },
     };
 
-    // ── Beatrice items ────────────────────────────────────────────────────────
     vector<BeatriceItem> beatrices;
     {
         int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
@@ -416,6 +420,16 @@ int main(void)
     float spawnTimer = 0.0f;
     float spawnInterval = 10.0f;
     float minuteTimer = 0.0f;
+
+    // ── Beatrice ability ──────────────────────────────────────────────────────
+    const float BEATRICE_DURATION = 7.0f;
+    const float BEA_BULLET_SHOOT_INTERVAL = 0.6f;
+    const float BEA_BULLET_SPEED = 500.0f;
+    const float BEA_BULLET_LIFETIME = 5.0f;
+    float       beatriceAbilityTimer = 0.0f;
+    float       beaBulletShootTimer = 0.0f;
+    vector<BeaBullet> beaBullets(20);
+    for (auto& bb : beaBullets) bb.active = false;
 
     // ── Beam positions ────────────────────────────────────────────────────────
     vector<Vector2> beamPositions = {
@@ -463,6 +477,8 @@ int main(void)
     Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
     Sound deathSound = LoadSound("Assets/Nuevo audio/po.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/yamete kudasay.mp3");
+    Sound nukeSound = LoadSound("Assets/Nuevo audio/nuke.mp3");       // reemplazar ruta
+    Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/jump_brl.mp3");   // reemplazar ruta
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
@@ -559,9 +575,7 @@ int main(void)
     Texture2D Dk_Mario_Walk2_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk2_Beatrice.png");
     Texture2D Beatrice_Idle1 = LoadTexture("Assets/Textures/Characters/Beatrice/Beatrice_Idle1.png");
     Texture2D Beatrice_Idle2 = LoadTexture("Assets/Textures/Characters/Beatrice/Beatrice_Idle2.png");
-    
-
-    Texture2D BeaBullet = LoadTexture("Assets/Textures/Characters/Beatrice/BeaBullet.png");
+    Texture2D texBeaBullet = LoadTexture("Assets/Textures/Characters/Beatrice/BeaBullet.png");
 
     Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,  &RegulusIdle2,  &RegulusIdle3 };
     Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,  &RegulusGrab2,  &RegulusGrab3 };
@@ -678,10 +692,13 @@ int main(void)
 
     auto ClearRoundEntities = [&]()
         {
-            for (auto& b : barrels) b.active = false;
+            for (auto& b : barrels)    b.active = false;
+            for (auto& bb : beaBullets) bb.active = false;
             spawnTimer = 0.0f;
             playerHasNuke = false;
             playerHasBeatrice = false;
+            beatriceAbilityTimer = 0.0f;
+            beaBulletShootTimer = 0.0f;
         };
 
     auto ResetPlayerPos = [&]()
@@ -734,6 +751,9 @@ int main(void)
             deathShakeOffset = { 0, 0 };
             playerHasNuke = false;
             playerHasBeatrice = false;
+            beatriceAbilityTimer = 0.0f;
+            beaBulletShootTimer = 0.0f;
+            for (auto& bb : beaBullets) bb.active = false;
             invincible = true;
             invincibleTimer = invincibleDuration;
             PauseMusicStream(music);
@@ -767,6 +787,9 @@ int main(void)
             spawnInterval = 10.0f;
             minuteTimer = 0.0f;
             playerHasBeatrice = false;
+            beatriceAbilityTimer = 0.0f;
+            beaBulletShootTimer = 0.0f;
+            for (auto& bb : beaBullets) bb.active = false;
             beatriceItemAnimTimer = 0.0f;
             beatriceItemAnimFrame = 0;
 
@@ -958,11 +981,80 @@ int main(void)
                 for (auto& bc : beatrices)
                 {
                     if (!bc.active) continue;
-                    Rectangle bcRect = { bc.pos.x, bc.pos.y, bcW, bcH };
+                    Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
                     if (CheckCollisionRecs(player, bcRect))
                     {
                         bc.active = false;
                         playerHasBeatrice = true;
+                        beatriceAbilityTimer = BEATRICE_DURATION;
+                        beaBulletShootTimer = 0.0f;
+                        break;
+                    }
+                }
+            }
+
+            // ── Beatrice ability timer & bullets ──────────────────────────────
+            if (playerHasBeatrice && !isDying)
+            {
+                beatriceAbilityTimer -= dt;
+                if (beatriceAbilityTimer <= 0.0f)
+                {
+                    playerHasBeatrice = false;
+                    beatriceAbilityTimer = 0.0f;
+                    beaBulletShootTimer = 0.0f;
+                    for (auto& bb : beaBullets) bb.active = false;
+                }
+                else if (!onLadder)
+                {
+                    beaBulletShootTimer += dt;
+                    if (beaBulletShootTimer >= BEA_BULLET_SHOOT_INTERVAL)
+                    {
+                        beaBulletShootTimer = 0.0f;
+                        Vector2 mousePos = GetMousePosition();
+                        float   startX = player.x + player.width * 0.5f;
+                        float   startY = player.y + player.height * 0.30f;
+                        Vector2 dir = Vector2Normalize(Vector2Subtract(mousePos, { startX, startY }));
+                        for (auto& bb : beaBullets)
+                        {
+                            if (!bb.active)
+                            {
+                                bb.pos = { startX, startY };
+                                bb.vel = { dir.x * BEA_BULLET_SPEED, dir.y * BEA_BULLET_SPEED };
+                                bb.lifetime = 0.0f;
+                                bb.active = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Bullet update & barrel collision ──────────────────────────────
+            for (auto& bb : beaBullets)
+            {
+                if (!bb.active) continue;
+                bb.pos.x += bb.vel.x * dt;
+                bb.pos.y += bb.vel.y * dt;
+                bb.lifetime += dt;
+                if (bb.lifetime >= BEA_BULLET_LIFETIME
+                    || bb.pos.x < -60 || bb.pos.x > screenWidth + 60
+                    || bb.pos.y < -60 || bb.pos.y > screenHeight + 60)
+                {
+                    bb.active = false; continue;
+                }
+                float     bbScale = 2.0f;
+                float     bbHalfW = texBeaBullet.width * bbScale * 0.5f;
+                float     bbHalfH = texBeaBullet.height * bbScale * 0.5f;
+                Rectangle bbRect = { bb.pos.x - bbHalfW, bb.pos.y - bbHalfH,
+                                      bbHalfW * 2.0f, bbHalfH * 2.0f };
+                for (auto& b : barrels)
+                {
+                    if (!b.active) continue;
+                    if (CheckCollisionRecs(bbRect, b.hitbox))
+                    {
+                        b.active = false;
+                        bb.active = false;
+                        score += 100;
                         break;
                     }
                 }
@@ -975,6 +1067,7 @@ int main(void)
             // ── Nuke detonation ───────────────────────────────────────────────
             if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
             {
+                PlaySound(nukeSound);
                 float scale = 3.8f * 0.85f * 1.05f;
                 float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
                 float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
@@ -1128,7 +1221,7 @@ int main(void)
                         b.hitbox.y - zoneH,
                         zoneW, zoneH
                     };
-                    if (CheckCollisionRecs(player, jumpZone)) { score += 100; b.jumpScored = true; }
+                    if (CheckCollisionRecs(player, jumpZone)) { score += 100; b.jumpScored = true; PlaySound(jumpBrlSound); }
                 }
             }
 
@@ -1285,7 +1378,7 @@ int main(void)
                     if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
                     {
                         bool entered = false;
-                        if (!playerHasNuke)
+                        if (!playerHasNuke && !playerHasBeatrice)
                         {
                             for (int i = 0; i < (int)ladders.size(); i++)
                             {
@@ -1306,7 +1399,7 @@ int main(void)
                                     onLadder = true;
                                     currentLadder = i;
                                     ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                                    ladderClimbFrame = 0;     ladderClimbTimer = 0;
+                                    ladderClimbFrame = 0;      ladderClimbTimer = 0;
                                     player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
                                     velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
                                     entered = true; break;
@@ -1335,7 +1428,7 @@ int main(void)
                     // ── Player animation selection ────────────────────────────
                     if (isJumping)
                     {
-                        if (playerHasBeatrice) image = &Dk_Mario_Jump_Beatrice;
+                        if (playerHasBeatrice)      image = &Dk_Mario_Jump_Beatrice;
                         else if (playerHasNuke)     image = &imgMarioJumpNuke;
                         else                        image = &imgMarioJump;
                     }
@@ -1346,13 +1439,13 @@ int main(void)
                             walkFrame = (walkFrame + 1) % 2;
                             animationTimer = fmod(animationTimer, animationSpeed);
                         }
-                        if (playerHasBeatrice) image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
+                        if (playerHasBeatrice)      image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
                         else if (playerHasNuke)     image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
                         else                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
                     }
                     else
                     {
-                        if (playerHasBeatrice) image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
+                        if (playerHasBeatrice)      image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
                         else if (playerHasNuke)     image = &imgMarioIdleNuke;
                         else                        image = &imgMarioIdle;
                         walkFrame = 0;
@@ -1488,7 +1581,8 @@ int main(void)
                 for (const auto& bc : beatrices)
                 {
                     if (!bc.active) continue;
-                    float bobY = bc.pos.y + sinf((float)GetTime() * 2.5f) * 4.0f;
+                    // pos.y is bottom edge, matching nuke convention — drawn above beam surface
+                    float bobY = bc.pos.y - bcH + sinf((float)GetTime() * 2.5f) * 4.0f;
                     DrawTexturePro(*bcTex,
                         { 0, 0, (float)bcTex->width, (float)bcTex->height },
                         { bc.pos.x, bobY, bcW, bcH },
@@ -1560,9 +1654,13 @@ int main(void)
                 bool showPlayer = isDying || !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
                 if (showPlayer)
                 {
-                    float     scale = 3.8f * 0.85f * 1.05f;
+                    float scale = 3.8f * 0.85f * 1.05f;
+                    // Feet-aligned draw: offset up so bottom of sprite matches regardless of sprite height
+                    float baseH = imgMarioIdle.height * scale;
+                    float thisH = image->height * scale;
+                    float drawY = player.y + 10.0f + (baseH - thisH);
                     Rectangle src = { 0, 0, (float)image->width, (float)image->height };
-                    Rectangle dest = { player.x, player.y + 10.0f, image->width * scale, image->height * scale };
+                    Rectangle dest = { player.x, drawY, image->width * scale, thisH };
                     if (!facingRight && !onLadder) src.width *= -1;
                     DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
 
@@ -1574,7 +1672,7 @@ int main(void)
                         float nukeOffsetY = 5.0f;
                         bool  moving = (!onLadder && !isJumping && walkFrame != 0);
                         if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
-                        float nkY = player.y + 10.0f - nkH - 2.0f + nukeOffsetY;
+                        float nkY = drawY - nkH - 2.0f + nukeOffsetY;
                         Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
                         if (!facingRight) nukeSrc.width *= -1;
                         DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, {}, 0.f, WHITE);
@@ -1602,6 +1700,22 @@ int main(void)
                 DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
             }
 
+            // 6.5 Beatrice bullets
+            {
+                float bbScale = 2.0f;
+                float bbW = texBeaBullet.width * bbScale;
+                float bbH = texBeaBullet.height * bbScale;
+                for (const auto& bb : beaBullets)
+                {
+                    if (!bb.active) continue;
+                    float angle = atan2f(bb.vel.y, bb.vel.x) * RAD2DEG;
+                    DrawTexturePro(texBeaBullet,
+                        { 0, 0, (float)texBeaBullet.width, (float)texBeaBullet.height },
+                        { bb.pos.x - bbW * 0.5f, bb.pos.y - bbH * 0.5f, bbW, bbH },
+                        { bbW * 0.5f, bbH * 0.5f }, angle, WHITE);
+                }
+            }
+
             // 7. HUD
             for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
             {
@@ -1615,6 +1729,9 @@ int main(void)
                 int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
                 DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
             }
+            if (playerHasBeatrice)
+                DrawText(TextFormat("BEATRICE: %.1fs", beatriceAbilityTimer),
+                    10, screenHeight - 105, 18, MAGENTA);
             if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
 
             // 8. Nuke explosion
@@ -1689,6 +1806,8 @@ int main(void)
     UnloadMusicStream(music);
     UnloadSound(deathSound);
     UnloadSound(HitSound);
+    UnloadSound(nukeSound);
+    UnloadSound(jumpBrlSound);
 
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
@@ -1715,10 +1834,10 @@ int main(void)
     UnloadTexture(cave10); UnloadTexture(cave11);
     UnloadTexture(Rain);   UnloadTexture(Rain2);
 
-    UnloadTexture(RegulusGrab1);    UnloadTexture(RegulusGrab2);    UnloadTexture(RegulusGrab3);
-    UnloadTexture(RegulusIdle1);    UnloadTexture(RegulusIdle2);    UnloadTexture(RegulusIdle3);
-    UnloadTexture(RegulusStairs1);  UnloadTexture(RegulusStairs2);
-    UnloadTexture(Regulus_Stun1);   UnloadTexture(Regulus_Stun2);   UnloadTexture(Regulus_Stun3);
+    UnloadTexture(RegulusGrab1);     UnloadTexture(RegulusGrab2);     UnloadTexture(RegulusGrab3);
+    UnloadTexture(RegulusIdle1);     UnloadTexture(RegulusIdle2);     UnloadTexture(RegulusIdle3);
+    UnloadTexture(RegulusStairs1);   UnloadTexture(RegulusStairs2);
+    UnloadTexture(Regulus_Stun1);    UnloadTexture(Regulus_Stun2);    UnloadTexture(Regulus_Stun3);
     UnloadTexture(Regulus_StunEnd1); UnloadTexture(Regulus_StunEnd2); UnloadTexture(Regulus_StunEnd3);
     UnloadTexture(Regulus_StunEnd4); UnloadTexture(Regulus_StunEnd5);
 
@@ -1726,6 +1845,7 @@ int main(void)
     UnloadTexture(Dk_Mario_Jump_Beatrice);
     UnloadTexture(Dk_Mario_Walk1_Beatrice); UnloadTexture(Dk_Mario_Walk2_Beatrice);
     UnloadTexture(Beatrice_Idle1);          UnloadTexture(Beatrice_Idle2);
+    UnloadTexture(texBeaBullet);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
