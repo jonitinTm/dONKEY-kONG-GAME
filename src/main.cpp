@@ -483,10 +483,10 @@ int main(void)
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
     Music music = LoadMusicStream("Assets/Nuevo audio/mp3/PerfectLoopSubaru.mp3");
-    Sound deathSound = LoadSound("Assets/Nuevo audio/po.mp3");
-    Sound HitSound = LoadSound("Assets/Nuevo audio/yamete kudasay.mp3");
-    Sound nukeSound = LoadSound("Assets/Nuevo audio/nuke.mp3");
-    Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/jump_brl.mp3");
+    Sound deathSound = LoadSound("Assets/Nuevo audio/mp3/20. Dead.mp3");
+    Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
+    Sound nukeSound = LoadSound("Assets/Nuevo audio/mp3/Flash.mp3");
+    Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
