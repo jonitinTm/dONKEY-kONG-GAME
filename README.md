@@ -2,6 +2,7 @@
 https://github.com/jonitinTm/dONKEY-kONG-GAME
 
 ## Video link
+[Video Explanation](https://youtu.be/Eyc5Np19dak)
 
 ## Team Members
 Alejandro Perez
