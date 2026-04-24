@@ -2,6 +2,7 @@
 #include "raymath.h"
 #include "Collision.h"
 #include "Ladder.h"
+#include <ctime>
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU,CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH };
 
@@ -37,12 +38,20 @@ struct Barrel
     float     animTimer = 0.0f;
     int       animFrame = 0;
     bool      jumpScored = false;
+    bool      reachedEnd = false;   // true when barrel dies at terminal node
 };
 
 struct NukeItem
 {
     Vector2 pos;
     bool    active = true;
+};
+
+struct FlyingNuke
+{
+    Rectangle rect = { 0, 0, 0, 0 };
+    Vector2   vel = { 0, 0 };
+    bool      active = false;
 };
 
 struct BeatriceItem
@@ -145,7 +154,7 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
             if (node.isSplitNode) { b.isFalling = false; b.animFrame = 0; }
             b.currentNode = nextNode;
         }
-        else { b.active = false; }
+        else { b.active = false; b.reachedEnd = true; }
     }
     else
     {
@@ -170,7 +179,7 @@ void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     if (!e.active) return;
 
     // Parámetros por tipo
-    float jumpForce = (e.type == GRUNT) ? -9.0f : -8.5f;//cambio altura de salto
+    float jumpForce = (e.type == GRUNT) ? -5.5f : -5.0f;//cambio altura de salto//cambio altura de salto
     float speedToward = (e.type == GRUNT) ? 4.0f : 4.0f; //cambio tiempo en el aire
     float speedBack = (e.type == GRUNT) ? 1.8f : 2.5f;
     float idleTime = (e.type == GRUNT) ? 2.0f : 1.65f;
@@ -554,7 +563,7 @@ int main(void)
         { 200.0f, 316.0f }, { 500.0f, 316.0f },   // Floor 4  (plataforma y=360)
     };
 
-    vector<Enemy> enemies(4);
+    vector<Enemy> enemies(8);
     for (auto& en : enemies) en.active = false;
 
     // Lambda que inicializa/respawnea los dos enemigos en posiciones aleatorias
@@ -580,11 +589,12 @@ int main(void)
                     en.active = true;
                 };
 
-            initEnemy(enemies[0], enemySpawnPositions[idx1], GRUNT, 44.0f, 44.0f, 0.0f);
-            initEnemy(enemies[1], enemySpawnPositions[idx2], SPECTER, 38.0f, 50.0f, 0.4f);
+            // hitbox is 70% of original; DrawEnemy stays centred on it automatically
+            initEnemy(enemies[0], enemySpawnPositions[idx1], GRUNT, 30.8f, 30.8f, 0.0f);
+            initEnemy(enemies[1], enemySpawnPositions[idx2], SPECTER, 26.6f, 35.0f, 0.4f);
         };
 
-    SpawnRandomEnemies();
+    // enemies now spawn only when barrels reach the end node
 
 
 
@@ -624,8 +634,10 @@ int main(void)
         /* 27 */ { {148, 850},  { -1, -1 },  5, false },
     };
 
-    vector<Barrel> barrels(100);
+    vector<Barrel>    barrels(100);
     for (auto& b : barrels) b.active = false;
+
+    vector<FlyingNuke> flyingNukes;
 
     // ── Nuke spawn positions ──────────────────────────────────────────────────
     vector<Vector2> nukeSpawnNodes = {
@@ -648,10 +660,10 @@ int main(void)
 
     // ── Beatrice spawn positions ──────────────────────────────────────────────
     vector<Vector2> beatriceSpawnNodes = {
-        { 250.0f, 715.0f }, { 500.0f, 715.0f },
-        { 150.0f, 585.0f }, { 420.0f, 585.0f }, { 660.0f, 585.0f },
-        { 200.0f, 455.0f }, { 480.0f, 455.0f },
-        { 310.0f, 325.0f }, { 560.0f, 325.0f },
+        { 250.0f, 750.0f }, { 500.0f, 750.0f },
+        { 150.0f, 620.0f }, { 420.0f, 620.0f }, { 660.0f, 620.0f },
+        { 200.0f, 490.0f }, { 480.0f, 490.0f },
+        { 310.0f, 360.0f }, { 560.0f, 360.0f },
     };
 
     vector<BeatriceItem> beatrices;
@@ -713,6 +725,7 @@ int main(void)
 
     // ── Window / audio / textures ─────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
+    SetRandomSeed((unsigned int)time(NULL));   // truly random each run
     InitAudioDevice();
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
@@ -836,6 +849,8 @@ int main(void)
     Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
     Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
+    
+    Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
 
     // Array for easy indexed access
     Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = {
@@ -957,8 +972,11 @@ int main(void)
 
     auto ClearRoundEntities = [&]()
         {
-            for (auto& b : barrels)    b.active = false;
-            for (auto& bb : beaBullets) bb.active = false;
+            for (auto& b : barrels)     b.active = false;
+            for (auto& bb : beaBullets)  bb.active = false;
+            for (auto& en : enemies)     en.active = false;
+            for (auto& fn : flyingNukes) fn.active = false;
+            flyingNukes.clear();
             spawnTimer = 0.0f;
             playerHasNuke = false;
             playerHasBeatrice = false;
@@ -1037,7 +1055,6 @@ int main(void)
             invincible = true;
             invincibleTimer = invincibleDuration;
             ResumeMusicStream(music);
-            SpawnRandomEnemies();
         };
 
     auto FullReset = [&]()
@@ -1074,7 +1091,7 @@ int main(void)
             nukeShakeOffset = { 0, 0 };
             for (auto& nk : nukes) nk.active = false;
             nukes.clear();
-            SpawnRandomEnemies();
+            
             {
                 int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
                 nukes.push_back({ nukeSpawnNodes[idx], true });
@@ -1099,6 +1116,30 @@ int main(void)
             subaruTimer = 0.0f;
 
             ResumeMusicStream(music);
+        };
+
+    // ── Spawn one enemy at the cave end when a barrel completes its path ─────
+    auto SpawnEnemyAtEnd = [&](float barrelCX)
+        {
+            for (auto& en : enemies)
+            {
+                if (en.active) continue;
+                EnemyType t = (GetRandomValue(0, 1) == 0) ? GRUNT : SPECTER;
+                float     hw = (t == GRUNT) ? 30.8f : 26.6f;
+                float     hh = (t == GRUNT) ? 30.8f : 35.0f;
+                // feet flush with the bottom platform (y = 880)
+                en.hitbox = { barrelCX - hw * 0.5f, 880.0f - hh, hw, hh };
+                en.type = t;
+                en.state = ES_IDLE;
+                en.stateTimer = 0.0f;
+                en.velocity = { 0.0f, 0.0f };
+                en.grounded = true;
+                en.animFrame = 0;
+                en.animTimer = 0.0f;
+                en.facingRight = (GetRandomValue(0, 1) == 1);
+                en.active = true;
+                break;
+            }
         };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1167,9 +1208,37 @@ int main(void)
 
             if (!isDying)
             {
-                for (auto& b : barrels) UpdateBarrel(b, barrelPath, dt);
+                for (auto& b : barrels)
+                {
+                    bool wasActive = b.active;
+                    b.reachedEnd = false;
+                    UpdateBarrel(b, barrelPath, dt);
+                    if (wasActive && !b.active && b.reachedEnd)
+                        SpawnEnemyAtEnd(b.hitbox.x + b.hitbox.width * 0.5f);
+                }
                 spawnTimer += dt;
                 minuteTimer += dt;
+            }
+
+            // ── Flying nuke physics ───────────────────────────────────────────
+            for (auto& fn : flyingNukes)
+            {
+                if (!fn.active) continue;
+                float prevFnX = fn.rect.x, prevFnY = fn.rect.y;
+                fn.vel.y += gravity;          // same gravity constant as player
+                fn.rect.x += fn.vel.x;
+                fn.rect.y += fn.vel.y;
+                float fnVx = fn.vel.x, fnVy = fn.vel.y;
+                CollisionResult col = CollisionManager::ResolveAll(
+                    fn.rect, fnVx, fnVy, platforms, prevFnX, prevFnY);
+                fn.vel.x = fnVx;
+                fn.vel.y = fnVy;
+                if (col.grounded)
+                {
+                    nukes.push_back({ { fn.rect.x, fn.rect.y }, true });
+                    fn.active = false;
+                }
+                if (fn.rect.y > (float)screenHeight + 120.0f) fn.active = false;
             }
 
             // ── Beatrice item animation ───────────────────────────────────────
@@ -1369,9 +1438,21 @@ int main(void)
                 }
             }
 
-            // ── Drop nuke with G ──────────────────────────────────────────────
+            // ── Drop nuke with G — place it back in the world at player feet ──
+            // ── Throw nuke with G — arc in facing direction, lands on platforms ─
             if (playerHasNuke && IsKeyPressed(KEY_G))
+            {
                 playerHasNuke = false;
+                float     nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                float     nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                FlyingNuke fn;
+                fn.rect = { player.x + player.width * 0.5f - nkW * 0.5f,
+                              player.y + player.height * 0.5f - nkH * 0.5f,
+                              nkW, nkH };
+                fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };  // forward arc
+                fn.active = true;
+                flyingNukes.push_back(fn);
+            }
 
             // ── Nuke detonation ───────────────────────────────────────────────
             if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
@@ -1938,6 +2019,16 @@ int main(void)
                 }
             }
 
+            // 4.55 Flying nukes (in-air)
+            for (const auto& fn : flyingNukes)
+            {
+                if (!fn.active) continue;
+                DrawTexturePro(Nuke,
+                    { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
+                    { fn.rect.x, fn.rect.y, fn.rect.width, fn.rect.height },
+                    {}, 0.f, WHITE);
+            }
+
             // 4.6 Beatrice items
             {
                 float      bcScale = 2.0f;
@@ -2123,6 +2214,84 @@ int main(void)
                 float sW = Rain.width * scaleX, sH = Rain.height * scaleY;
                 DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height }, { 0, 0, sW, sH }, {}, 0.f, rainTint);
                 DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height }, { 0, -sH + rainScrollY, sW, sH }, {}, 0.f, rainTint);
+            }
+
+            // 9.5 "Press E" prompt — drawn after rain so it's above everything
+            if (!isDying)
+            {
+                const float ebScale = 1.75f;
+                const float ebW = EButton.width * ebScale;
+                const float ebH = EButton.height * ebScale;
+                bool        shown = false;
+
+                // ── Nuke item ─────────────────────────────────────────────
+                if (!playerHasNuke)
+                {
+                    const float nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                    const float nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                    for (const auto& nk : nukes)
+                    {
+                        if (!nk.active) continue;
+                        Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
+                        if (CheckCollisionRecs(player, nkRect))
+                        {
+                            // centre horizontally over item, sit just above it
+                            float cx = nk.pos.x + nkW * 0.5f - ebW * 0.5f;
+                            float cy = nk.pos.y - ebH + 5.0f;
+                            DrawTexturePro(EButton,
+                                { 0, 0, (float)EButton.width, (float)EButton.height },
+                                { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
+                            shown = true;
+                            break;
+                        }
+                    }
+                }
+
+                // ── Beatrice item ─────────────────────────────────────────
+                if (!shown && !playerHasBeatrice)
+                {
+                    const float bcScale2 = 2.0f;
+                    const float bcW = Beatrice_Idle1.width * bcScale2;
+                    const float bcH = Beatrice_Idle1.height * bcScale2;
+                    for (const auto& bc : beatrices)
+                    {
+                        if (!bc.active) continue;
+                        // beatrice rect is drawn feet-up, so top = pos.y - bcH
+                        Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
+                        if (CheckCollisionRecs(player, bcRect))
+                        {
+                            float cx = bc.pos.x + bcW * 0.5f - ebW * 0.5f;
+                            float cy = bc.pos.y - bcH - ebH - 1.0f;
+                            DrawTexturePro(EButton,
+                                { 0, 0, (float)EButton.width, (float)EButton.height },
+                                { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 9.6 Beatrice ability bar (above rain, bottom-left)
+            if (playerHasBeatrice)
+            {
+                const float barMaxW = 180.0f;
+                const float barH = 14.0f;
+                const float barX = 20.0f;
+                const float barY = (float)screenHeight - 58.0f;
+                float       frac = Clamp(beatriceAbilityTimer / BEATRICE_DURATION, 0.0f, 1.0f);
+
+                // outer border
+                DrawRectangle((int)barX - 2, (int)barY - 2,
+                    (int)barMaxW + 4, (int)barH + 4, BLACK);
+                // dark background track
+                DrawRectangle((int)barX, (int)barY,
+                    (int)barMaxW, (int)barH, { 60, 0, 60, 220 });
+                // fill — colour shifts red when low
+                Color fillCol = (frac > 0.3f) ? MAGENTA : RED;
+                DrawRectangle((int)barX, (int)barY,
+                    (int)(barMaxW * frac), (int)barH, fillCol);
+                // label above bar
+                DrawText("BEATRICE", (int)barX, (int)barY - 18, 14, MAGENTA);
             }
 
             // 10. Nuke flash
