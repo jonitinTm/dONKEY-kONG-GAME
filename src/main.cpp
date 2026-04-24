@@ -1352,6 +1352,21 @@ int main(void)
                         break;
                     }
                 }
+                // Colisión bala Beatrice con enemigos
+                if (bb.active) // solo si la bala sigue viva tras golpear barriles
+                {
+                    for (auto& en : enemies)
+                    {
+                        if (!en.active) continue;
+                        if (CheckCollisionRecs(bbRect, en.hitbox))
+                        {
+                            en.active = false;   // matar enemigo
+                            bb.active = false;   // destruir bala
+                            score += 300;
+                            break;
+                        }
+                    }
+                }
             }
 
             // ── Drop nuke with G ──────────────────────────────────────────────
@@ -1377,6 +1392,12 @@ int main(void)
                 nukeExtraDelay = 3.0f;
 
                 for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
+                // Nuke mata enemigos 
+                int enemiesKilled = 0;
+                for (auto& en : enemies)
+                {
+                    if (en.active) { en.active = false; score += 300; enemiesKilled++; }
+                }
                 spawnTimer = 0.0f;
 
                 regulusIsStunned = true;
