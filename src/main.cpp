@@ -1871,6 +1871,34 @@ int main(void)
         {
             if (lives > 0)
             {
+                splashTimer += dt;
+
+                // Advance Subaru animation at 5 fps
+                subaruTimer += dt;
+                if (subaruTimer >= 1.0f / SUBARU_ANIM_FPS)
+                {
+                    subaruTimer -= 1.0f / SUBARU_ANIM_FPS;
+                    subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
+                }
+
+                if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
+                {
+                    splashTimer = 0.0f;
+                    currentScreen = GAMEPLAY;
+                }
+                // 1. Background stretched to fill screen
+                DrawTexturePro(Subaru_Background,
+                    { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
+                    { 0, 0, (float)screenWidth, (float)screenHeight },
+                    { 0, 0 }, 0.f, WHITE);
+
+                // 2. Current Subaru animation frame, also full-screen
+                Texture2D* subTex = subaruFrames[subaruFrame];
+                DrawTexturePro(*subTex,
+                    { 0, 0, (float)subTex->width, (float)subTex->height },
+                    { 0, 0, (float)screenWidth, (float)screenHeight },
+                    { 0, 0 }, 0.f, WHITE);
+
                 DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
                 DrawText("25", 200, 800, 30, WHITE);
                 DrawText("50", 200, 700, 30, WHITE);
