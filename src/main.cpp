@@ -59,6 +59,27 @@ struct BeaBullet
     bool    active = false;
 };
 
+
+//Struct enemies
+// ── Enemy types ───────────────────────────────────────────────────────────────
+enum EnemyType { GRUNT = 0, SPECTER };
+enum EnemyState { ES_IDLE, ES_JUMP_TOWARD, ES_LAND_PAUSE, ES_JUMP_BACK };
+
+struct Enemy {
+    Rectangle  hitbox = { 0, 0, 44, 44 };
+    Vector2    velocity = { 0.0f, 0.0f };
+    EnemyType  type = GRUNT;
+    EnemyState state = ES_IDLE;
+    float      stateTimer = 0.0f;
+    bool       active = false;
+    bool       grounded = false;
+    bool       facingRight = true;
+    int        animFrame = 0;
+    float      animTimer = 0.0f;
+};
+
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f)
@@ -139,6 +160,168 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
     b.animTimer += delta;
     if (b.animTimer >= frameTime) { b.animFrame = (b.animFrame + 1) % frameCount; b.animTimer = 0.0f; }
 }
+
+//Funcion para updatear los enemigos
+
+
+void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
+    vector<Platform>& platforms, float delta)
+{
+    if (!e.active) return;
+
+    // Parámetros por tipo
+    float jumpForce = (e.type == GRUNT) ? -9.0f : -8.5f;//cambio altura de salto
+    float speedToward = (e.type == GRUNT) ? 4.0f : 4.0f; //cambio tiempo en el aire
+    float speedBack = (e.type == GRUNT) ? 1.8f : 2.5f;
+    float idleTime = (e.type == GRUNT) ? 2.0f : 1.65f;
+    float pauseTime = (e.type == GRUNT) ? 1.45f : 0.28f;
+    float animSpeed = (e.type == GRUNT) ? 0.22f : 0.14f;
+
+    float playerCX = playerRect.x + playerRect.width * 0.5f;
+    float enemyCX = e.hitbox.x + e.hitbox.width * 0.5f;
+    bool  playerRight = (playerCX > enemyCX);
+
+    // ── Máquina de estados ────────────────────────────────────────────────
+    e.stateTimer += delta;
+
+    switch (e.state)
+    {
+    case ES_IDLE:
+        e.velocity.x = 0.0f;
+        if (e.stateTimer >= idleTime)
+        {
+            e.state = ES_JUMP_TOWARD;
+            e.stateTimer = 0.0f;
+            e.velocity.y = jumpForce;
+            e.velocity.x = playerRight ? speedToward : -speedToward;
+            e.facingRight = playerRight;
+            e.grounded = false;
+        }
+        break;
+
+    case ES_JUMP_TOWARD:
+        if (e.grounded && e.stateTimer > 0.12f)
+        {
+            e.state = ES_LAND_PAUSE;
+            e.stateTimer = 0.0f;
+            e.velocity.x = 0.0f;
+        }
+        break;
+
+    case ES_LAND_PAUSE:
+        e.velocity.x = 0.0f;
+        if (e.stateTimer >= pauseTime)
+        {
+            e.state = ES_JUMP_BACK;
+            e.stateTimer = 0.0f;
+            e.velocity.y = jumpForce * 0.55f;         // salto pequeño atrás
+            e.velocity.x = playerRight ? -speedBack : speedBack;
+            e.facingRight = !playerRight;
+            e.grounded = false;
+        }
+        break;
+
+    case ES_JUMP_BACK:
+        if (e.grounded && e.stateTimer > 0.12f)
+        {
+            e.state = ES_IDLE;
+            e.stateTimer = 0.0f;
+            e.velocity.x = 0.0f;
+        }
+        break;
+    }
+
+    // ── Física ───────────────────────────────────────────────────────────
+    float prevX = e.hitbox.x, prevY = e.hitbox.y;
+    if (!e.grounded) e.velocity.y += 0.4f;
+    e.hitbox.x += e.velocity.x;
+    e.hitbox.y += e.velocity.y;
+
+    float vx = e.velocity.x, vy = e.velocity.y;
+    CollisionResult col = CollisionManager::ResolveAll(
+        e.hitbox, vx, vy, platforms, prevX, prevY);
+    e.velocity.x = vx;
+    e.velocity.y = vy;
+    e.grounded = col.grounded;
+    if (col.grounded) e.velocity.y = 0.0f;
+
+    if (e.hitbox.y > 1050.0f) e.active = false;   // cayó fuera de pantalla
+
+    // ── Animación ─────────────────────────────────────────────────────────
+    e.animTimer += delta;
+    if (e.animTimer >= animSpeed)
+    {
+        e.animTimer = 0.0f;
+        e.animFrame = (e.animFrame + 1) % 2;
+    }
+}
+
+
+
+
+
+//Dibujarlo en la pantallla
+
+void DrawEnemy(const Enemy& e,
+    Texture2D& walkGrunt,   // textura andar  del conejo negro (GRUNT)
+    Texture2D& jumpGrunt,   // textura saltar del conejo negro (GRUNT)
+    Texture2D& walkSpecter, // textura andar  del conejo blanco (SPECTER)
+    Texture2D& jumpSpecter) // textura saltar del conejo blanco (SPECTER)
+{
+    // Si el enemigo no está activo no dibujamos nada
+    if (!e.active) return;
+
+    // ── Elegir qué textura usar ───────────────────────────────────────────
+    Texture2D* tex = nullptr;
+
+    if (e.type == GRUNT)
+    {
+        // Conejo negro: si está en el aire usa la de salto, si no la de andar
+        if (!e.grounded)
+            tex = &jumpGrunt;
+        else
+            tex = &walkGrunt;
+    }
+    else // SPECTER
+    {
+        // Conejo blanco: igual pero con sus propias texturas
+        if (!e.grounded)
+            tex = &jumpSpecter;
+        else
+            tex = &walkSpecter;
+    }
+
+    // ── Tamaño en pantalla ────────────────────────────────────────────────
+    float scale = 2.5f;                    // cuánto agrandar la textura (3x su tamaño original)
+    float drawW = tex->width * scale;     // ancho  final en pantalla
+    float drawH = tex->height * scale;     // altura final en pantalla
+
+    // ── Posición: centrado horizontalmente, pies tocando el suelo del hitbox
+    float drawX = e.hitbox.x + e.hitbox.width * 0.5f - drawW * 0.5f;
+    float drawY = e.hitbox.y + e.hitbox.height - drawH;
+
+    // ── Voltear la imagen si mira a la izquierda ──────────────────────────
+    // src es el "recorte" de la textura original que vamos a dibujar
+    Rectangle src = { 0, 0, (float)tex->width, (float)tex->height };
+
+    if (!e.facingRight)
+        src.width *= -1; // ancho negativo = raylib espeja la imagen horizontalmente
+
+    // ── Dibujar ───────────────────────────────────────────────────────────
+    // DrawTexturePro(textura, recorte_origen, rectangulo_destino, origen_rotacion, angulo, color)
+    DrawTexturePro(*tex, src, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
+}
+
+
+
+
+
+
+
+
+
+
+
 
 void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& barrels, int screenHeight)
 {
@@ -356,6 +539,56 @@ int main(void)
         Ladder::Make(160, 632,  40, 101),
         Ladder::Make(670, 760,  40, 105),
     };
+
+
+
+    //enemies
+
+    // ── Enemies ───────────────────────────────────────────────────────────────
+    vector<Vector2> enemySpawnPositions = {
+        { 180.0f, 706.0f }, { 620.0f, 706.0f },   // Floor 1  (plataforma y=750)
+        { 200.0f, 576.0f }, { 550.0f, 576.0f },   // Floor 2  (plataforma y=620)
+        { 160.0f, 446.0f }, { 520.0f, 446.0f },   // Floor 3  (plataforma y=490)
+        { 200.0f, 316.0f }, { 500.0f, 316.0f },   // Floor 4  (plataforma y=360)
+    };
+
+    vector<Enemy> enemies(4);
+    for (auto& en : enemies) en.active = false;
+
+    // Lambda que inicializa/respawnea los dos enemigos en posiciones aleatorias
+    auto SpawnRandomEnemies = [&]()
+        {
+            for (auto& en : enemies) en.active = false;
+
+            int idx1 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1);
+            int idx2;
+            do { idx2 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1); } while (idx2 == idx1);
+
+            auto initEnemy = [](Enemy& en, Vector2 pos, EnemyType t, float w, float h, float timerOffset)
+                {
+                    en.hitbox = { pos.x, pos.y, w, h };
+                    en.type = t;
+                    en.state = ES_IDLE;
+                    en.stateTimer = timerOffset;   // desfase para que no se sincronicen
+                    en.velocity = { 0.0f, 0.0f };
+                    en.grounded = true;
+                    en.animFrame = 0;
+                    en.animTimer = 0.0f;
+                    en.facingRight = true;
+                    en.active = true;
+                };
+
+            initEnemy(enemies[0], enemySpawnPositions[idx1], GRUNT, 44.0f, 44.0f, 0.0f);
+            initEnemy(enemies[1], enemySpawnPositions[idx2], SPECTER, 38.0f, 50.0f, 0.4f);
+        };
+
+    SpawnRandomEnemies();
+
+
+
+
+
+
 
     // ── Barrel path ───────────────────────────────────────────────────────────
     vector<PathNode> barrelPath = {
@@ -593,6 +826,15 @@ int main(void)
     Texture2D Subaru5 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru5.png");
     Texture2D Subaru_Background = LoadTexture("Assets/Textures/Characters/Subaru/Subaru_Background.png");
 
+    // ──Enemies─────────────────────────────────────────────
+    //black rabbit
+    Texture2D rabbitWalkBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Blue1.png");
+    Texture2D rabbitJumpBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump_Blue1.png");
+    //White rabbit---------
+    Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
+    Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
+
+
     // Array for easy indexed access
     Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = {
         &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5
@@ -782,6 +1024,8 @@ int main(void)
             RespawnItems();
         };
 
+    //resets
+
     auto ResetRound = [&]()
         {
             ClearDeathState();
@@ -791,6 +1035,7 @@ int main(void)
             invincible = true;
             invincibleTimer = invincibleDuration;
             ResumeMusicStream(music);
+            SpawnRandomEnemies();
         };
 
     auto FullReset = [&]()
@@ -827,6 +1072,7 @@ int main(void)
             nukeShakeOffset = { 0, 0 };
             for (auto& nk : nukes) nk.active = false;
             nukes.clear();
+            SpawnRandomEnemies();
             {
                 int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
                 nukes.push_back({ nukeSpawnNodes[idx], true });
@@ -1250,6 +1496,18 @@ int main(void)
                     if (fromBelow) continue;
                     TriggerDeath();
                     break;
+                }
+            }
+
+            //Rabbit/ player collision
+            // ── Actualizar enemigos y colisión con jugador ────────────────────────────
+            if (!isDying)
+            {
+                for (auto& en : enemies)
+                {
+                    UpdateEnemy(en, player, platforms, dt);
+                    if (en.active && !invincible && CheckCollisionRecs(player, en.hitbox))
+                        TriggerDeath();
                 }
             }
 
@@ -1775,6 +2033,11 @@ int main(void)
                 float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f - 2.625f;
                 DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
             }
+
+            // 6.1 Enemies
+            for (const auto& en : enemies)
+                DrawEnemy(en, rabbitWalkBlack, rabbitJumpBlack, rabbitWalkWhite, rabbitJumpWhite);
+
 
             // 6.5 Beatrice bullets
             {
