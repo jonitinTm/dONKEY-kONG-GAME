@@ -3,7 +3,7 @@
 #include "Collision.h"
 #include "Ladder.h"
 
-enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, GAMEPLAY, GAME_OVER, HOW_HIGH };
+enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU,CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH };
 
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
@@ -385,6 +385,8 @@ int main(void)
     int       selectedOption = 0;
     Rectangle btnPlay = { 340, 450, 200, 40 };
     Rectangle btnExit = { 340, 500, 200, 40 };
+    Rectangle btnCtrl = { 340, 550, 200, 40 };
+
     bool      debugPath = false;
 
     int score = 0;
@@ -1125,6 +1127,7 @@ int main(void)
             Vector2 mouse = GetMousePosition();
             if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
             if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
+            if (CheckCollisionPointRec(mouse, btnCtrl)) { selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = CONTROLS; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
             if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
         }
         // ── HOW HIGH screen (update) ──────────────────────────────────────────
@@ -1806,24 +1809,31 @@ int main(void)
             const char* title = "DONKEY KONG";
             const char* playText = "1 PLAYER GAME";
             const char* exitText = "EXIT";
+            const char* controlText = "CONTROLS";
             const char* subtitle = "© 1981 NINTENDO";
 
             int titleW = MeasureText(title, titleFont), playW = MeasureText(playText, menuFont);
             int exitW = MeasureText(exitText, menuFont), subW = MeasureText(subtitle, smallFont);
+            int controlW = MeasureText(controlText, menuFont);
             int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
             int startY = (screenHeight - totalH) / 2;
             int titleX = (screenWidth - titleW) / 2, titleY = startY;
             int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
             int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
-            int subX = (screenWidth - subW) / 2, subY = exitY + menuFont + spacing;
+            int controlX = (screenWidth - controlW) / 2, controlY = exitY + menuFont + spacing;
+            int subX = (screenWidth - subW) / 2, subY = controlY + menuFont + spacing;
 
             if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
             else if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
+            else if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
+
 
             DrawText(title, titleX, titleY, titleFont, dkRed);
             DrawText(playText, playX, playY, menuFont, dkWhite);
             DrawText(exitText, exitX, exitY, menuFont, dkWhite);
             DrawText(subtitle, subX, subY, smallFont, dkOrange);
+            DrawText(controlText, controlX, controlY, menuFont, dkWhite);
+
         }
         // ── HOW HIGH screen (draw) ────────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
