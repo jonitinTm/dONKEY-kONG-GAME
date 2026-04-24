@@ -1005,7 +1005,7 @@ int main(void)
             }
 
             // ── Nuke pickup ───────────────────────────────────────────────────
-            if (!isDying && !playerHasNuke)
+            if (!isDying && !playerHasNuke && IsKeyPressed(KEY_E))
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE;
                 float nkH = NUKE_NATIVE_H * NUKE_SCALE;
@@ -1018,7 +1018,7 @@ int main(void)
             }
 
             // ── Beatrice pickup ───────────────────────────────────────────────
-            if (!isDying && !playerHasBeatrice)
+            if (!isDying && !playerHasBeatrice && IsKeyPressed(KEY_E))
             {
                 float bcScale = 2.0f;
                 float bcW = Beatrice_Idle1.width * bcScale;
