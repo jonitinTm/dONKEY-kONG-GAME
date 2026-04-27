@@ -1190,6 +1190,22 @@ int main(void)
                 currentScreen = GAMEPLAY;
             }
         }
+        else if (currentScreen == CONTROLS)
+        {
+            Rectangle btnsalida = { 750, 900, 200, 40 };
+            Vector2 mouse = GetMousePosition();
+            if (CheckCollisionPointRec(mouse, btnsalida)) 
+            { 
+                DrawText(">", 725, 900, 40, ORANGE);
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) 
+                {
+                    currentScreen = MENU;
+                    
+                }
+            }
+
+        }
+
         // ── GAMEPLAY ──────────────────────────────────────────────────────────
         else if (currentScreen == GAMEPLAY)
         {
@@ -1962,6 +1978,22 @@ int main(void)
             int peW = MeasureText(pressEnter, 28);
             DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
         }
+        else if (currentScreen == CONTROLS)
+        {
+
+            DrawText("- Move with", 10, 250, 30, WHITE);
+            DrawText("W, A, S, D", 195, 250, 30, ORANGE);
+            DrawText("E", 285, 300, 30, ORANGE);
+            DrawText("- Grab Items with", 10, 300, 30, WHITE);
+            DrawText("- Use items with", 10, 350, 30, WHITE);
+            DrawText("F", 260, 350, 30, ORANGE);
+            DrawText("- Climb stairs with ", 10, 400, 30, WHITE);
+            DrawText("W", 295, 400, 30, ORANGE);
+            DrawText("while you are close to them", 330, 400, 30, WHITE);
+
+            DrawText("Return", 750, 900, 30, WHITE);
+        }
+
         else if (currentScreen == GAMEPLAY)
         {
             Camera2D cam = { 0 };
