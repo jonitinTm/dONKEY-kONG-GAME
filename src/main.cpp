@@ -2,9 +2,11 @@
 #include "raymath.h"
 #include "Collision.h"
 #include "Ladder.h"
+#include "LevelData.h"
+#include "LevelEditor.h"
 #include <ctime>
 
-enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU,CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH };
+enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR };
 
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
@@ -395,6 +397,9 @@ int main(void)
     Rectangle btnPlay = { 340, 450, 200, 40 };
     Rectangle btnExit = { 340, 500, 200, 40 };
     Rectangle btnCtrl = { 340, 550, 200, 40 };
+    Rectangle btnEditor = { 340, 600, 200, 40 };
+
+    LevelEditor editor;
 
     bool      debugPath = false;
 
@@ -725,6 +730,7 @@ int main(void)
 
     // ── Window / audio / textures ─────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
+    editor.Init(screenWidth, screenHeight);
     SetRandomSeed((unsigned int)time(NULL));   // truly random each run
     InitAudioDevice();
 
@@ -1169,6 +1175,7 @@ int main(void)
             if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
             if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
             if (CheckCollisionPointRec(mouse, btnCtrl)) { selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = CONTROLS; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
+            if (CheckCollisionPointRec(mouse, btnEditor)) { selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; } }
             if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
         }
         // ── HOW HIGH screen (update) ──────────────────────────────────────────
@@ -1194,16 +1201,20 @@ int main(void)
         {
             Rectangle btnsalida = { 750, 900, 200, 40 };
             Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnsalida)) 
-            { 
+            if (CheckCollisionPointRec(mouse, btnsalida))
+            {
                 DrawText(">", 725, 900, 40, ORANGE);
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) 
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
                 {
                     currentScreen = MENU;
-                    
                 }
             }
-
+        }
+        else if (currentScreen == LEVEL_EDITOR)
+        {
+            editor.Update(dt);
+            if (editor.WantsMenu()) { editor.ClearFlags(); currentScreen = MENU; }
+            if (editor.WantsPlay()) { editor.ClearFlags(); FullReset(); currentScreen = GAMEPLAY; }
         }
 
         // ── GAMEPLAY ──────────────────────────────────────────────────────────
@@ -1928,30 +1939,48 @@ int main(void)
             const char* playText = "1 PLAYER GAME";
             const char* exitText = "EXIT";
             const char* controlText = "CONTROLS";
+            const char* editorText = "LEVEL EDITOR";
             const char* subtitle = "1967 Skibidi Toiltet Defense & Co";
 
-            int titleW = MeasureText(title, titleFont), playW = MeasureText(playText, menuFont);
-            int exitW = MeasureText(exitText, menuFont), subW = MeasureText(subtitle, smallFont);
+            int titleW = MeasureText(title, titleFont);
+            int playW = MeasureText(playText, menuFont);
+            int exitW = MeasureText(exitText, menuFont);
+            int subW = MeasureText(subtitle, smallFont);
             int controlW = MeasureText(controlText, menuFont);
-            int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
+            int editorW = MeasureText(editorText, menuFont);
+
+            int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
             int startY = (screenHeight - totalH) / 2;
             int titleX = (screenWidth - titleW) / 2, titleY = startY;
             int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
             int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
             int controlX = (screenWidth - controlW) / 2, controlY = exitY + menuFont + spacing;
-            int subX = (screenWidth - subW) / 2, subY = controlY + menuFont + spacing;
+            int editorX = (screenWidth - editorW) / 2, editorY = controlY + menuFont + spacing;
+            int subX = (screenWidth - subW) / 2, subY = editorY + menuFont + spacing;
+
+            // Sync button rectangles to computed positions
+            btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)menuFont + 6 };
+            btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)menuFont + 6 };
+            btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)menuFont + 6 };
+            btnEditor = { (float)(editorX - 10), (float)editorY,  (float)(editorW + 20), (float)menuFont + 6 };
 
             if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
-            else if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
-            else if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
-
+            if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
+            if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
+            if (selectedOption == 3) DrawText(">", editorX - 40, editorY, menuFont, dkOrange);
 
             DrawText(title, titleX, titleY, titleFont, dkRed);
             DrawText(playText, playX, playY, menuFont, dkWhite);
             DrawText(exitText, exitX, exitY, menuFont, dkWhite);
-            DrawText(subtitle, subX, subY, smallFont, dkOrange);
             DrawText(controlText, controlX, controlY, menuFont, dkWhite);
+            DrawText(editorText, editorX, editorY, menuFont, dkOrange);
+            DrawText(subtitle, subX, subY, smallFont, dkOrange);
+        }
 
+        // ── LEVEL EDITOR draw ─────────────────────────────────────────────────
+        else if (currentScreen == LEVEL_EDITOR)
+        {
+            editor.Draw();
         }
         // ── HOW HIGH screen (draw) ────────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
