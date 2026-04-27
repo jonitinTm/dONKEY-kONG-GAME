@@ -96,6 +96,7 @@ Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f)
 {
     Barrel b;
+    if (path.empty()) { b.active = false; return b; }   // no path → dead barrel
     b.currentNode = startNode;
     b.speed = spd;
     b.isBlue = (GetRandomValue(0, 9) == 0);
@@ -113,6 +114,7 @@ bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f,
     bool forceBlue = false)
 {
+    if (path.empty()) return false;   // no path defined for this level
     for (auto& b : barrels)
     {
         if (!b.active)
@@ -399,13 +401,18 @@ int main(void)
     Rectangle btnCtrl = { 340, 550, 200, 40 };
     Rectangle btnEditor = { 340, 600, 200, 40 };
 
-    LevelEditor editor;
-
     bool      debugPath = false;
 
     int score = 0;
+    int currentLevelId = 1;   // which level is currently loaded / playing
 
     Rectangle wincondition = { 400, 150, 40, 40 };
+
+    // ── Dynamic player spawn (updated by level data) ──────────────────────────
+    float playerSpawnX = 35.0f + 64.0f * 3.5f + 10.0f;
+    float playerSpawnY = 817.0f;
+
+    LevelEditor editor;
 
     // ── Subaru animation state ────────────────────────────────────────────────
     const float SUBARU_ANIM_FPS = 5.0f;
@@ -575,6 +582,7 @@ int main(void)
     auto SpawnRandomEnemies = [&]()
         {
             for (auto& en : enemies) en.active = false;
+            if (enemySpawnPositions.size() < 2) return;   // not enough spawn points
 
             int idx1 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1);
             int idx2;
@@ -658,7 +666,7 @@ int main(void)
         { 200.0f, 350.0f }, { 450.0f, 350.0f },
     };
     vector<NukeItem> nukes;
-    {
+    if (!nukeSpawnNodes.empty()) {
         int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
         nukes.push_back({ nukeSpawnNodes[idx], true });
     }
@@ -672,7 +680,7 @@ int main(void)
     };
 
     vector<BeatriceItem> beatrices;
-    {
+    if (!beatriceSpawnNodes.empty()) {
         int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
         beatrices.push_back({ beatriceSpawnNodes[idx], true });
     }
@@ -855,7 +863,7 @@ int main(void)
     Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
     Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
-    
+
     Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
 
     // Array for easy indexed access
@@ -891,7 +899,7 @@ int main(void)
             { pos.x, pos.y, beam.width * beamScale, beam.height * beamScale },
             { 0, 0 }, 0.f, WHITE);
     EndTextureMode();
-    UnloadTexture(beam);
+    // NOTE: beam texture is kept alive so RebuildLayers can rebake staticLayer
 
     // ── Bake ladder layer ─────────────────────────────────────────────────────
     float ladderScale = 4.0f;
@@ -921,7 +929,100 @@ int main(void)
         }
     }
     EndTextureMode();
-    UnloadTexture(LadderPart);
+    // NOTE: LadderPart texture is kept alive so RebuildLayers can rebake ladderLayer
+
+    // ── Wire textures into the editor ─────────────────────────────────────────
+    editor.SetTextures(&background, &beam, &LadderPart);
+
+    // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
+    auto RebuildLayers = [&]()
+        {
+            // Beam layer
+            float bScale = 4.0f;
+            BeginTextureMode(staticLayer);
+            ClearBackground(BLANK);
+            for (const auto& pos : beamPositions)
+                DrawTexturePro(beam,
+                    { 0, 0, (float)beam.width, (float)beam.height },
+                    { pos.x, pos.y, beam.width * bScale, beam.height * bScale },
+                    { 0, 0 }, 0.f, WHITE);
+            EndTextureMode();
+
+            // Ladder layer (uniform tiling, no hard-coded per-index offsets)
+            float lScale = 4.0f;
+            float tileW = 16.f * lScale;
+            float tileH = 16.f * lScale;
+            BeginTextureMode(ladderLayer);
+            ClearBackground(BLANK);
+            for (const Ladder& lad : ladders)
+            {
+                float drawX = lad.x + lad.width * 0.5f - tileW * 0.5f;
+                for (float y = lad.y; y < lad.y + lad.height; y += tileH)
+                {
+                    float dh = fminf(tileH, lad.y + lad.height - y);
+                    float srh = dh / lScale;
+                    DrawTexturePro(LadderPart,
+                        { 0, 0, 16.f, srh },
+                        { drawX, y, tileW, dh },
+                        { 0, 0 }, 0.f, WHITE);
+                }
+            }
+            EndTextureMode();
+        };
+
+    // ── ApplyLevelData: push a LevelData into all live game vectors ───────────
+    auto ApplyLevelData = [&](const LevelData& lv)
+        {
+            // Platforms
+            platforms.clear();
+            for (const auto& pd : lv.platforms)
+                platforms.push_back(Platform::Make(pd.x, pd.y, pd.w, pd.h, pd.tilt));
+
+            // Ladders
+            ladders.clear();
+            for (const auto& ld : lv.ladders)
+                ladders.push_back(Ladder::Make(ld.x, ld.y, ld.w, ld.h));
+
+            // Barrel path
+            barrelPath.clear();
+            for (const auto& nd : lv.pathNodes) {
+                PathNode n;
+                n.pos = { nd.x, nd.y };
+                n.next[0] = nd.next[0];
+                n.next[1] = nd.next[1];
+                n.rollThreshold = nd.rollThreshold;
+                n.isSplitNode = nd.isSplitNode;
+                barrelPath.push_back(n);
+            }
+
+            // Spawn nodes
+            nukeSpawnNodes.clear();
+            for (const auto& v : lv.nukeSpawns)     nukeSpawnNodes.push_back(v);
+            beatriceSpawnNodes.clear();
+            for (const auto& v : lv.beatriceSpawns)  beatriceSpawnNodes.push_back(v);
+            enemySpawnPositions.clear();
+            for (const auto& v : lv.enemySpawns)     enemySpawnPositions.push_back(v);
+
+            // Beam positions + rebuild baked layers
+            beamPositions.clear();
+            for (const auto& v : lv.beams)           beamPositions.push_back(v);
+
+            // Cave / house position
+            if (lv.hasCave) {
+                houseX = lv.cavePos.x;
+                houseY = lv.cavePos.y;
+                houseHitbox = { houseX, houseY, houseW, houseH };
+            }
+
+            // Player spawn
+            if (lv.hasPlayerSpawn) {
+                playerSpawnX = lv.playerSpawn.x;
+                playerSpawnY = lv.playerSpawn.y;
+            }
+
+            // Rebuild render textures with new data
+            RebuildLayers();
+        };
 
     Texture2D* image = &imgMarioIdle;
     SetTargetFPS(60);
@@ -939,6 +1040,7 @@ int main(void)
     // ── Helper: respawn items on death ────────────────────────────────────────
     auto RespawnItems = [&]()
         {
+            if (nukeRespawnNodes.empty()) return;
             if (GetRandomValue(1, 100) <= 30)
             {
                 int idx = GetRandomValue(0, (int)nukeRespawnNodes.size() - 1);
@@ -992,8 +1094,8 @@ int main(void)
 
     auto ResetPlayerPos = [&]()
         {
-            player.x = 35.0f + 64.0f * 3.5f + 10.0f;
-            player.y = 817.0f;
+            player.x = playerSpawnX;
+            player.y = playerSpawnY;
             velocityX = 0.0f;
             velocityY = 0.0f;
             isJumping = false;
@@ -1065,6 +1167,13 @@ int main(void)
 
     auto FullReset = [&]()
         {
+            // Reload level 1 data if we've moved past it
+            if (currentLevelId != 1) {
+                currentLevelId = 1;
+                LevelData lv1;
+                if (LoadLevel(lv1, 1)) ApplyLevelData(lv1);
+                else                   ApplyLevelData(GetDefaultLevel1());
+            }
             ClearDeathState();
             ClearRoundEntities();
             ResetPlayerPos();
@@ -1097,14 +1206,13 @@ int main(void)
             nukeShakeOffset = { 0, 0 };
             for (auto& nk : nukes) nk.active = false;
             nukes.clear();
-            
-            {
+            if (!nukeSpawnNodes.empty()) {
                 int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
                 nukes.push_back({ nukeSpawnNodes[idx], true });
             }
 
             beatrices.clear();
-            {
+            if (!beatriceSpawnNodes.empty()) {
                 int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
                 beatrices.push_back({ beatriceSpawnNodes[idx], true });
             }
@@ -1178,6 +1286,71 @@ int main(void)
             if (CheckCollisionPointRec(mouse, btnEditor)) { selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; } }
             if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
         }
+        else if (currentScreen == CONTROLS)
+        {
+            Rectangle btnsalida = { 750, 900, 200, 40 };
+            Vector2 mouse = GetMousePosition();
+            if (CheckCollisionPointRec(mouse, btnsalida))
+            {
+                DrawText(">", 725, 900, 40, ORANGE);
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                {
+                    currentScreen = MENU;
+
+                }
+            }
+
+        }
+        // ── LEVEL EDITOR ──────────────────────────────────────────────────────
+        else if (currentScreen == LEVEL_EDITOR)
+        {
+            editor.Update(dt);
+            if (editor.WantsMenu()) {
+                editor.ClearFlags();
+                currentScreen = MENU;
+            }
+            if (editor.WantsPlay()) {
+                editor.ClearFlags();
+                // Apply the editor's current level to the live game data
+                ApplyLevelData(editor.GetLevel());
+                currentLevelId = editor.GetCurrentLevelId();
+                // Full reset without reloading level 1 (we just applied editor data)
+                ClearDeathState();
+                ClearRoundEntities();
+                ResetPlayerPos();
+                ResetRegulus();
+                lives = 3; death = false; score = 0;
+                invincible = true; invincibleTimer = invincibleDuration;
+                spawnInterval = 10.0f; minuteTimer = 0.0f;
+                playerHasBeatrice = false; beatriceAbilityTimer = 0.0f;
+                beaBulletShootTimer = 0.0f;
+                for (auto& bb : beaBullets) bb.active = false;
+                beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
+                houseAnimPlaying = false; houseAnimFrame = 0;
+                houseAnimTimer = 0.0f; houseIsSnowed = false;
+                nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
+                nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
+                nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
+                for (auto& nk : nukes) nk.active = false;
+                nukes.clear();
+                if (!nukeSpawnNodes.empty()) {
+                    int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+                    nukes.push_back({ nukeSpawnNodes[idx], true });
+                }
+                beatrices.clear();
+                if (!beatriceSpawnNodes.empty()) {
+                    int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
+                    beatrices.push_back({ beatriceSpawnNodes[idx], true });
+                }
+                regulusThrowing = true; regulusThrowFrame = 0;
+                regulusThrowTimer = 0.0f; regulusSpawnPending = true;
+                regulusForceBlue = true; regulusIdleFrame = 0;
+                regulusIdleTimer = 0.0f;
+                subaruFrame = 0; subaruTimer = 0.0f;
+                ResumeMusicStream(music);
+                currentScreen = GAMEPLAY;
+            }
+        }
         // ── HOW HIGH screen (update) ──────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
         {
@@ -1196,25 +1369,6 @@ int main(void)
                 splashTimer = 0.0f;
                 currentScreen = GAMEPLAY;
             }
-        }
-        else if (currentScreen == CONTROLS)
-        {
-            Rectangle btnsalida = { 750, 900, 200, 40 };
-            Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, btnsalida))
-            {
-                DrawText(">", 725, 900, 40, ORANGE);
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                {
-                    currentScreen = MENU;
-                }
-            }
-        }
-        else if (currentScreen == LEVEL_EDITOR)
-        {
-            editor.Update(dt);
-            if (editor.WantsMenu()) { editor.ClearFlags(); currentScreen = MENU; }
-            if (editor.WantsPlay()) { editor.ClearFlags(); FullReset(); currentScreen = GAMEPLAY; }
         }
 
         // ── GAMEPLAY ──────────────────────────────────────────────────────────
@@ -1895,8 +2049,19 @@ int main(void)
             // ── Win Condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
-                splashTimer = 0.0f;
-                currentScreen = GAME_OVER;
+                // Try to load the next level from disk
+                LevelData nextLv;
+                if (LoadLevel(nextLv, currentLevelId + 1)) {
+                    currentLevelId++;
+                    ApplyLevelData(nextLv);
+                    FullReset();
+                    currentScreen = GAMEPLAY;
+                }
+                else {
+                    // No more levels → show completion, then menu
+                    splashTimer = 0.0f;
+                    currentScreen = GAME_OVER;
+                }
             }
 
         } // end GAMEPLAY update
@@ -1945,12 +2110,11 @@ int main(void)
             int titleW = MeasureText(title, titleFont);
             int playW = MeasureText(playText, menuFont);
             int exitW = MeasureText(exitText, menuFont);
-            int subW = MeasureText(subtitle, smallFont);
             int controlW = MeasureText(controlText, menuFont);
             int editorW = MeasureText(editorText, menuFont);
+            int subW = MeasureText(subtitle, smallFont);
 
-            int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
-            int startY = (screenHeight - totalH) / 2;
+            int startY = (screenHeight - (titleFont + spacing * 5 + menuFont * 4 + smallFont)) / 2;
             int titleX = (screenWidth - titleW) / 2, titleY = startY;
             int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
             int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
@@ -1958,11 +2122,11 @@ int main(void)
             int editorX = (screenWidth - editorW) / 2, editorY = controlY + menuFont + spacing;
             int subX = (screenWidth - subW) / 2, subY = editorY + menuFont + spacing;
 
-            // Sync button rectangles to computed positions
-            btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)menuFont + 6 };
-            btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)menuFont + 6 };
-            btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)menuFont + 6 };
-            btnEditor = { (float)(editorX - 10), (float)editorY,  (float)(editorW + 20), (float)menuFont + 6 };
+            // Keep button rects in sync with computed positions
+            btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)(menuFont + 6) };
+            btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)(menuFont + 6) };
+            btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)(menuFont + 6) };
+            btnEditor = { (float)(editorX - 10), (float)editorY,  (float)(editorW + 20), (float)(menuFont + 6) };
 
             if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
             if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
@@ -1976,13 +2140,8 @@ int main(void)
             DrawText(editorText, editorX, editorY, menuFont, dkOrange);
             DrawText(subtitle, subX, subY, smallFont, dkOrange);
         }
-
-        // ── LEVEL EDITOR draw ─────────────────────────────────────────────────
-        else if (currentScreen == LEVEL_EDITOR)
-        {
-            editor.Draw();
-        }
         // ── HOW HIGH screen (draw) ────────────────────────────────────────────
+        // ── HOW HIGH screen (update) ──────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
         {
             // 1. Background stretched to fill screen
@@ -2021,6 +2180,12 @@ int main(void)
             DrawText("while you are close to them", 330, 400, 30, WHITE);
 
             DrawText("Return", 750, 900, 30, WHITE);
+        }
+
+        // ── LEVEL EDITOR draw ─────────────────────────────────────────────────
+        else if (currentScreen == LEVEL_EDITOR)
+        {
+            editor.Draw();
         }
 
         else if (currentScreen == GAMEPLAY)
@@ -2452,6 +2617,7 @@ int main(void)
     UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
+    UnloadTexture(beam);              UnloadTexture(LadderPart);
     UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
     UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
     UnloadTexture(BarrelFall1);       UnloadTexture(BarrelFall2);

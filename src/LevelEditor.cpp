@@ -57,12 +57,12 @@ void LevelEditor::Init(int screenW, int screenH)
     _sw = screenW;
     _sh = screenH;
     _canvasH = (float)(_sh - TOOLBAR_H - BROWSER_H);
-    _zoom    = _canvasH / (float)_sh;   // world height = _sh, canvas height = _canvasH
+    _zoom = _canvasH / (float)_sh;   // world height = _sh, canvas height = _canvasH
 
-    _cam.offset   = { 0.0f, (float)TOOLBAR_H };
-    _cam.target   = { 0.0f, 0.0f };
+    _cam.offset = { 0.0f, (float)TOOLBAR_H };
+    _cam.target = { 0.0f, 0.0f };
     _cam.rotation = 0.0f;
-    _cam.zoom     = _zoom;
+    _cam.zoom = _zoom;
 
     LoadLevel(1);
 }
@@ -134,51 +134,71 @@ bool LevelEditor::PickEntity(Vector2 p)
 
     // Singletons
     if (_level.hasPlayerSpawn && CheckCollisionPointCircle(p, _level.playerSpawn, R))
-        { _sel = { (int)EditorTool::PLAYER_SPAWN, 0 }; return true; }
+    {
+        _sel = { (int)EditorTool::PLAYER_SPAWN, 0 }; return true;
+    }
     if (_level.hasRegulus && CheckCollisionPointCircle(p, _level.regulusPos, R))
-        { _sel = { (int)EditorTool::REGULUS, 0 }; return true; }
+    {
+        _sel = { (int)EditorTool::REGULUS, 0 }; return true;
+    }
     if (_level.hasCave && CheckCollisionPointRec(p, { _level.cavePos.x, _level.cavePos.y, 50, 50 }))
-        { _sel = { (int)EditorTool::CAVE, 0 }; return true; }
+    {
+        _sel = { (int)EditorTool::CAVE, 0 }; return true;
+    }
 
     // Path nodes (small, check first before platforms)
     for (int i = 0; i < (int)_level.pathNodes.size(); i++) {
         Vector2 np = { _level.pathNodes[i].x, _level.pathNodes[i].y };
         if (CheckCollisionPointCircle(p, np, 10.f))
-            { _sel = { (int)EditorTool::PATH_NODE, i }; return true; }
+        {
+            _sel = { (int)EditorTool::PATH_NODE, i }; return true;
+        }
     }
 
     // Platforms
     for (int i = 0; i < (int)_level.platforms.size(); i++) {
         if (CheckCollisionPointRec(p, PlatRect(_level.platforms[i])))
-            { _sel = { (int)EditorTool::PLATFORM, i }; return true; }
+        {
+            _sel = { (int)EditorTool::PLATFORM, i }; return true;
+        }
     }
 
     // Ladders
     for (int i = 0; i < (int)_level.ladders.size(); i++) {
         if (CheckCollisionPointRec(p, LadRect(_level.ladders[i])))
-            { _sel = { (int)EditorTool::LADDER, i }; return true; }
+        {
+            _sel = { (int)EditorTool::LADDER, i }; return true;
+        }
     }
 
     // Beams
     for (int i = 0; i < (int)_level.beams.size(); i++) {
         if (CheckCollisionPointRec(p, BeamRect(_level.beams[i])))
-            { _sel = { (int)EditorTool::BEAM, i }; return true; }
+        {
+            _sel = { (int)EditorTool::BEAM, i }; return true;
+        }
     }
 
     // Nuke spawns
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)
         if (CheckCollisionPointCircle(p, _level.nukeSpawns[i], R))
-            { _sel = { (int)EditorTool::NUKE_SPAWN, i }; return true; }
+        {
+            _sel = { (int)EditorTool::NUKE_SPAWN, i }; return true;
+        }
 
     // Beatrice spawns
     for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++)
         if (CheckCollisionPointCircle(p, _level.beatriceSpawns[i], R))
-            { _sel = { (int)EditorTool::BEATRICE_SPAWN, i }; return true; }
+        {
+            _sel = { (int)EditorTool::BEATRICE_SPAWN, i }; return true;
+        }
 
     // Enemy spawns
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)
         if (CheckCollisionPointCircle(p, _level.enemySpawns[i], R))
-            { _sel = { (int)EditorTool::ENEMY_SPAWN, i }; return true; }
+        {
+            _sel = { (int)EditorTool::ENEMY_SPAWN, i }; return true;
+        }
 
     return false;
 }
@@ -194,18 +214,18 @@ void LevelEditor::DeleteSelected()
     auto erase = [](auto& vec, int i) {
         if (i >= 0 && i < (int)vec.size())
             vec.erase(vec.begin() + i);
-    };
+        };
 
     EditorTool t = (EditorTool)_sel.type;
     int        i = _sel.index;
 
     switch (t) {
     case EditorTool::PLAYER_SPAWN:   _level.hasPlayerSpawn = false; break;
-    case EditorTool::REGULUS:        _level.hasRegulus     = false; break;
-    case EditorTool::CAVE:           _level.hasCave        = false; break;
-    case EditorTool::PLATFORM:       erase(_level.platforms,      i); break;
-    case EditorTool::LADDER:         erase(_level.ladders,        i); break;
-    case EditorTool::BEAM:           erase(_level.beams,          i); break;
+    case EditorTool::REGULUS:        _level.hasRegulus = false; break;
+    case EditorTool::CAVE:           _level.hasCave = false; break;
+    case EditorTool::PLATFORM:       erase(_level.platforms, i); break;
+    case EditorTool::LADDER:         erase(_level.ladders, i); break;
+    case EditorTool::BEAM:           erase(_level.beams, i); break;
     case EditorTool::PATH_NODE: {
         // Clear references to this node from other nodes before deleting
         for (auto& n : _level.pathNodes) {
@@ -218,9 +238,9 @@ void LevelEditor::DeleteSelected()
         erase(_level.pathNodes, i);
         break;
     }
-    case EditorTool::NUKE_SPAWN:     erase(_level.nukeSpawns,     i); break;
+    case EditorTool::NUKE_SPAWN:     erase(_level.nukeSpawns, i); break;
     case EditorTool::BEATRICE_SPAWN: erase(_level.beatriceSpawns, i); break;
-    case EditorTool::ENEMY_SPAWN:    erase(_level.enemySpawns,    i); break;
+    case EditorTool::ENEMY_SPAWN:    erase(_level.enemySpawns, i); break;
     default: break;
     }
 
@@ -242,7 +262,7 @@ Vector2 LevelEditor::GetSelPos() const
     case EditorTool::REGULUS:        return _level.regulusPos;
     case EditorTool::CAVE:           return _level.cavePos;
     case EditorTool::PLATFORM:       return { _level.platforms[i].x, _level.platforms[i].y };
-    case EditorTool::LADDER:         return { _level.ladders[i].x,   _level.ladders[i].y   };
+    case EditorTool::LADDER:         return { _level.ladders[i].x,   _level.ladders[i].y };
     case EditorTool::BEAM:           return _level.beams[i];
     case EditorTool::PATH_NODE:      return { _level.pathNodes[i].x, _level.pathNodes[i].y };
     case EditorTool::NUKE_SPAWN:     return _level.nukeSpawns[i];
@@ -257,19 +277,19 @@ void LevelEditor::SetSelPos(Vector2 p)
     if (!_sel.valid()) return;
     int i = _sel.index;
     switch ((EditorTool)_sel.type) {
-    case EditorTool::PLAYER_SPAWN:   _level.playerSpawn           = p; break;
-    case EditorTool::REGULUS:        _level.regulusPos             = p; break;
-    case EditorTool::CAVE:           _level.cavePos                = p; break;
+    case EditorTool::PLAYER_SPAWN:   _level.playerSpawn = p; break;
+    case EditorTool::REGULUS:        _level.regulusPos = p; break;
+    case EditorTool::CAVE:           _level.cavePos = p; break;
     case EditorTool::PLATFORM:       _level.platforms[i].x = p.x;
-                                     _level.platforms[i].y = p.y; break;
+        _level.platforms[i].y = p.y; break;
     case EditorTool::LADDER:         _level.ladders[i].x = p.x;
-                                     _level.ladders[i].y = p.y; break;
+        _level.ladders[i].y = p.y; break;
     case EditorTool::BEAM:           _level.beams[i] = p; break;
     case EditorTool::PATH_NODE:      _level.pathNodes[i].x = p.x;
-                                     _level.pathNodes[i].y = p.y; break;
-    case EditorTool::NUKE_SPAWN:     _level.nukeSpawns[i]     = p; break;
+        _level.pathNodes[i].y = p.y; break;
+    case EditorTool::NUKE_SPAWN:     _level.nukeSpawns[i] = p; break;
     case EditorTool::BEATRICE_SPAWN: _level.beatriceSpawns[i] = p; break;
-    case EditorTool::ENEMY_SPAWN:    _level.enemySpawns[i]    = p; break;
+    case EditorTool::ENEMY_SPAWN:    _level.enemySpawns[i] = p; break;
     default: break;
     }
 }
@@ -281,27 +301,29 @@ void LevelEditor::SetSelPos(Vector2 p)
 void LevelEditor::LoadLevel(int id)
 {
     _levelId = id;
-    _level   = LevelData{};
+    _level = LevelData{};
 
     // Try saved file first; fall back to built-in level 1
     if (!::LoadLevel(_level, id)) {
         if (id == 1) {
             _level = GetDefaultLevel1();
             SetStatus("Loaded built-in level 1.");
-        } else {
-            _level.id    = id;
+        }
+        else {
+            _level.id = id;
             _level.valid = true;
             SetStatus("New empty level created.");
         }
-    } else {
+    }
+    else {
         SetStatus(TextFormat("Loaded level %d from disk.", id));
     }
 
     _sel.clear();
     _placingPlatform = false;
-    _placingLadder   = false;
-    _dragging        = false;
-    _connectMode     = ConnectMode::NONE;
+    _placingLadder = false;
+    _dragging = false;
+    _connectMode = ConnectMode::NONE;
 }
 
 void LevelEditor::SaveCurrentLevel()
@@ -309,7 +331,8 @@ void LevelEditor::SaveCurrentLevel()
     _level.id = _levelId;
     if (SaveLevel(_level)) {
         SetStatus(TextFormat("Level %d saved.", _levelId));
-    } else {
+    }
+    else {
         SetStatus("ERROR: Could not save level!");
     }
 }
@@ -334,15 +357,19 @@ void LevelEditor::UpdateToolbar()
     if (IsKeyPressed(KEY_S) && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)))
         SaveCurrentLevel();
     if (IsKeyPressed(KEY_G))
-        { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
+    {
+        _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF");
+    }
     if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
         DeleteSelected();
     if (IsKeyPressed(KEY_ESCAPE))
-        { _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT;
-          _sel.clear(); SetStatus("Cancelled."); }
+    {
+        _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT;
+        _sel.clear(); SetStatus("Cancelled.");
+    }
 
     // Level navigation via < > keys
-    if (IsKeyPressed(KEY_LEFT)  && _levelId > 1)  { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
+    if (IsKeyPressed(KEY_LEFT) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
     if (IsKeyPressed(KEY_RIGHT) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(_levelId + 1); }
 
     // ── Toolbar button clicks ─────────────────────────────────────────────────
@@ -353,7 +380,7 @@ void LevelEditor::UpdateToolbar()
     auto TBtn = [&](int col, int totalCols) -> Rectangle {
         float w = (float)_sw / totalCols;
         return { col * w, 0, w - 2, (float)TOOLBAR_H - 2 };
-    };
+        };
 
     //  [0]<  [1]LevelN  [2]>  [3]Grid  [4]Save  [5]Play  [6]Menu
     if (CheckCollisionPointRec(mouse, TBtn(0, 7))) {
@@ -363,12 +390,18 @@ void LevelEditor::UpdateToolbar()
         if (_levelId < 10) { SaveCurrentLevel(); LoadLevel(++_levelId); }
     }
     if (CheckCollisionPointRec(mouse, TBtn(3, 7)))
-        { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
+    {
+        _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF");
+    }
     if (CheckCollisionPointRec(mouse, TBtn(4, 7))) SaveCurrentLevel();
     if (CheckCollisionPointRec(mouse, TBtn(5, 7)))
-        { SaveCurrentLevel(); _wantsPlay = true; }
+    {
+        SaveCurrentLevel(); _wantsPlay = true;
+    }
     if (CheckCollisionPointRec(mouse, TBtn(6, 7)))
-        { _wantsMenu = true; }
+    {
+        _wantsMenu = true;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,7 +425,7 @@ void LevelEditor::UpdateBrowser()
     // Row 0: SELECT PLAYER REGULUS CAVE PLATFORM LADDER  (6 buttons)
     // Row 1: BEAM   PATH_NODE NUKE BEATRICE ENEMY          (5 buttons)
     const int row0tools[] = { 0,1,2,3,4,5 };
-    const int row1tools[] = { 6,7,8,9,10  };
+    const int row1tools[] = { 6,7,8,9,10 };
 
     for (int c = 0; c < 6; c++) {
         if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6))) {
@@ -420,13 +453,13 @@ void LevelEditor::UpdateBrowser()
 
 void LevelEditor::UpdateCanvas()
 {
-    Vector2 wm  = WorldMouse();
+    Vector2 wm = WorldMouse();
     Vector2 swm = Snap(wm);
 
-    bool lmbP = IsMouseButtonPressed (MOUSE_LEFT_BUTTON);
-    bool lmbD = IsMouseButtonDown    (MOUSE_LEFT_BUTTON);
+    bool lmbP = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool lmbD = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
     bool lmbR = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
-    bool rmbP = IsMouseButtonPressed (MOUSE_RIGHT_BUTTON);
+    bool rmbP = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
 
     // ── Right-click always deletes under cursor ───────────────────────────────
     if (rmbP) {
@@ -458,10 +491,14 @@ void LevelEditor::UpdateCanvas()
     {
         if (lmbP && !_dragging) {
             if (PickEntity(wm)) {
-                _dragging   = true;
+                _dragging = true;
                 _dragOffset = Vector2Subtract(wm, GetSelPos());
-            } else {
+                SetStatus(TextFormat("Selected %s #%d  —  drag to move, DEL to delete",
+                    ToolName((EditorTool)_sel.type), _sel.index));
+            }
+            else {
                 _sel.clear();
+                SetStatus("Nothing selected.");
             }
         }
         if (_dragging && lmbD) {
@@ -480,9 +517,9 @@ void LevelEditor::UpdateCanvas()
             if (fabsf(w) < GRID_SZ) w = (float)(GRID_SZ * 4);
             PlatformData p;
             if (w >= 0) { p.x = _platStart.x; p.w = w; }
-            else        { p.x = swm.x;        p.w = -w; }
-            p.y    = _platStart.y;
-            p.h    = 0.f;
+            else { p.x = swm.x;        p.w = -w; }
+            p.y = _platStart.y;
+            p.h = 0.f;
             p.tilt = 0.f;
             _level.platforms.push_back(p);
             _placingPlatform = false;
@@ -528,7 +565,7 @@ void LevelEditor::UpdateCanvas()
         {
         case EditorTool::PLAYER_SPAWN:
             _level.hasPlayerSpawn = true;
-            _level.playerSpawn    = swm;
+            _level.playerSpawn = swm;
             SetStatus("Player spawn set.");
             break;
 
@@ -539,8 +576,8 @@ void LevelEditor::UpdateCanvas()
             break;
 
         case EditorTool::CAVE:
-            _level.hasCave  = true;
-            _level.cavePos  = swm;
+            _level.hasCave = true;
+            _level.cavePos = swm;
             SetStatus("Cave / house set.");
             break;
 
@@ -592,24 +629,74 @@ void LevelEditor::Update(float dt)
 void LevelEditor::DrawPlatEnt(const PlatformData& p, bool sel) const
 {
     Rectangle r = PlatRect(p);
-    Color fc = { 80, 120, 255, 60 };
-    Color bc = sel ? YELLOW : Color{ 80, 120, 255, 200 };
-    DrawRectangleRec(r, fc);
+    Color bc = sel ? YELLOW : Color{ 80, 120, 255, 220 };
+
+    if (_beamTex && _beamTex->id > 0) {
+        // Tile beam texture across the platform, same scale as gameplay (4×)
+        const float scale = 4.0f;
+        const float tw = _beamTex->width * scale;
+        const float th = _beamTex->height * scale;
+        float x = r.x;
+        while (x < r.x + r.width) {
+            float drawW = fminf(tw, r.x + r.width - x);
+            float srcW = drawW / scale;
+            DrawTexturePro(*_beamTex,
+                { 0, 0, srcW, (float)_beamTex->height },
+                { x, p.y, drawW, th },
+                { 0, 0 }, 0.f, WHITE);
+            x += tw;
+        }
+    }
+    else {
+        DrawRectangleRec(r, { 80, 120, 255, 60 });
+    }
+
     DrawRectangleLinesEx(r, sel ? 2.f : 1.5f, bc);
-    // Tilt indicator
     if (fabsf(p.tilt) > 0.1f) {
         char buf[32]; snprintf(buf, sizeof(buf), "t=%.1f", p.tilt);
-        DrawText(buf, (int)r.x + 2, (int)r.y + 1, 8, bc);
+        DrawText(buf, (int)r.x + 2, (int)r.y - 11, 9, bc);
+    }
+
+    // Selection handles (corners) when selected
+    if (sel) {
+        const float hs = 5.f;
+        DrawRectangle((int)(r.x - hs), (int)(r.y - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
+        DrawRectangle((int)(r.x + r.width - hs), (int)(r.y - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
+        DrawRectangle((int)(r.x - hs), (int)(r.y + r.height - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
+        DrawRectangle((int)(r.x + r.width - hs), (int)(r.y + r.height - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
     }
 }
 
 void LevelEditor::DrawLadEnt(const LadderData& l, bool sel) const
 {
     Rectangle r = LadRect(l);
-    Color fc = { 255, 220, 0, 50 };
     Color bc = sel ? YELLOW : Color{ 255, 220, 0, 200 };
-    DrawRectangleRec(r, fc);
+
+    if (_ladderTex && _ladderTex->id > 0) {
+        // Tile the ladder texture vertically, same scale as gameplay (4×)
+        const float scale = 4.0f;
+        const float tileW = 16.f * scale;
+        const float tileH = 16.f * scale;
+        float drawX = r.x + r.width * 0.5f - tileW * 0.5f;
+        for (float y = r.y; y < r.y + r.height; y += tileH) {
+            float drawH = fminf(tileH, r.y + r.height - y);
+            float srcH = drawH / scale;
+            DrawTexturePro(*_ladderTex,
+                { 0, 0, 16.f, srcH },
+                { drawX, y, tileW, drawH },
+                { 0, 0 }, 0.f, WHITE);
+        }
+    }
+    else {
+        DrawRectangleRec(r, { 255, 220, 0, 50 });
+    }
+
     DrawRectangleLinesEx(r, sel ? 2.f : 1.5f, bc);
+    if (sel) {
+        const float hs = 5.f;
+        DrawRectangle((int)(r.x - hs), (int)(r.y + r.height * 0.5f - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
+        DrawRectangle((int)(r.x + r.width - hs), (int)(r.y + r.height * 0.5f - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
+    }
 }
 
 void LevelEditor::DrawCircEnt(Vector2 pos, float radius, Color c, bool sel, const char* lbl) const
@@ -639,11 +726,11 @@ void LevelEditor::DrawPathNodes()
         Vector2 from = { n.x, n.y };
         for (int s = 0; s < 2; s++) {
             if (n.next[s] < 0 || n.next[s] >= (int)nodes.size()) continue;
-            Vector2 to   = { nodes[n.next[s]].x, nodes[n.next[s]].y };
-            Color   lc   = (s == 0) ? Color{255,140,0,200} : Color{0,200,255,200};
+            Vector2 to = { nodes[n.next[s]].x, nodes[n.next[s]].y };
+            Color   lc = (s == 0) ? Color{ 255,140,0,200 } : Color{ 0,200,255,200 };
             DrawLineEx(from, to, 2.f, lc);
             // Arrow head
-            Vector2 mid  = Vector2Lerp(from, to, 0.65f);
+            Vector2 mid = Vector2Lerp(from, to, 0.65f);
             DrawCircleV(mid, 3.f, lc);
         }
     }
@@ -655,7 +742,7 @@ void LevelEditor::DrawPathNodes()
 
         Color fill;
         if (i == 0)                                       fill = WHITE;
-        else if (n.next[0]==-1 && n.next[1]==-1)         fill = RED;
+        else if (n.next[0] == -1 && n.next[1] == -1)         fill = RED;
         else if (n.isSplitNode && n.rollThreshold == 10)  fill = ORANGE;
         else if (n.isSplitNode)                           fill = GREEN;
         else                                              fill = YELLOW;
@@ -663,19 +750,19 @@ void LevelEditor::DrawPathNodes()
         Vector2 pos = { n.x, n.y };
         if (sel) DrawCircleV(pos, 13.f, YELLOW);
         DrawCircleV(pos, 10.f, BLACK);
-        DrawCircleV(pos, 8.f,  fill);
+        DrawCircleV(pos, 8.f, fill);
         char lbl[8]; snprintf(lbl, sizeof(lbl), "%d", i);
         int tw = MeasureText(lbl, 8);
-        DrawText(lbl, (int)pos.x - tw/2, (int)pos.y - 4, 8, BLACK);
+        DrawText(lbl, (int)pos.x - tw / 2, (int)pos.y - 4, 8, BLACK);
     }
 
     // Highlight source node during connection mode
     if (_connectMode != ConnectMode::NONE && _connectFrom >= 0 && _connectFrom < (int)nodes.size()) {
         Vector2 src = { nodes[_connectFrom].x, nodes[_connectFrom].y };
-        DrawCircleLines((int)src.x, (int)src.y, 16, (_connectMode==ConnectMode::NEXT0) ? ORANGE : SKYBLUE);
+        DrawCircleLines((int)src.x, (int)src.y, 16, (_connectMode == ConnectMode::NEXT0) ? ORANGE : SKYBLUE);
         // Draw preview line to mouse
         DrawLineEx(src, WorldMouse(), 1.5f,
-            (_connectMode==ConnectMode::NEXT0) ? Color{255,140,0,150} : Color{0,200,255,150});
+            (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,150 } : Color{ 0,200,255,150 });
     }
 }
 
@@ -683,11 +770,20 @@ void LevelEditor::DrawPathNodes()
 
 void LevelEditor::DrawBackground() const
 {
-    // Subtle dark background for the world area
-    DrawRectangle(0, 0, _sw, _sh, { 20, 22, 30, 255 });
+    if (_bgTex && _bgTex->id > 0) {
+        // Draw the actual game background scaled to the world size
+        DrawTexturePro(*_bgTex,
+            { 0, 0, (float)_bgTex->width, (float)_bgTex->height },
+            { 0, 0, (float)_sw, (float)_sh },
+            { 0, 0 }, 0.f, WHITE);
+        // Darken slightly so editor entities are easier to see
+        DrawRectangle(0, 0, _sw, _sh, { 0, 0, 0, 60 });
+    }
+    else {
+        DrawRectangle(0, 0, _sw, _sh, { 20, 22, 30, 255 });
+    }
     // World boundary
-    Rectangle wb = { 0, 0, (float)_sw, (float)_sh };
-    DrawRectangleLinesEx(wb, 2.f, { 60, 60, 80, 255 });
+    DrawRectangleLinesEx({ 0, 0, (float)_sw, (float)_sh }, 2.f, { 60, 60, 80, 200 });
 }
 
 void LevelEditor::DrawGrid() const
@@ -707,17 +803,17 @@ void LevelEditor::DrawLevelEntities()
     // Platforms
     for (int i = 0; i < (int)_level.platforms.size(); i++)
         DrawPlatEnt(_level.platforms[i],
-            _sel.valid() && _sel.type==(int)EditorTool::PLATFORM && _sel.index==i);
+            _sel.valid() && _sel.type == (int)EditorTool::PLATFORM && _sel.index == i);
 
     // Ladders
     for (int i = 0; i < (int)_level.ladders.size(); i++)
         DrawLadEnt(_level.ladders[i],
-            _sel.valid() && _sel.type==(int)EditorTool::LADDER && _sel.index==i);
+            _sel.valid() && _sel.type == (int)EditorTool::LADDER && _sel.index == i);
 
     // Beams
     for (int i = 0; i < (int)_level.beams.size(); i++)
         DrawBeamEnt(_level.beams[i],
-            _sel.valid() && _sel.type==(int)EditorTool::BEAM && _sel.index==i);
+            _sel.valid() && _sel.type == (int)EditorTool::BEAM && _sel.index == i);
 
     // Path nodes + connections
     DrawPathNodes();
@@ -725,29 +821,29 @@ void LevelEditor::DrawLevelEntities()
     // Nuke spawns
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)
         DrawCircEnt(_level.nukeSpawns[i], 10.f, SKYBLUE,
-            _sel.valid() && _sel.type==(int)EditorTool::NUKE_SPAWN && _sel.index==i, "N");
+            _sel.valid() && _sel.type == (int)EditorTool::NUKE_SPAWN && _sel.index == i, "N");
 
     // Beatrice spawns
     for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++)
         DrawCircEnt(_level.beatriceSpawns[i], 10.f, MAGENTA,
-            _sel.valid() && _sel.type==(int)EditorTool::BEATRICE_SPAWN && _sel.index==i, "B");
+            _sel.valid() && _sel.type == (int)EditorTool::BEATRICE_SPAWN && _sel.index == i, "B");
 
     // Enemy spawns
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)
         DrawCircEnt(_level.enemySpawns[i], 10.f, RED,
-            _sel.valid() && _sel.type==(int)EditorTool::ENEMY_SPAWN && _sel.index==i, "E");
+            _sel.valid() && _sel.type == (int)EditorTool::ENEMY_SPAWN && _sel.index == i, "E");
 
     // Singleton entities
     if (_level.hasPlayerSpawn)
         DrawCircEnt(_level.playerSpawn, 12.f, GREEN,
-            _sel.valid() && _sel.type==(int)EditorTool::PLAYER_SPAWN, "P");
+            _sel.valid() && _sel.type == (int)EditorTool::PLAYER_SPAWN, "P");
 
     if (_level.hasRegulus)
         DrawCircEnt(_level.regulusPos, 16.f, { 160,32,240,255 },
-            _sel.valid() && _sel.type==(int)EditorTool::REGULUS, "R");
+            _sel.valid() && _sel.type == (int)EditorTool::REGULUS, "R");
 
     if (_level.hasCave) {
-        bool sel = _sel.valid() && _sel.type==(int)EditorTool::CAVE;
+        bool sel = _sel.valid() && _sel.type == (int)EditorTool::CAVE;
         Rectangle r = { _level.cavePos.x, _level.cavePos.y, 50, 50 };
         DrawRectangleRec(r, { 255,165,0,60 });
         DrawRectangleLinesEx(r, sel ? 2.f : 1.5f, sel ? YELLOW : ORANGE);
@@ -759,8 +855,17 @@ void LevelEditor::DrawLevelEntities()
 
 void LevelEditor::DrawPlacementPreview() const
 {
-    Vector2 wm  = WorldMouse();
+    Vector2 wm = WorldMouse();
     Vector2 swm = Snap(wm);
+
+    // ── Drag indicator ─────────────────────────────────────────────────────────
+    if (_tool == EditorTool::SELECT && _dragging && _sel.valid()) {
+        // Draw a move-arrow cross at mouse position
+        const float A = 10.f;
+        DrawLineEx({ wm.x - A, wm.y }, { wm.x + A, wm.y }, 2.f, { 255, 255, 0, 200 });
+        DrawLineEx({ wm.x, wm.y - A }, { wm.x, wm.y + A }, 2.f, { 255, 255, 0, 200 });
+        DrawText("MOVE", (int)wm.x + 12, (int)wm.y - 6, 10, { 255, 255, 0, 200 });
+    }
 
     if (_placingPlatform) {
         float w = swm.x - _platStart.x;
@@ -768,7 +873,7 @@ void LevelEditor::DrawPlacementPreview() const
         if (w >= 0) r = { _platStart.x, _platStart.y, w > 0 ? w : 8.f, 12.f };
         else        r = { swm.x,        _platStart.y, -w > 0 ? -w : 8.f, 12.f };
         DrawRectangleLinesEx(r, 1.5f, { 80,120,255,180 });
-        DrawText(TextFormat("w=%.0f", fabsf(w)), (int)r.x, (int)r.y - 14, 10, Color{80,120,255,220});
+        DrawText(TextFormat("w=%.0f", fabsf(w)), (int)r.x, (int)r.y - 14, 10, Color{ 80,120,255,220 });
     }
 
     if (_placingLadder) {
@@ -776,7 +881,7 @@ void LevelEditor::DrawPlacementPreview() const
         if (h < 0) h = 0;
         Rectangle r = { _ladStart.x, _ladStart.y, 40.f, h > 0 ? h : 8.f };
         DrawRectangleLinesEx(r, 1.5f, { 255,220,0,180 });
-        DrawText(TextFormat("h=%.0f", h), (int)r.x, (int)r.y - 14, 10, Color{255,220,0,220});
+        DrawText(TextFormat("h=%.0f", h), (int)r.x, (int)r.y - 14, 10, Color{ 255,220,0,220 });
     }
 
     // Crosshair at snapped mouse position
@@ -792,23 +897,23 @@ void LevelEditor::DrawToolbarUI() const
     DrawLine(0, TOOLBAR_H - 1, _sw, TOOLBAR_H - 1, { 70, 80, 110, 255 });
 
     float bw = (float)_sw / 7;
-    auto  TBtn = [&](int c) -> Rectangle { return { c*bw + 1, 1, bw - 2, (float)TOOLBAR_H - 2 }; };
+    auto  TBtn = [&](int c) -> Rectangle { return { c * bw + 1, 1, bw - 2, (float)TOOLBAR_H - 2 }; };
 
     auto DrawTB = [&](int c, const char* label, Color bg, Color fg) {
         Rectangle r = TBtn(c);
         DrawRectangleRec(r, bg);
         DrawRectangleLinesEx(r, 1, { 80,90,120,255 });
         int tw = MeasureText(label, 14);
-        DrawText(label, (int)(r.x + r.width/2 - tw/2), (int)(r.y + r.height/2 - 7), 14, fg);
-    };
+        DrawText(label, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 7), 14, fg);
+        };
 
-    DrawTB(0, "<",               { 40,42,55,255 },  WHITE);
+    DrawTB(0, "<", { 40,42,55,255 }, WHITE);
     DrawTB(1, TextFormat("Lv%d", _levelId), { 50,55,75,255 }, YELLOW);
-    DrawTB(2, ">",               { 40,42,55,255 },  WHITE);
+    DrawTB(2, ">", { 40,42,55,255 }, WHITE);
     DrawTB(3, _gridOn ? "Grid:ON" : "Grid:OFF", { 40,42,55,255 }, _gridOn ? GREEN : GRAY);
-    DrawTB(4, "SAVE [Ctrl+S]",   { 30,80,50,255 },  WHITE);
-    DrawTB(5, "PLAY",            { 30,60,100,255 }, WHITE);
-    DrawTB(6, "MENU",            { 80,30,30,255 },  WHITE);
+    DrawTB(4, "SAVE [Ctrl+S]", { 30,80,50,255 }, WHITE);
+    DrawTB(5, "PLAY", { 30,60,100,255 }, WHITE);
+    DrawTB(6, "MENU", { 80,30,30,255 }, WHITE);
 }
 
 // ── Browser UI ────────────────────────────────────────────────────────────────
@@ -840,12 +945,12 @@ void LevelEditor::DrawBrowserUI()
         }
         : Color{ 30, 32, 44, 255 };
         DrawRectangleRec(r, bg);
-        DrawRectangleLinesEx(r, active ? 2.f : 1.f, active ? tc : Color{60,65,85,255});
+        DrawRectangleLinesEx(r, active ? 2.f : 1.f, active ? tc : Color{ 60,65,85,255 });
         const char* nm = ToolName(t);
         int         tw = MeasureText(nm, 11);
-        DrawText(nm, (int)(r.x + r.width/2 - tw/2), (int)(r.y + r.height/2 - 5), 11,
-            active ? tc : Color{180,185,200,255});
-    };
+        DrawText(nm, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 5), 11,
+            active ? tc : Color{ 180,185,200,255 });
+        };
 
     for (int c = 0; c < 6; c++) DrawTool(0, c, 6, row0[c]);
     for (int c = 0; c < 5; c++) DrawTool(1, c, 5, row1[c]);
@@ -864,8 +969,8 @@ void LevelEditor::DrawBrowserUI()
 void LevelEditor::DrawPropertiesPanel()
 {
     // Sits in the lower part of the browser, between the tool rows and status
-    float py  = (float)(_sh - BROWSER_H) + 6 + 2*(38+4) + 4;
-    float ph  = (float)(_sh - 26) - py;
+    float py = (float)(_sh - BROWSER_H) + 6 + 2 * (38 + 4) + 4;
+    float ph = (float)(_sh - 26) - py;
     if (ph < 10) return;
 
     if (!_sel.valid()) {
@@ -873,11 +978,11 @@ void LevelEditor::DrawPropertiesPanel()
         DrawText(TextFormat(
             "Level %d  |  Platforms:%d  Ladders:%d  PathNodes:%d  Beams:%d  Nukes:%d  Bea:%d  Enemies:%d",
             _levelId,
-            (int)_level.platforms.size(),  (int)_level.ladders.size(),
-            (int)_level.pathNodes.size(),  (int)_level.beams.size(),
+            (int)_level.platforms.size(), (int)_level.ladders.size(),
+            (int)_level.pathNodes.size(), (int)_level.beams.size(),
             (int)_level.nukeSpawns.size(), (int)_level.beatriceSpawns.size(),
             (int)_level.enemySpawns.size()),
-            8, (int)py, 12, Color{140,145,160,255});
+            8, (int)py, 12, Color{ 140,145,160,255 });
         return;
     }
 
@@ -887,7 +992,7 @@ void LevelEditor::DrawPropertiesPanel()
     // Delete button (always shown when something is selected)
     Rectangle delBtn = { (float)_sw - 72, py, 68, 22 };
     bool      delHov = CheckCollisionPointRec(GetMousePosition(), delBtn);
-    DrawRectangleRec(delBtn, delHov ? Color{180,30,30,255} : Color{100,20,20,255});
+    DrawRectangleRec(delBtn, delHov ? Color{ 180,30,30,255 } : Color{ 100,20,20,255 });
     DrawText("DELETE", (int)delBtn.x + 6, (int)delBtn.y + 5, 11, WHITE);
     if (delHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) DeleteSelected();
 
@@ -902,16 +1007,16 @@ void LevelEditor::DrawPropertiesPanel()
         DrawText(buf, 8, (int)py, 13, ToolColor(t));
 
         // Tilt -/+ buttons
-        Rectangle tiltM = { 8, py+16, 24, 18 };
-        Rectangle tiltP = { 36, py+16, 24, 18 };
-        DrawRectangleRec(tiltM, {50,50,70,255}); DrawText("-", 17, (int)py+19, 11, WHITE);
-        DrawRectangleRec(tiltP, {50,50,70,255}); DrawText("+", 44, (int)py+19, 11, WHITE);
+        Rectangle tiltM = { 8, py + 16, 24, 18 };
+        Rectangle tiltP = { 36, py + 16, 24, 18 };
+        DrawRectangleRec(tiltM, { 50,50,70,255 }); DrawText("-", 17, (int)py + 19, 11, WHITE);
+        DrawRectangleRec(tiltP, { 50,50,70,255 }); DrawText("+", 44, (int)py + 19, 11, WHITE);
         Vector2 m = GetMousePosition();
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (CheckCollisionPointRec(m, tiltM)) p.tilt -= 1.f;
             if (CheckCollisionPointRec(m, tiltP)) p.tilt += 1.f;
         }
-        DrawText(TextFormat("tilt: %.0f", p.tilt), 66, (int)py+19, 11, LIGHTGRAY);
+        DrawText(TextFormat("tilt: %.0f", p.tilt), 66, (int)py + 19, 11, LIGHTGRAY);
         break;
     }
     case EditorTool::LADDER: {
@@ -931,27 +1036,27 @@ void LevelEditor::DrawPropertiesPanel()
         auto SmallBtn = [&](const char* lbl, float x, Color c) -> Rectangle {
             Rectangle r = { x, brow, 58, 18 };
             DrawRectangleRec(r, c);
-            int tw = MeasureText(lbl, 10); DrawText(lbl, (int)(x+r.width/2-tw/2),(int)brow+4,10,WHITE);
+            int tw = MeasureText(lbl, 10); DrawText(lbl, (int)(x + r.width / 2 - tw / 2), (int)brow + 4, 10, WHITE);
             return r;
-        };
+            };
 
         Vector2 mp = GetMousePosition();
         bool lp = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
 
         // Connect N0
-        Rectangle rN0 = SmallBtn("Set N0", bx, {180,80,0,255});
+        Rectangle rN0 = SmallBtn("Set N0", bx, { 180,80,0,255 });
         bx += 62;
-        Rectangle rN1 = SmallBtn("Set N1", bx, {0,100,180,255});
+        Rectangle rN1 = SmallBtn("Set N1", bx, { 0,100,180,255 });
         bx += 62;
 
         // Split toggle
-        Rectangle rSpl = SmallBtn(n.isSplitNode ? "Split:ON" : "Split:OFF", bx, {50,50,80,255});
+        Rectangle rSpl = SmallBtn(n.isSplitNode ? "Split:ON" : "Split:OFF", bx, { 50,50,80,255 });
         bx += 62;
 
         // Roll threshold
-        Rectangle rRM = SmallBtn("Roll-", bx, {50,50,70,255}); bx += 62;
-        Rectangle rRP = SmallBtn("Roll+", bx, {50,50,70,255}); bx += 62;
-        DrawText(TextFormat("=%d", n.rollThreshold), (int)bx, (int)brow+4, 11, LIGHTGRAY);
+        Rectangle rRM = SmallBtn("Roll-", bx, { 50,50,70,255 }); bx += 62;
+        Rectangle rRP = SmallBtn("Roll+", bx, { 50,50,70,255 }); bx += 62;
+        DrawText(TextFormat("=%d", n.rollThreshold), (int)bx, (int)brow + 4, 11, LIGHTGRAY);
 
         if (lp) {
             double now = GetTime();
@@ -975,7 +1080,7 @@ void LevelEditor::DrawPropertiesPanel()
         // Show current connections
         char cnx[64];
         snprintf(cnx, sizeof(cnx), "N0→%d  N1→%d", n.next[0], n.next[1]);
-        DrawText(cnx, (int)(8+5*62), (int)brow+4, 11, Color{200,200,200,255});
+        DrawText(cnx, (int)(8 + 5 * 62), (int)brow + 4, 11, Color{ 200,200,200,255 });
         break;
     }
     default: {
@@ -1013,9 +1118,9 @@ void LevelEditor::Draw()
             ? ">> Click a node to set NEXT[0]  (ESC = cancel)"
             : ">> Click a node to set NEXT[1]  (ESC = cancel)";
         int tw = MeasureText(hint, 14);
-        int tx = _sw/2 - tw/2, ty = _sh/2 - 10;
+        int tx = _sw / 2 - tw / 2, ty = _sh / 2 - 10;
         DrawRectangle(tx - 8, ty - 6, tw + 16, 26, { 0,0,0,200 });
         DrawText(hint, tx, ty, 14,
-            (_connectMode==ConnectMode::NEXT0) ? Color{255,140,0,255} : Color{0,200,255,255});
+            (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,255 } : Color{ 0,200,255,255 });
     }
 }
