@@ -1928,7 +1928,7 @@ int main(void)
             const char* playText = "1 PLAYER GAME";
             const char* exitText = "EXIT";
             const char* controlText = "CONTROLS";
-            const char* subtitle = "© 1981 NINTENDO";
+            const char* subtitle = "1967 Skibidi Toiltet Defense & Co";
 
             int titleW = MeasureText(title, titleFont), playW = MeasureText(playText, menuFont);
             int exitW = MeasureText(exitText, menuFont), subW = MeasureText(subtitle, smallFont);
