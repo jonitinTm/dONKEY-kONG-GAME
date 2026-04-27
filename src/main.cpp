@@ -1192,11 +1192,11 @@ int main(void)
         }
         else if (currentScreen == CONTROLS)
         {
-            Rectangle btnsalida = { 750, 900, 200, 40 };
+            Rectangle btnsalida = { 350, 500, 200, 40 };
             Vector2 mouse = GetMousePosition();
             if (CheckCollisionPointRec(mouse, btnsalida)) 
             { 
-                DrawText(">", 725, 900, 40, ORANGE);
+                DrawText(">", 325, 500, 30, ORANGE);
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) 
                 {
                     currentScreen = MENU;
@@ -1991,7 +1991,7 @@ int main(void)
             DrawText("W", 295, 400, 30, ORANGE);
             DrawText("while you are close to them", 330, 400, 30, WHITE);
 
-            DrawText("Return", 750, 900, 30, WHITE);
+            DrawText("Return", 350, 500, 30, WHITE);
         }
 
         else if (currentScreen == GAMEPLAY)
