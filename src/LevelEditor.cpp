@@ -427,8 +427,6 @@ void LevelEditor::UpdateToolbar()
         _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT;
         _sel.clear(); _multiSel.clear(); _boxSelecting = false; SetStatus("Cancelled.");
     }
-    // B = back to menu (always)
-    if (IsKeyPressed(KEY_B)) { _wantsMenu = true; return; }
     // [ / ] cycle grid division
     if (IsKeyPressed(KEY_LEFT_BRACKET))
     {
@@ -655,6 +653,8 @@ void LevelEditor::UpdateCanvas()
 void LevelEditor::Update(float dt)
 {
     if (_statusTimer > 0.f) _statusTimer -= dt;
+    // B = back to menu, absolute top priority before any other input
+    if (IsKeyPressed(KEY_B)) { _wantsMenu = true; return; }
     UpdateToolbar();
     if (_wantsMenu || _wantsPlay) return;
     UpdateBrowser();

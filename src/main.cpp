@@ -1306,7 +1306,7 @@ int main(void)
         else if (currentScreen == LEVEL_EDITOR)
         {
             editor.Update(dt);
-            if (editor.WantsMenu()) {
+            if (editor.WantsMenu() || IsKeyPressed(KEY_B)) {
                 editor.ClearFlags();
                 currentScreen = MENU;
             }
