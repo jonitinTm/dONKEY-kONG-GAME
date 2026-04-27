@@ -2,11 +2,9 @@
 #include "raymath.h"
 #include "Collision.h"
 #include "Ladder.h"
-#include "LevelData.h"
-#include "LevelEditor.h"
 #include <ctime>
 
-enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR };
+enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU,CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH };
 
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
@@ -397,9 +395,6 @@ int main(void)
     Rectangle btnPlay = { 340, 450, 200, 40 };
     Rectangle btnExit = { 340, 500, 200, 40 };
     Rectangle btnCtrl = { 340, 550, 200, 40 };
-    Rectangle btnEditor = { 340, 600, 200, 40 };
-
-    LevelEditor editor;
 
     bool      debugPath = false;
 
@@ -730,7 +725,6 @@ int main(void)
 
     // ── Window / audio / textures ─────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
-    editor.Init(screenWidth, screenHeight);
     SetRandomSeed((unsigned int)time(NULL));   // truly random each run
     InitAudioDevice();
 
@@ -855,7 +849,7 @@ int main(void)
     Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
     Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
-
+    
     Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
 
     // Array for easy indexed access
@@ -1097,7 +1091,7 @@ int main(void)
             nukeShakeOffset = { 0, 0 };
             for (auto& nk : nukes) nk.active = false;
             nukes.clear();
-
+            
             {
                 int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
                 nukes.push_back({ nukeSpawnNodes[idx], true });
@@ -1175,7 +1169,6 @@ int main(void)
             if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
             if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
             if (CheckCollisionPointRec(mouse, btnCtrl)) { selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = CONTROLS; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
-            if (CheckCollisionPointRec(mouse, btnEditor)) { selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; } }
             if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
         }
         // ── HOW HIGH screen (update) ──────────────────────────────────────────
@@ -1199,422 +1192,400 @@ int main(void)
         }
         else if (currentScreen == CONTROLS)
         {
-            Rectangle btnsalida = { 350, 500, 200, 40 };
+            Rectangle btnsalida = { 750, 900, 200, 40 };
             Vector2 mouse = GetMousePosition();
-            <<<<<< < Updated upstream
-                if (CheckCollisionPointRec(mouse, btnsalida))
+            if (CheckCollisionPointRec(mouse, btnsalida)) 
+            { 
+                DrawText(">", 725, 900, 40, ORANGE);
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) 
                 {
-                    DrawText(">", 325, 500, 30, ORANGE);
-                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                        ====== =
-                        if (CheckCollisionPointRec(mouse, btnsalida))
-                        {
-                            DrawText(">", 725, 900, 40, ORANGE);
-                            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                                >>>>>> > Stashed changes
-                            {
-                                currentScreen = MENU;
-                            }
-                        }
+                    currentScreen = MENU;
+                    
                 }
-                else if (currentScreen == LEVEL_EDITOR)
+            }
+
+        }
+
+        // ── GAMEPLAY ──────────────────────────────────────────────────────────
+        else if (currentScreen == GAMEPLAY)
+        {
+            UpdateMusicStream(music);
+            animationTimer += dt;
+            if (ladderCooldown > 0.0f) ladderCooldown -= dt;
+
+            if (invincible)
+            {
+                invincibleTimer -= dt;
+                if (invincibleTimer <= 0.0f) { invincible = false; invincibleTimer = 0.0f; }
+            }
+
+            float prevX = player.x, prevY = player.y;
+            bool  playerIsMoving = false;
+
+            if (!isDying)
+            {
+                for (auto& b : barrels)
                 {
-                    editor.Update(dt);
-                    if (editor.WantsMenu()) { editor.ClearFlags(); currentScreen = MENU; }
-                    if (editor.WantsPlay()) { editor.ClearFlags(); FullReset(); currentScreen = GAMEPLAY; }
+                    bool wasActive = b.active;
+                    b.reachedEnd = false;
+                    UpdateBarrel(b, barrelPath, dt);
+                    if (wasActive && !b.active && b.reachedEnd)
+                        SpawnEnemyAtEnd(b.hitbox.x + b.hitbox.width * 0.5f);
                 }
+                spawnTimer += dt;
+                minuteTimer += dt;
+            }
 
-            // ── GAMEPLAY ──────────────────────────────────────────────────────────
-                else if (currentScreen == GAMEPLAY)
+            // ── Flying nuke physics ───────────────────────────────────────────
+            for (auto& fn : flyingNukes)
+            {
+                if (!fn.active) continue;
+                float prevFnX = fn.rect.x, prevFnY = fn.rect.y;
+                fn.vel.y += gravity;          // same gravity constant as player
+                fn.rect.x += fn.vel.x;
+                fn.rect.y += fn.vel.y;
+                float fnVx = fn.vel.x, fnVy = fn.vel.y;
+                CollisionResult col = CollisionManager::ResolveAll(
+                    fn.rect, fnVx, fnVy, platforms, prevFnX, prevFnY);
+                fn.vel.x = fnVx;
+                fn.vel.y = fnVy;
+                if (col.grounded)
                 {
-                    UpdateMusicStream(music);
-                    animationTimer += dt;
-                    if (ladderCooldown > 0.0f) ladderCooldown -= dt;
+                    nukes.push_back({ { fn.rect.x, fn.rect.y }, true });
+                    fn.active = false;
+                }
+                if (fn.rect.y > (float)screenHeight + 120.0f) fn.active = false;
+            }
 
-                    if (invincible)
+            // ── Beatrice item animation ───────────────────────────────────────
+            beatriceItemAnimTimer += dt;
+            if (beatriceItemAnimTimer >= 0.35f)
+            {
+                beatriceItemAnimFrame = (beatriceItemAnimFrame + 1) % 2;
+                beatriceItemAnimTimer = 0.0f;
+            }
+
+            // ── Regulus animation update ──────────────────────────────────────
+            if (regulusIsStunned)
+            {
+                if (regulusStunEnding)
+                {
+                    regulusStunEndTimer += dt;
+                    if (regulusStunEndTimer >= 1.0f / REGULUS_STUN_END_FPS)
                     {
-                        invincibleTimer -= dt;
-                        if (invincibleTimer <= 0.0f) { invincible = false; invincibleTimer = 0.0f; }
-                    }
-
-                    float prevX = player.x, prevY = player.y;
-                    bool  playerIsMoving = false;
-
-                    if (!isDying)
-                    {
-                        for (auto& b : barrels)
+                        regulusStunEndTimer -= 1.0f / REGULUS_STUN_END_FPS;
+                        regulusStunEndFrame++;
+                        if (regulusStunEndFrame >= 5)
                         {
-                            bool wasActive = b.active;
-                            b.reachedEnd = false;
-                            UpdateBarrel(b, barrelPath, dt);
-                            if (wasActive && !b.active && b.reachedEnd)
-                                SpawnEnemyAtEnd(b.hitbox.x + b.hitbox.width * 0.5f);
+                            regulusIsStunned = false;
+                            regulusStunEnding = false;
+                            regulusStunEndFrame = 0;
+                            regulusIdleFrame = 0;
+                            regulusIdleTimer = 0.0f;
                         }
-                        spawnTimer += dt;
-                        minuteTimer += dt;
                     }
-
-                    // ── Flying nuke physics ───────────────────────────────────────────
-                    for (auto& fn : flyingNukes)
+                }
+                else
+                {
+                    regulusStunTimer += dt;
+                    if (regulusStunTimer >= 1.0f / REGULUS_STUN_FPS)
                     {
-                        if (!fn.active) continue;
-                        float prevFnX = fn.rect.x, prevFnY = fn.rect.y;
-                        fn.vel.y += gravity;          // same gravity constant as player
-                        fn.rect.x += fn.vel.x;
-                        fn.rect.y += fn.vel.y;
-                        float fnVx = fn.vel.x, fnVy = fn.vel.y;
-                        CollisionResult col = CollisionManager::ResolveAll(
-                            fn.rect, fnVx, fnVy, platforms, prevFnX, prevFnY);
-                        fn.vel.x = fnVx;
-                        fn.vel.y = fnVy;
-                        if (col.grounded)
+                        regulusStunTimer -= 1.0f / REGULUS_STUN_FPS;
+                        regulusStunFrame++;
+                        if (regulusStunFrame >= 3)
                         {
-                            nukes.push_back({ { fn.rect.x, fn.rect.y }, true });
-                            fn.active = false;
-                        }
-                        if (fn.rect.y > (float)screenHeight + 120.0f) fn.active = false;
-                    }
-
-                    // ── Beatrice item animation ───────────────────────────────────────
-                    beatriceItemAnimTimer += dt;
-                    if (beatriceItemAnimTimer >= 0.35f)
-                    {
-                        beatriceItemAnimFrame = (beatriceItemAnimFrame + 1) % 2;
-                        beatriceItemAnimTimer = 0.0f;
-                    }
-
-                    // ── Regulus animation update ──────────────────────────────────────
-                    if (regulusIsStunned)
-                    {
-                        if (regulusStunEnding)
-                        {
-                            regulusStunEndTimer += dt;
-                            if (regulusStunEndTimer >= 1.0f / REGULUS_STUN_END_FPS)
+                            regulusStunFrame = 0;
+                            regulusStunLoops++;
+                            if (regulusStunLoops >= REGULUS_STUN_LOOPS)
                             {
-                                regulusStunEndTimer -= 1.0f / REGULUS_STUN_END_FPS;
-                                regulusStunEndFrame++;
-                                if (regulusStunEndFrame >= 5)
-                                {
-                                    regulusIsStunned = false;
-                                    regulusStunEnding = false;
-                                    regulusStunEndFrame = 0;
-                                    regulusIdleFrame = 0;
-                                    regulusIdleTimer = 0.0f;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            regulusStunTimer += dt;
-                            if (regulusStunTimer >= 1.0f / REGULUS_STUN_FPS)
-                            {
-                                regulusStunTimer -= 1.0f / REGULUS_STUN_FPS;
-                                regulusStunFrame++;
-                                if (regulusStunFrame >= 3)
-                                {
-                                    regulusStunFrame = 0;
-                                    regulusStunLoops++;
-                                    if (regulusStunLoops >= REGULUS_STUN_LOOPS)
-                                    {
-                                        regulusStunEnding = true;
-                                        regulusStunEndFrame = 0;
-                                        regulusStunEndTimer = 0.0f;
-                                    }
-                                }
+                                regulusStunEnding = true;
+                                regulusStunEndFrame = 0;
+                                regulusStunEndTimer = 0.0f;
                             }
                         }
                     }
-                    else if (!regulusThrowing)
+                }
+            }
+            else if (!regulusThrowing)
+            {
+                regulusIdleTimer += dt;
+                if (regulusIdleTimer >= 1.0f / REGULUS_IDLE_FPS)
+                {
+                    regulusIdleTimer -= 1.0f / REGULUS_IDLE_FPS;
+                    regulusIdleFrame = (regulusIdleFrame + 1) % 3;
+                }
+            }
+            else
+            {
+                regulusThrowTimer += dt;
+                if (regulusThrowTimer >= 1.0f / REGULUS_THROW_FPS)
+                {
+                    regulusThrowTimer -= 1.0f / REGULUS_THROW_FPS;
+                    regulusThrowFrame++;
+                    if (regulusThrowFrame >= 3)
                     {
-                        regulusIdleTimer += dt;
-                        if (regulusIdleTimer >= 1.0f / REGULUS_IDLE_FPS)
+                        if (regulusSpawnPending)
                         {
-                            regulusIdleTimer -= 1.0f / REGULUS_IDLE_FPS;
-                            regulusIdleFrame = (regulusIdleFrame + 1) % 3;
+                            SpawnBarrelFromPool(barrels, barrelPath, 4.0f, 26.25f, 26.25f, regulusForceBlue);
+                            regulusSpawnPending = false;
+                            regulusForceBlue = false;
                         }
+                        regulusThrowing = false;
+                        regulusThrowFrame = 0;
+                        regulusIdleFrame = 0;
+                        regulusIdleTimer = 0.0f;
+                    }
+                }
+            }
+
+            // ── Nuke pickup ───────────────────────────────────────────────────
+            if (!isDying && !playerHasNuke && IsKeyPressed(KEY_E))
+            {
+                float nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                float nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                for (auto& nk : nukes)
+                {
+                    if (!nk.active) continue;
+                    Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
+                    if (CheckCollisionRecs(player, nkRect)) { nk.active = false; playerHasNuke = true; break; }
+                }
+            }
+
+            // ── Beatrice pickup ───────────────────────────────────────────────
+            if (!isDying && !playerHasBeatrice && IsKeyPressed(KEY_E))
+            {
+                float bcScale = 2.0f;
+                float bcW = Beatrice_Idle1.width * bcScale;
+                float bcH = Beatrice_Idle1.height * bcScale;
+                for (auto& bc : beatrices)
+                {
+                    if (!bc.active) continue;
+                    Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
+                    if (CheckCollisionRecs(player, bcRect))
+                    {
+                        bc.active = false;
+                        playerHasBeatrice = true;
+                        beatriceAbilityTimer = BEATRICE_DURATION;
+                        beaBulletShootTimer = 0.0f;
+                        break;
+                    }
+                }
+            }
+
+            // ── Beatrice ability timer & bullets ──────────────────────────────
+            if (playerHasBeatrice && !isDying)
+            {
+                beatriceAbilityTimer -= dt;
+                if (beatriceAbilityTimer <= 0.0f)
+                {
+                    playerHasBeatrice = false;
+                    beatriceAbilityTimer = 0.0f;
+                    beaBulletShootTimer = 0.0f;
+                    for (auto& bb : beaBullets) bb.active = false;
+                }
+                else if (!onLadder)
+                {
+                    beaBulletShootTimer += dt;
+                    if (beaBulletShootTimer >= BEA_BULLET_SHOOT_INTERVAL)
+                    {
+                        beaBulletShootTimer = 0.0f;
+                        Vector2 mousePos = GetMousePosition();
+                        float   startX = player.x + player.width * 0.5f;
+                        float   startY = player.y + player.height * 0.30f;
+                        Vector2 dir = Vector2Normalize(Vector2Subtract(mousePos, { startX, startY }));
+                        for (auto& bb : beaBullets)
+                        {
+                            if (!bb.active)
+                            {
+                                bb.pos = { startX, startY };
+                                bb.vel = { dir.x * BEA_BULLET_SPEED, dir.y * BEA_BULLET_SPEED };
+                                bb.lifetime = 0.0f;
+                                bb.active = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Bullet update & barrel collision ──────────────────────────────
+            for (auto& bb : beaBullets)
+            {
+                if (!bb.active) continue;
+                bb.pos.x += bb.vel.x * dt;
+                bb.pos.y += bb.vel.y * dt;
+                bb.lifetime += dt;
+                if (bb.lifetime >= BEA_BULLET_LIFETIME
+                    || bb.pos.x < -60 || bb.pos.x > screenWidth + 60
+                    || bb.pos.y < -60 || bb.pos.y > screenHeight + 60)
+                {
+                    bb.active = false; continue;
+                }
+                float     bbScale = 2.0f;
+                float     bbHalfW = texBeaBullet.width * bbScale * 0.5f;
+                float     bbHalfH = texBeaBullet.height * bbScale * 0.5f;
+                Rectangle bbRect = { bb.pos.x - bbHalfW, bb.pos.y - bbHalfH,
+                                      bbHalfW * 2.0f, bbHalfH * 2.0f };
+                for (auto& b : barrels)
+                {
+                    if (!b.active) continue;
+                    if (CheckCollisionRecs(bbRect, b.hitbox))
+                    {
+                        b.active = false;
+                        bb.active = false;
+                        score += 100;
+                        break;
+                    }
+                }
+                // Colisión bala Beatrice con enemigos
+                if (bb.active) // solo si la bala sigue viva tras golpear barriles
+                {
+                    for (auto& en : enemies)
+                    {
+                        if (!en.active) continue;
+                        if (CheckCollisionRecs(bbRect, en.hitbox))
+                        {
+                            en.active = false;   // matar enemigo
+                            bb.active = false;   // destruir bala
+                            score += 300;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // ── Drop nuke with G — place it back in the world at player feet ──
+            // ── Throw nuke with G — arc in facing direction, lands on platforms ─
+            if (playerHasNuke && IsKeyPressed(KEY_G))
+            {
+                playerHasNuke = false;
+                float     nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                float     nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                FlyingNuke fn;
+                fn.rect = { player.x + player.width * 0.5f - nkW * 0.5f,
+                              player.y + player.height * 0.5f - nkH * 0.5f,
+                              nkW, nkH };
+                fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };  // forward arc
+                fn.active = true;
+                flyingNukes.push_back(fn);
+            }
+
+            // ── Nuke detonation ───────────────────────────────────────────────
+            if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
+            {
+                PlaySound(nukeSound);
+                float scale = 3.8f * 0.85f * 1.05f;
+                float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
+                float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
+                nukeExplosionPos = {
+                    player.x + image->width * scale * 0.5f - nkW * 0.5f,
+                    player.y - nkH - 2.0f
+                };
+                playerHasNuke = false;
+                nukeExplosionPlaying = true;
+                nukeExplosionFrame = 0;
+                nukeExplosionTimer = 0.0f;
+                nukeFlashTimer = 0.0f;
+                nukeExtraDelay = 3.0f;
+
+                for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
+                // Nuke mata enemigos 
+                int enemiesKilled = 0;
+                for (auto& en : enemies)
+                {
+                    if (en.active) { en.active = false; score += 300; enemiesKilled++; }
+                }
+                spawnTimer = 0.0f;
+
+                regulusIsStunned = true;
+                regulusStunEnding = false;
+                regulusStunFrame = 0;
+                regulusStunTimer = 0.0f;
+                regulusStunLoops = 0;
+                regulusStunEndFrame = 0;
+                regulusStunEndTimer = 0.0f;
+                regulusThrowing = false;
+                regulusSpawnPending = false;
+                regulusForceBlue = false;
+                regulusThrowFrame = 0;
+                regulusActiveSpawnTimer = 0.0f;
+            }
+            if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
+
+            if (nukeExplosionPlaying)
+            {
+                nukeExplosionTimer += dt;
+                if (nukeExplosionTimer >= 1.0f / NUKE_EXPL_FPS)
+                {
+                    nukeExplosionTimer -= 1.0f / NUKE_EXPL_FPS;
+                    nukeExplosionFrame++;
+                    if (nukeExplosionFrame >= NUKE_EXPL_FRAME_COUNT) nukeExplosionPlaying = false;
+                }
+            }
+
+            {
+                float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
+                if (nukeFlashTimer < flashTotal) nukeFlashTimer += dt;
+                if (nukeFlashTimer >= NUKE_FLASH_IN && nukeFlashTimer < flashTotal)
+                {
+                    float shakeFade = 1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT;
+                    float shakeMag = NUKE_SHAKE_AMOUNT * shakeFade;
+                    nukeShakeOffset = {
+                        (float)GetRandomValue((int)-shakeMag, (int)shakeMag),
+                        (float)GetRandomValue((int)-shakeMag, (int)shakeMag)
+                    };
+                }
+                else nukeShakeOffset = { 0, 0 };
+            }
+
+            // ── Regulus active/inactive machine ───────────────────────────────
+            if (!isDying && nukeExtraDelay <= 0.0f && !regulusIsStunned)
+            {
+                regulusStateTickTimer += dt;
+                if (regulusStateTickTimer >= 1.0f)
+                {
+                    regulusStateTickTimer -= 1.0f;
+                    if (regulusIsActive)
+                    {
+                        int threshold = 20 + regulusActiveFails * 20;
+                        if (threshold > 100) threshold = 100;
+                        if (GetRandomValue(1, 100) <= threshold)
+                        {
+                            regulusIsActive = false;
+                            regulusInactiveTime = 0.0f;
+                            regulusInactiveFails = 0;
+                            regulusActiveFails = 0;
+                        }
+                        else { regulusActiveFails++; }
                     }
                     else
                     {
-                        regulusThrowTimer += dt;
-                        if (regulusThrowTimer >= 1.0f / REGULUS_THROW_FPS)
+                        if (regulusInactiveTime >= 3.0f)
                         {
-                            regulusThrowTimer -= 1.0f / REGULUS_THROW_FPS;
-                            regulusThrowFrame++;
-                            if (regulusThrowFrame >= 3)
+                            int threshold = 30 + regulusInactiveFails * 15;
+                            if (threshold > 100) threshold = 100;
+                            if (GetRandomValue(1, 100) <= threshold)
                             {
-                                if (regulusSpawnPending)
-                                {
-                                    SpawnBarrelFromPool(barrels, barrelPath, 4.0f, 26.25f, 26.25f, regulusForceBlue);
-                                    regulusSpawnPending = false;
-                                    regulusForceBlue = false;
-                                }
-                                regulusThrowing = false;
-                                regulusThrowFrame = 0;
-                                regulusIdleFrame = 0;
-                                regulusIdleTimer = 0.0f;
+                                regulusIsActive = true;
+                                regulusActiveFails = 0;
+                                regulusInactiveFails = 0;
+                                regulusActiveSpawnTimer = 0.0f;
                             }
+                            else { regulusInactiveFails++; }
                         }
                     }
+                }
+                if (!regulusIsActive) regulusInactiveTime += dt;
+            }
 
-                    // ── Nuke pickup ───────────────────────────────────────────────────
-                    if (!isDying && !playerHasNuke && IsKeyPressed(KEY_E))
-                    {
-                        float nkW = NUKE_NATIVE_W * NUKE_SCALE;
-                        float nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                        for (auto& nk : nukes)
-                        {
-                            if (!nk.active) continue;
-                            Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
-                            if (CheckCollisionRecs(player, nkRect)) { nk.active = false; playerHasNuke = true; break; }
-                        }
-                    }
-
-                    // ── Beatrice pickup ───────────────────────────────────────────────
-                    if (!isDying && !playerHasBeatrice && IsKeyPressed(KEY_E))
-                    {
-                        float bcScale = 2.0f;
-                        float bcW = Beatrice_Idle1.width * bcScale;
-                        float bcH = Beatrice_Idle1.height * bcScale;
-                        for (auto& bc : beatrices)
-                        {
-                            if (!bc.active) continue;
-                            Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
-                            if (CheckCollisionRecs(player, bcRect))
-                            {
-                                bc.active = false;
-                                playerHasBeatrice = true;
-                                beatriceAbilityTimer = BEATRICE_DURATION;
-                                beaBulletShootTimer = 0.0f;
-                                break;
-                            }
-                        }
-                    }
-
-                    // ── Beatrice ability timer & bullets ──────────────────────────────
-                    if (playerHasBeatrice && !isDying)
-                    {
-                        beatriceAbilityTimer -= dt;
-                        if (beatriceAbilityTimer <= 0.0f)
-                        {
-                            playerHasBeatrice = false;
-                            beatriceAbilityTimer = 0.0f;
-                            beaBulletShootTimer = 0.0f;
-                            for (auto& bb : beaBullets) bb.active = false;
-                        }
-                        else if (!onLadder)
-                        {
-                            beaBulletShootTimer += dt;
-                            if (beaBulletShootTimer >= BEA_BULLET_SHOOT_INTERVAL)
-                            {
-                                beaBulletShootTimer = 0.0f;
-                                Vector2 mousePos = GetMousePosition();
-                                float   startX = player.x + player.width * 0.5f;
-                                float   startY = player.y + player.height * 0.30f;
-                                Vector2 dir = Vector2Normalize(Vector2Subtract(mousePos, { startX, startY }));
-                                for (auto& bb : beaBullets)
-                                {
-                                    if (!bb.active)
-                                    {
-                                        bb.pos = { startX, startY };
-                                        bb.vel = { dir.x * BEA_BULLET_SPEED, dir.y * BEA_BULLET_SPEED };
-                                        bb.lifetime = 0.0f;
-                                        bb.active = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── Bullet update & barrel collision ──────────────────────────────
-                    for (auto& bb : beaBullets)
-                    {
-                        if (!bb.active) continue;
-                        bb.pos.x += bb.vel.x * dt;
-                        bb.pos.y += bb.vel.y * dt;
-                        bb.lifetime += dt;
-                        if (bb.lifetime >= BEA_BULLET_LIFETIME
-                            || bb.pos.x < -60 || bb.pos.x > screenWidth + 60
-                            || bb.pos.y < -60 || bb.pos.y > screenHeight + 60)
-                        {
-                            bb.active = false; continue;
-                        }
-                        float     bbScale = 2.0f;
-                        float     bbHalfW = texBeaBullet.width * bbScale * 0.5f;
-                        float     bbHalfH = texBeaBullet.height * bbScale * 0.5f;
-                        Rectangle bbRect = { bb.pos.x - bbHalfW, bb.pos.y - bbHalfH,
-                                              bbHalfW * 2.0f, bbHalfH * 2.0f };
-                        for (auto& b : barrels)
-                        {
-                            if (!b.active) continue;
-                            if (CheckCollisionRecs(bbRect, b.hitbox))
-                            {
-                                b.active = false;
-                                bb.active = false;
-                                score += 100;
-                                break;
-                            }
-                        }
-                        // Colisión bala Beatrice con enemigos
-                        if (bb.active) // solo si la bala sigue viva tras golpear barriles
-                        {
-                            for (auto& en : enemies)
-                            {
-                                if (!en.active) continue;
-                                if (CheckCollisionRecs(bbRect, en.hitbox))
-                                {
-                                    en.active = false;   // matar enemigo
-                                    bb.active = false;   // destruir bala
-                                    score += 300;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // ── Drop nuke with G — place it back in the world at player feet ──
-                    // ── Throw nuke with G — arc in facing direction, lands on platforms ─
-                    if (playerHasNuke && IsKeyPressed(KEY_G))
-                    {
-                        playerHasNuke = false;
-                        float     nkW = NUKE_NATIVE_W * NUKE_SCALE;
-                        float     nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                        FlyingNuke fn;
-                        fn.rect = { player.x + player.width * 0.5f - nkW * 0.5f,
-                                      player.y + player.height * 0.5f - nkH * 0.5f,
-                                      nkW, nkH };
-                        fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };  // forward arc
-                        fn.active = true;
-                        flyingNukes.push_back(fn);
-                    }
-
-                    // ── Nuke detonation ───────────────────────────────────────────────
-                    if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
-                    {
-                        PlaySound(nukeSound);
-                        float scale = 3.8f * 0.85f * 1.05f;
-                        float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
-                        float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                        nukeExplosionPos = {
-                            player.x + image->width * scale * 0.5f - nkW * 0.5f,
-                            player.y - nkH - 2.0f
-                        };
-                        playerHasNuke = false;
-                        nukeExplosionPlaying = true;
-                        nukeExplosionFrame = 0;
-                        nukeExplosionTimer = 0.0f;
-                        nukeFlashTimer = 0.0f;
-                        nukeExtraDelay = 3.0f;
-
-                        for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
-                        // Nuke mata enemigos 
-                        int enemiesKilled = 0;
-                        for (auto& en : enemies)
-                        {
-                            if (en.active) { en.active = false; score += 300; enemiesKilled++; }
-                        }
-                        spawnTimer = 0.0f;
-
-                        regulusIsStunned = true;
-                        regulusStunEnding = false;
-                        regulusStunFrame = 0;
-                        regulusStunTimer = 0.0f;
-                        regulusStunLoops = 0;
-                        regulusStunEndFrame = 0;
-                        regulusStunEndTimer = 0.0f;
-                        regulusThrowing = false;
-                        regulusSpawnPending = false;
-                        regulusForceBlue = false;
-                        regulusThrowFrame = 0;
-                        regulusActiveSpawnTimer = 0.0f;
-                    }
-                    if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
-
-                    if (nukeExplosionPlaying)
-                    {
-                        nukeExplosionTimer += dt;
-                        if (nukeExplosionTimer >= 1.0f / NUKE_EXPL_FPS)
-                        {
-                            nukeExplosionTimer -= 1.0f / NUKE_EXPL_FPS;
-                            nukeExplosionFrame++;
-                            if (nukeExplosionFrame >= NUKE_EXPL_FRAME_COUNT) nukeExplosionPlaying = false;
-                        }
-                    }
-
-                    {
-                        float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
-                        if (nukeFlashTimer < flashTotal) nukeFlashTimer += dt;
-                        if (nukeFlashTimer >= NUKE_FLASH_IN && nukeFlashTimer < flashTotal)
-                        {
-                            float shakeFade = 1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT;
-                            float shakeMag = NUKE_SHAKE_AMOUNT * shakeFade;
-                            nukeShakeOffset = {
-                                (float)GetRandomValue((int)-shakeMag, (int)shakeMag),
-                                (float)GetRandomValue((int)-shakeMag, (int)shakeMag)
-                            };
-                        }
-                        else nukeShakeOffset = { 0, 0 };
-                    }
-
-                    // ── Regulus active/inactive machine ───────────────────────────────
-                    if (!isDying && nukeExtraDelay <= 0.0f && !regulusIsStunned)
-                    {
-                        regulusStateTickTimer += dt;
-                        if (regulusStateTickTimer >= 1.0f)
-                        {
-                            regulusStateTickTimer -= 1.0f;
-                            if (regulusIsActive)
-                            {
-                                int threshold = 20 + regulusActiveFails * 20;
-                                if (threshold > 100) threshold = 100;
-                                if (GetRandomValue(1, 100) <= threshold)
-                                {
-                                    regulusIsActive = false;
-                                    regulusInactiveTime = 0.0f;
-                                    regulusInactiveFails = 0;
-                                    regulusActiveFails = 0;
-                                }
-                                else { regulusActiveFails++; }
-                            }
-                            else
-                            {
-                                if (regulusInactiveTime >= 3.0f)
-                                {
-                                    int threshold = 30 + regulusInactiveFails * 15;
-                                    if (threshold > 100) threshold = 100;
-                                    if (GetRandomValue(1, 100) <= threshold)
-                                    {
-                                        regulusIsActive = true;
-                                        regulusActiveFails = 0;
-                                        regulusInactiveFails = 0;
-                                        regulusActiveSpawnTimer = 0.0f;
-                                    }
-                                    else { regulusInactiveFails++; }
-                                }
-                            }
-                        }
-                        if (!regulusIsActive) regulusInactiveTime += dt;
-                    }
-
-                    // ── Barrel spawn (active mode) ────────────────────────────────────
-                    if (!isDying && regulusIsActive && nukeExtraDelay <= 0.0f && !regulusIsStunned)
-                    {
-                        regulusActiveSpawnTimer += dt;
-                        if (regulusActiveSpawnTimer >= ACTIVE_SPAWN_INTERVAL)
-                        {
-                            regulusActiveSpawnTimer -= ACTIVE_SPAWN_INTERVAL;
-                            if (!regulusThrowing)
-                            {
-                                regulusThrowing = true;
-                                regulusThrowFrame = 0;
-                                regulusThrowTimer = 0.0f;
-                                regulusSpawnPending = true;
-                                regulusForceBlue = false;
-                            }
-                        }
-                    }
-
-                    if (!isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
+            // ── Barrel spawn (active mode) ────────────────────────────────────
+            if (!isDying && regulusIsActive && nukeExtraDelay <= 0.0f && !regulusIsStunned)
+            {
+                regulusActiveSpawnTimer += dt;
+                if (regulusActiveSpawnTimer >= ACTIVE_SPAWN_INTERVAL)
+                {
+                    regulusActiveSpawnTimer -= ACTIVE_SPAWN_INTERVAL;
+                    if (!regulusThrowing)
                     {
                         regulusThrowing = true;
                         regulusThrowFrame = 0;
@@ -1622,376 +1593,794 @@ int main(void)
                         regulusSpawnPending = true;
                         regulusForceBlue = false;
                     }
+                }
+            }
 
-                    // ── Barrel / player collision ─────────────────────────────────────
-                    if (!isDying && !invincible)
+            if (!isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
+            {
+                regulusThrowing = true;
+                regulusThrowFrame = 0;
+                regulusThrowTimer = 0.0f;
+                regulusSpawnPending = true;
+                regulusForceBlue = false;
+            }
+
+            // ── Barrel / player collision ─────────────────────────────────────
+            if (!isDying && !invincible)
+            {
+                for (const auto& b : barrels)
+                {
+                    if (!b.active) continue;
+                    if (!CheckCollisionRecs(player, b.hitbox)) continue;
+                    bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
+                        (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
+                    if (fromBelow) continue;
+                    TriggerDeath();
+                    break;
+                }
+            }
+
+            //Rabbit/ player collision
+            // ── Actualizar enemigos y colisión con jugador ────────────────────────────
+            if (!isDying)
+            {
+                for (auto& en : enemies)
+                {
+                    UpdateEnemy(en, player, platforms, dt);
+                    if (en.active && !invincible && CheckCollisionRecs(player, en.hitbox))
+                        TriggerDeath();
+                }
+            }
+
+            // ── Jump-over-barrel scoring ──────────────────────────────────────
+            if (!isDying && !onLadder && !isGrounded)
+            {
+                for (auto& b : barrels)
+                {
+                    if (!b.active || b.jumpScored) continue;
+                    float zoneW = (b.hitbox.width + 10.0f) * 1.3f;
+                    float zoneH = b.hitbox.height * 1.3f;
+                    Rectangle jumpZone = {
+                        b.hitbox.x - (zoneW - b.hitbox.width) * 0.5f,
+                        b.hitbox.y - zoneH,
+                        zoneW, zoneH
+                    };
+                    if (CheckCollisionRecs(player, jumpZone)) { score += 100; b.jumpScored = true; PlaySound(jumpBrlSound); }
+                }
+            }
+
+            // ── Death sequence update ─────────────────────────────────────────
+            if (isDying)
+            {
+                deathTimer += dt;
+                if (!hitPlayed) { PlaySound(HitSound);   hitPlayed = true; }
+                if (deathTimer > 0.5f && !deathPlayed) { PlaySound(deathSound); deathPlayed = true; }
+
+                if (deathShakeTimer > 0.0f)
+                {
+                    deathShakeTimer -= dt;
+                    float mag = DEATH_SHAKE_AMOUNT * (deathShakeTimer / DEATH_SHAKE_DURATION);
+                    deathShakeOffset = {
+                        (float)GetRandomValue((int)-mag, (int)mag),
+                        (float)GetRandomValue((int)-mag, (int)mag)
+                    };
+                }
+                else deathShakeOffset = { 0, 0 };
+
+                if (!deathReachedBlack)
+                {
+                    deathFallVelY += DEATH_FALL_GRAVITY;
+                    player.y += deathFallVelY;
+                    if (deathTimer >= DEATH_TOTAL_FALL)
                     {
-                        for (const auto& b : barrels)
+                        deathReachedBlack = true;
+                        deathBlackTimer = 0.0f;
+                    }
+                }
+                else
+                {
+                    deathBlackTimer += dt;
+                    if (deathBlackTimer >= (DEATH_BLACK_HOLD + 0.5f))
+                    {
+                        if (lives <= 0) currentScreen = GAME_OVER;
+                        else            ResetRound();
+                    }
+                }
+            }
+
+            // ── Barrel / house collision ──────────────────────────────────────
+            if (!isDying && !houseAnimPlaying)
+            {
+                for (auto& b : barrels)
+                {
+                    if (b.active && b.isBlue && CheckCollisionRecs(b.hitbox, houseHitbox))
+                    {
+                        houseAnimPlaying = true; houseAnimFrame = 0; houseAnimTimer = 0.0f;
+                        b.active = false; break;
+                    }
+                }
+            }
+            if (houseAnimPlaying)
+            {
+                houseAnimTimer += dt;
+                float frameDuration = 1.0f / HOUSE_ANIM_FPS;
+                if (houseAnimTimer >= frameDuration)
+                {
+                    houseAnimTimer -= frameDuration;
+                    houseAnimFrame++;
+                    if (houseAnimFrame == HOUSE_SWAP_AT_FRAME) houseIsSnowed = true;
+                    if (houseAnimFrame >= CAVE_FRAME_COUNT) { houseAnimPlaying = false; houseAnimFrame = CAVE_FRAME_COUNT - 1; }
+                }
+            }
+
+            // ── Player input ──────────────────────────────────────────────────
+            if (!isDying)
+            {
+                if (onLadder)
+                {
+                    const Ladder& lad = ladders[currentLadder];
+                    if (ladderExitPlaying)
+                    {
+                        float exitTotalDuration = 2.0f * ladderExitFrameDuration;
+                        ladderProgress += (0.4f / exitTotalDuration) * dt;
+                        ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
+                        player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                        player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                        ladderExitTimer += dt;
+                        if (ladderExitTimer >= ladderExitFrameDuration) { ladderExitTimer = 0.0f; ladderExitStep++; }
+                        if (ladderExitStep == 0)      image = &imgMarioClimbEnd1;
+                        else if (ladderExitStep == 1) image = &imgMarioClimbEnd2;
+                        else
                         {
-                            if (!b.active) continue;
-                            if (!CheckCollisionRecs(player, b.hitbox)) continue;
-                            bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
-                                (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
-                            if (fromBelow) continue;
-                            TriggerDeath();
+                            image = &imgMarioClimbDown;
+                            bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
+                                || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
+                                || IsKeyPressed(KEY_SPACE);
+                            if (wants)
+                            {
+                                onLadder = false; currentLadder = -1;
+                                ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
+                                ladderEntryClamp = false;
+                                velocityY = 0; isJumping = false;
+                            }
+                        }
+                    }
+                    else if (ladderEntryClamp)
+                    {
+                        ladderEntryClampTimer += dt;
+                        float t = Clamp(ladderEntryClampTimer / 0.3f, 0.0f, 1.0f);
+                        ladderProgress = ladderEntryClampStart + (0.57f - ladderEntryClampStart) * t;
+                        player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                        player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                        velocityY = 0; velocityX = 0;
+                        ladderClimbTimer += dt;
+                        if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
+                        image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
+                        if (t >= 1.0f) ladderEntryClamp = false;
+                    }
+                    else
+                    {
+                        bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
+                        if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
+                        if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
+                        ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
+                        player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
+                        player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                        velocityY = 0; velocityX = 0;
+                        if (ladderProgress <= 0.0f)
+                        {
+                            image = &imgMarioClimbDown;
+                            bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
+                                || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
+                                || IsKeyPressed(KEY_SPACE);
+                            if (wants)
+                            {
+                                onLadder = false; currentLadder = -1;
+                                ladderEntryClamp = false;
+                                isGrounded = true; isJumping = false; ladderCooldown = 0.2f;
+                            }
+                        }
+                        else if (ladderProgress >= 0.6f)
+                        {
+                            ladderExitPlaying = true;
+                            ladderExitStep = 0; ladderExitTimer = 0;
+                            image = &imgMarioClimbEnd1;
+                        }
+                        else if (climbing)
+                        {
+                            ladderClimbTimer += dt;
+                            if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
+                            image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
+                        }
+                    }
+                }
+                else
+                {
+                    if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
+                    if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
+
+                    if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
+                    {
+                        bool entered = false;
+                        if (!playerHasNuke && !playerHasBeatrice)
+                        {
+                            for (int i = 0; i < (int)ladders.size(); i++)
+                            {
+                                Rectangle _lhb = ladders[i].GetHitbox();
+                                float     _lnw = _lhb.width * 0.5f;
+                                Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height - 20.0f };
+                                if (ladderCooldown <= 0 && CheckCollisionRecs(player, _lnarrow))
+                                {
+                                    float ip = ladders[i].ProgressFromPlayerY(player.y, player.height);
+                                    ladderProgress = Clamp(ip, 0.01f, 0.99f);
+                                    ladderEntryClamp = false;
+                                    if (ladderProgress > 0.65f)
+                                    {
+                                        ladderEntryClamp = true;
+                                        ladderEntryClampStart = ladderProgress;
+                                        ladderEntryClampTimer = 0.0f;
+                                    }
+                                    onLadder = true;
+                                    currentLadder = i;
+                                    ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
+                                    ladderClimbFrame = 0;      ladderClimbTimer = 0;
+                                    player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
+                                    velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
+                                    entered = true; break;
+                                }
+                            }
+                        }
+                        if (!entered && IsKeyPressed(KEY_W) && !isJumping)
+                        {
+                            velocityY = jumpForce; isJumping = true; isGrounded = false;
+                        }
+                    }
+
+                    if (IsKeyPressed(KEY_SPACE) && !isJumping)
+                    {
+                        velocityY = jumpForce; isJumping = true; isGrounded = false;
+                    }
+
+                    if (!isGrounded) velocityY += gravity;
+                    player.y += velocityY;
+
+                    CollisionResult col = CollisionManager::ResolveAll(
+                        player, velocityX, velocityY, platforms, prevX, prevY);
+                    isGrounded = col.grounded;
+                    if (col.grounded) isJumping = false;
+
+                    // ── Player animation selection ────────────────────────────
+                    if (isJumping)
+                    {
+                        if (playerHasBeatrice)      image = &Dk_Mario_Jump_Beatrice;
+                        else if (playerHasNuke)     image = &imgMarioJumpNuke;
+                        else                        image = &imgMarioJump;
+                    }
+                    else if (playerIsMoving)
+                    {
+                        if (animationTimer >= animationSpeed)
+                        {
+                            walkFrame = (walkFrame + 1) % 2;
+                            animationTimer = fmod(animationTimer, animationSpeed);
+                        }
+                        if (playerHasBeatrice)      image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
+                        else if (playerHasNuke)     image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
+                        else                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
+                    }
+                    else
+                    {
+                        if (playerHasBeatrice)      image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
+                        else if (playerHasNuke)     image = &imgMarioIdleNuke;
+                        else                        image = &imgMarioIdle;
+                        walkFrame = 0;
+                    }
+
+                    if (player.y > screenHeight + 40) TriggerDeath();
+                }
+            }
+
+            if (isDying) image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
+
+            // ── Win Condition ─────────────────────────────────────────────────
+            if (CheckCollisionRecs(wincondition, player))
+            {
+                splashTimer = 0.0f;
+                currentScreen = GAME_OVER;
+            }
+
+        } // end GAMEPLAY update
+
+        else if (currentScreen == GAME_OVER)
+        {
+            splashTimer += dt;
+            if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER)) { splashTimer = 0.0f; FullReset(); currentScreen = MENU; }
+        }
+
+        rainScrollY += rainSpeed * dt;
+        rain2ScrollY += rain2Speed * dt;
+        if (rainScrollY >= Rain.height)  rainScrollY = 0.0f;
+        if (rain2ScrollY >= Rain2.height) rain2ScrollY = 0.0f;
+
+        // ─────────────────────────────────────────────────────────────────────
+        // DRAW
+        // ─────────────────────────────────────────────────────────────────────
+        BeginDrawing();
+        ClearBackground(BLACK);
+
+        if (currentScreen == SPLASH_SCREEN)
+        {
+            DrawText("A DONKEY KONG GAME PROJECT", 15, 400, 50, WHITE);
+            DrawText("Assignatura: Projecte 1 \nCurs: Disseny i Desenvolupament de videojocs 1 \nUniversitat: UPC", 50, 800, 20, GRAY);
+        }
+        else if (currentScreen == SPLASH_SCREEN2)
+        {
+            DrawText("Game by:\n\n Alejandro Perez\n Jonathan Bermello\n Marc Flores\n Biel Yubero", 300, 250, 30, WHITE);
+            DrawText("Tutor Alejandro Paris", 50, 800, 30, GRAY);
+        }
+        else if (currentScreen == MENU)
+        {
+            int   titleFont = 60, menuFont = 28, smallFont = 20, spacing = 30;
+            Color dkRed = { 255,  60,   0, 255 };
+            Color dkOrange = { 255, 140,   0, 255 };
+            Color dkWhite = WHITE;
+
+            const char* title = "DONKEY KONG";
+            const char* playText = "1 PLAYER GAME";
+            const char* exitText = "EXIT";
+            const char* controlText = "CONTROLS";
+            const char* subtitle = "1967 Skibidi Toiltet Defense & Co";
+
+            int titleW = MeasureText(title, titleFont), playW = MeasureText(playText, menuFont);
+            int exitW = MeasureText(exitText, menuFont), subW = MeasureText(subtitle, smallFont);
+            int controlW = MeasureText(controlText, menuFont);
+            int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
+            int startY = (screenHeight - totalH) / 2;
+            int titleX = (screenWidth - titleW) / 2, titleY = startY;
+            int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
+            int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
+            int controlX = (screenWidth - controlW) / 2, controlY = exitY + menuFont + spacing;
+            int subX = (screenWidth - subW) / 2, subY = controlY + menuFont + spacing;
+
+            if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
+            else if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
+            else if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
+
+
+            DrawText(title, titleX, titleY, titleFont, dkRed);
+            DrawText(playText, playX, playY, menuFont, dkWhite);
+            DrawText(exitText, exitX, exitY, menuFont, dkWhite);
+            DrawText(subtitle, subX, subY, smallFont, dkOrange);
+            DrawText(controlText, controlX, controlY, menuFont, dkWhite);
+
+        }
+        // ── HOW HIGH screen (draw) ────────────────────────────────────────────
+        else if (currentScreen == HOW_HIGH)
+        {
+            // 1. Background stretched to fill screen
+            DrawTexturePro(Subaru_Background,
+                { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
+                { 0, 0, (float)screenWidth, (float)screenHeight },
+                { 0, 0 }, 0.f, WHITE);
+
+            // 2. Current Subaru animation frame, also full-screen
+            Texture2D* subTex = subaruFrames[subaruFrame];
+            DrawTexturePro(*subTex,
+                { 0, 0, (float)subTex->width, (float)subTex->height },
+                { 0, 0, (float)screenWidth, (float)screenHeight },
+                { 0, 0 }, 0.f, WHITE);
+
+            // 3. Text on top
+            const char* howHighTxt = "HOW HIGH CAN YOU GET?";
+            int hwW = MeasureText(howHighTxt, 50);
+            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
+
+            const char* pressEnter = "PRESS ENTER TO PLAY";
+            int peW = MeasureText(pressEnter, 28);
+            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
+        }
+        else if (currentScreen == CONTROLS)
+        {
+
+            DrawText("- Move with", 10, 250, 30, WHITE);
+            DrawText("W, A, S, D", 195, 250, 30, ORANGE);
+            DrawText("E", 285, 300, 30, ORANGE);
+            DrawText("- Grab Items with", 10, 300, 30, WHITE);
+            DrawText("- Use items with", 10, 350, 30, WHITE);
+            DrawText("F", 260, 350, 30, ORANGE);
+            DrawText("- Climb stairs with ", 10, 400, 30, WHITE);
+            DrawText("W", 295, 400, 30, ORANGE);
+            DrawText("while you are close to them", 330, 400, 30, WHITE);
+
+            DrawText("Return", 750, 900, 30, WHITE);
+        }
+
+        else if (currentScreen == GAMEPLAY)
+        {
+            Camera2D cam = { 0 };
+            cam.zoom = 1.0f;
+            cam.offset = { nukeShakeOffset.x + deathShakeOffset.x, nukeShakeOffset.y + deathShakeOffset.y };
+            BeginMode2D(cam);
+
+            // 1. Background
+            DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
+
+            // 1.5 Rain2
+            {
+                float scaleX = (float)screenWidth / Rain2.width;
+                float scaleY = (float)screenHeight / Rain2.height;
+                float sW = Rain2.width * scaleX, sH = Rain2.height * scaleY;
+                DrawTexturePro(Rain2, { 0, rain2ScrollY, (float)Rain2.width, (float)Rain2.height }, { 0, 0, sW, sH }, {}, 0.f, rain2Tint);
+                DrawTexturePro(Rain2, { 0, 0, (float)Rain2.width, (float)Rain2.height }, { 0, -sH + rain2ScrollY, sW, sH }, {}, 0.f, rain2Tint);
+            }
+
+            // 2. Ladders
+            DrawTextureRec(ladderLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
+
+            // 3. Beams
+            DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
+            CollisionManager::DrawAll(platforms);
+
+            // 4. House
+            {
+                Texture2D& houseTex = houseIsSnowed ? House2 : House1;
+                DrawTexturePro(houseTex, { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H }, { houseX, houseY, houseW, houseH }, {}, 0.f, WHITE);
+                if (houseIsSnowed)
+                {
+                    float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE, sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
+                    DrawTexturePro(SnowFloor, { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H }, { houseX, 865.0f, sfW, sfH }, {}, 0.f, WHITE);
+                }
+                if (houseAnimPlaying && houseAnimFrame < CAVE_FRAME_COUNT)
+                {
+                    Texture2D* caveTex = caveFrames[houseAnimFrame];
+                    float caveW = CAVE_NATIVE_W * CAVE_DRAW_SCALE, caveH = CAVE_NATIVE_H * CAVE_DRAW_SCALE;
+                    float caveX = houseX + houseW - caveW * 0.65f;
+                    float animProgress = houseAnimFrame / (float)(CAVE_FRAME_COUNT - 1);
+                    float caveY = houseY + houseH * 0.5f - caveH * 0.7f + 10.0f * animProgress;
+                    DrawTexturePro(*caveTex, { 0, 0, CAVE_NATIVE_W, CAVE_NATIVE_H }, { caveX, caveY, caveW, caveH }, {}, 0.f, WHITE);
+                }
+            }
+
+            // 4.5 Nuke items
+            {
+                float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                for (const auto& nk : nukes)
+                {
+                    if (!nk.active) continue;
+                    float bobY = nk.pos.y + sinf((float)GetTime() * 3.0f) * 4.0f;
+                    DrawTexturePro(Nuke, { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H }, { nk.pos.x, bobY, nkW, nkH }, {}, 0.f, WHITE);
+                }
+            }
+
+            // 4.55 Flying nukes (in-air)
+            for (const auto& fn : flyingNukes)
+            {
+                if (!fn.active) continue;
+                DrawTexturePro(Nuke,
+                    { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
+                    { fn.rect.x, fn.rect.y, fn.rect.width, fn.rect.height },
+                    {}, 0.f, WHITE);
+            }
+
+            // 4.6 Beatrice items
+            {
+                float      bcScale = 2.0f;
+                Texture2D* bcTex = (beatriceItemAnimFrame == 0) ? &Beatrice_Idle1 : &Beatrice_Idle2;
+                float bcW = bcTex->width * bcScale;
+                float bcH = bcTex->height * bcScale;
+                for (const auto& bc : beatrices)
+                {
+                    if (!bc.active) continue;
+                    float bobY = bc.pos.y - bcH + sinf((float)GetTime() * 2.5f) * 4.0f;
+                    DrawTexturePro(*bcTex,
+                        { 0, 0, (float)bcTex->width, (float)bcTex->height },
+                        { bc.pos.x, bobY, bcW, bcH },
+                        {}, 0.f, WHITE);
+                }
+            }
+
+            // 4.7 Regulus
+            {
+                Texture2D* regTex = nullptr;
+                if (regulusIsStunned)
+                {
+                    if (regulusStunEnding)
+                    {
+                        int idx = regulusStunEndFrame < 5 ? regulusStunEndFrame : 4;
+                        regTex = regulusStunEndFrames[idx];
+                    }
+                    else
+                    {
+                        int idx = regulusStunFrame < 3 ? regulusStunFrame : 0;
+                        regTex = regulusStunFrames[idx];
+                    }
+                }
+                else
+                {
+                    int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                    regTex = regulusThrowing ? regulusThrowFrames[throwIdx] : regulusIdleFrames[regulusIdleFrame];
+                }
+
+                float regW = regTex->width * REGULUS_SCALE;
+                float regH = regTex->height * REGULUS_SCALE;
+                float regY = 225.0f - regH + 20.0f;
+                float regX = REGULUS_X + regW * 0.5f;
+
+                if (!regulusIsStunned && regulusThrowing)
+                {
+                    int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                    const float handOffX[3] = { 11.0f, 29.0f, 47.0f };
+                    const float handOffY[3] = { 40.0f, 19.0f, 40.0f };
+                    Texture2D* barrelHandTex = regulusForceBlue ? &BlueBarrelMov1 : &BarrelMov1;
+                    float barrelHandScale = REGULUS_SCALE * 0.55f;
+                    float barrelHandW = barrelHandTex->width * barrelHandScale;
+                    float barrelHandH = barrelHandTex->height * barrelHandScale;
+                    float handScrX = regX + handOffX[throwIdx] * REGULUS_SCALE - barrelHandW * 0.5f;
+                    float handScrY = regY + handOffY[throwIdx] * REGULUS_SCALE - barrelHandH * 0.5f;
+
+                    if (throwIdx == 0 || throwIdx == 2)
+                        DrawTexturePro(*barrelHandTex,
+                            { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                            { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
+                    DrawTexturePro(*regTex,
+                        { 0, 0, (float)regTex->width, (float)regTex->height },
+                        { regX, regY, regW, regH }, {}, 0.f, WHITE);
+                    if (throwIdx == 1)
+                        DrawTexturePro(*barrelHandTex,
+                            { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                            { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
+                }
+                else
+                {
+                    DrawTexturePro(*regTex,
+                        { 0, 0, (float)regTex->width, (float)regTex->height },
+                        { regX, regY, regW, regH }, {}, 0.f, WHITE);
+                }
+            }
+
+            // 5. Player
+            {
+                bool showPlayer = isDying || !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
+                if (showPlayer)
+                {
+                    float scale = 3.8f * 0.85f * 1.05f;
+                    // Feet-aligned: shift Beatrice sprites up so feet stay at same Y
+                    float baseH = imgMarioIdle.height * scale;
+                    float thisH = image->height * scale;
+                    float drawY = player.y + 10.0f + (baseH - thisH);
+                    Rectangle src = { 0, 0, (float)image->width, (float)image->height };
+                    Rectangle dest = { player.x, drawY, image->width * scale, thisH };
+                    if (!facingRight && !onLadder) src.width *= -1;
+                    DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
+
+                    if (playerHasNuke && !isDying)
+                    {
+                        float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
+                        float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
+                        float nkX = player.x + dest.width * 0.5f - nkW * 0.5f;
+                        float nukeOffsetY = 5.0f;
+                        bool  moving = (!onLadder && !isJumping && walkFrame != 0);
+                        if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
+                        float nkY = drawY - nkH - 2.0f + nukeOffsetY;
+                        Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
+                        if (!facingRight) nukeSrc.width *= -1;
+                        DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, {}, 0.f, WHITE);
+                    }
+                }
+            }
+
+            // 6. Barrels
+            for (const auto& b : barrels)
+            {
+                if (!b.active) continue;
+                Texture2D** rollSet = b.isBlue ? blueBarrelRoll : barrelRoll;
+                Texture2D** fallSet = b.isBlue ? blueBarrelFall : barrelFall;
+                Texture2D* tex;
+                if (b.isFalling) tex = fallSet[b.animFrame % 2];
+                else
+                {
+                    int frame = b.movingLeft ? (3 - b.animFrame % 4) : (b.animFrame % 4);
+                    tex = rollSet[frame];
+                }
+                float drawW = b.hitbox.width * 2.0f;
+                float drawH = b.hitbox.height * 2.0f;
+                float drawX = b.hitbox.x - (drawW - b.hitbox.width) * 0.5f;
+                float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f - 2.625f;
+                DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
+            }
+
+            // 6.1 Enemies
+            for (const auto& en : enemies)
+                DrawEnemy(en, rabbitWalkBlack, rabbitJumpBlack, rabbitWalkWhite, rabbitJumpWhite);
+
+
+            // 6.5 Beatrice bullets
+            {
+                float bbScale = 2.0f;
+                float bbW = texBeaBullet.width * bbScale;
+                float bbH = texBeaBullet.height * bbScale;
+                for (const auto& bb : beaBullets)
+                {
+                    if (!bb.active) continue;
+                    float angle = atan2f(bb.vel.y, bb.vel.x) * RAD2DEG;
+                    DrawTexturePro(texBeaBullet,
+                        { 0, 0, (float)texBeaBullet.width, (float)texBeaBullet.height },
+                        { bb.pos.x - bbW * 0.5f, bb.pos.y - bbH * 0.5f, bbW, bbH },
+                        { bbW * 0.5f, bbH * 0.5f }, angle, WHITE);
+                }
+            }
+
+            // 7. HUD
+            for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
+            {
+                const char* scoreTxt = TextFormat("SCORE: %d", score);
+                int sw = MeasureText(scoreTxt, 26);
+                DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW);
+            }
+            DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
+            if (onLadder) DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
+            {
+                int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
+                DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
+            }
+            if (playerHasBeatrice)
+                DrawText(TextFormat("BEATRICE: %.1fs", beatriceAbilityTimer),
+                    10, screenHeight - 105, 18, MAGENTA);
+            if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
+
+            // 8. Nuke explosion
+            if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT)
+            {
+                Texture2D* exTex = explosionFrames[nukeExplosionFrame];
+                float exScale = 4.0f;
+                float exW = exTex->width * exScale, exH = exTex->height * exScale;
+                DrawTexturePro(*exTex, { 0, 0, (float)exTex->width, (float)exTex->height },
+                    { nukeExplosionPos.x - exW * 0.5f, nukeExplosionPos.y - exH * 0.5f, exW, exH }, {}, 0.f, WHITE);
+            }
+
+            EndMode2D();
+
+            // 9. Rain overlay
+            {
+                float scaleX = (float)screenWidth / Rain.width;
+                float scaleY = (float)screenHeight / Rain.height;
+                float sW = Rain.width * scaleX, sH = Rain.height * scaleY;
+                DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height }, { 0, 0, sW, sH }, {}, 0.f, rainTint);
+                DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height }, { 0, -sH + rainScrollY, sW, sH }, {}, 0.f, rainTint);
+            }
+
+            // 9.5 "Press E" prompt — drawn after rain so it's above everything
+            if (!isDying)
+            {
+                const float ebScale = 1.75f;
+                const float ebW = EButton.width * ebScale;
+                const float ebH = EButton.height * ebScale;
+                bool        shown = false;
+
+                // ── Nuke item ─────────────────────────────────────────────
+                if (!playerHasNuke)
+                {
+                    const float nkW = NUKE_NATIVE_W * NUKE_SCALE;
+                    const float nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                    for (const auto& nk : nukes)
+                    {
+                        if (!nk.active) continue;
+                        Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
+                        if (CheckCollisionRecs(player, nkRect))
+                        {
+                            // centre horizontally over item, sit just above it
+                            float cx = nk.pos.x + nkW * 0.5f - ebW * 0.5f;
+                            float cy = nk.pos.y - ebH + 5.0f;
+                            DrawTexturePro(EButton,
+                                { 0, 0, (float)EButton.width, (float)EButton.height },
+                                { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
+                            shown = true;
                             break;
                         }
                     }
-
-                    //Rabbit/ player collision
-                    // ── Actualizar enemigos y colisión con jugador ────────────────────────────
-                    if (!isDying)
-                    {
-                        for (auto& en : enemies)
-                        {
-                            UpdateEnemy(en, player, platforms, dt);
-                            if (en.active && !invincible && CheckCollisionRecs(player, en.hitbox))
-                                TriggerDeath();
-                        }
-                    }
-
-                    // ── Jump-over-barrel scoring ──────────────────────────────────────
-                    if (!isDying && !onLadder && !isGrounded)
-                    {
-                        for (auto& b : barrels)
-                        {
-                            if (!b.active || b.jumpScored) continue;
-                            float zoneW = (b.hitbox.width + 10.0f) * 1.3f;
-                            float zoneH = b.hitbox.height * 1.3f;
-                            Rectangle jumpZone = {
-                                b.hitbox.x - (zoneW - b.hitbox.width) * 0.5f,
-                                b.hitbox.y - zoneH,
-                                zoneW, zoneH
-                            };
-                            if (CheckCollisionRecs(player, jumpZone)) { score += 100; b.jumpScored = true; PlaySound(jumpBrlSound); }
-                        }
-                    }
-
-                    // ── Death sequence update ─────────────────────────────────────────
-                    if (isDying)
-                    {
-                        deathTimer += dt;
-                        if (!hitPlayed) { PlaySound(HitSound);   hitPlayed = true; }
-                        if (deathTimer > 0.5f && !deathPlayed) { PlaySound(deathSound); deathPlayed = true; }
-
-                        if (deathShakeTimer > 0.0f)
-                        {
-                            deathShakeTimer -= dt;
-                            float mag = DEATH_SHAKE_AMOUNT * (deathShakeTimer / DEATH_SHAKE_DURATION);
-                            deathShakeOffset = {
-                                (float)GetRandomValue((int)-mag, (int)mag),
-                                (float)GetRandomValue((int)-mag, (int)mag)
-                            };
-                        }
-                        else deathShakeOffset = { 0, 0 };
-
-                        if (!deathReachedBlack)
-                        {
-                            deathFallVelY += DEATH_FALL_GRAVITY;
-                            player.y += deathFallVelY;
-                            if (deathTimer >= DEATH_TOTAL_FALL)
-                            {
-                                deathReachedBlack = true;
-                                deathBlackTimer = 0.0f;
-                            }
-                        }
-                        else
-                        {
-                            deathBlackTimer += dt;
-                            if (deathBlackTimer >= (DEATH_BLACK_HOLD + 0.5f))
-                            {
-                                if (lives <= 0) currentScreen = GAME_OVER;
-                                else            ResetRound();
-                            }
-                        }
-                    }
-
-                    // ── Barrel / house collision ──────────────────────────────────────
-                    if (!isDying && !houseAnimPlaying)
-                    {
-                        for (auto& b : barrels)
-                        {
-                            if (b.active && b.isBlue && CheckCollisionRecs(b.hitbox, houseHitbox))
-                            {
-                                houseAnimPlaying = true; houseAnimFrame = 0; houseAnimTimer = 0.0f;
-                                b.active = false; break;
-                            }
-                        }
-                    }
-                    if (houseAnimPlaying)
-                    {
-                        houseAnimTimer += dt;
-                        float frameDuration = 1.0f / HOUSE_ANIM_FPS;
-                        if (houseAnimTimer >= frameDuration)
-                        {
-                            houseAnimTimer -= frameDuration;
-                            houseAnimFrame++;
-                            if (houseAnimFrame == HOUSE_SWAP_AT_FRAME) houseIsSnowed = true;
-                            if (houseAnimFrame >= CAVE_FRAME_COUNT) { houseAnimPlaying = false; houseAnimFrame = CAVE_FRAME_COUNT - 1; }
-                        }
-                    }
-
-                    // ── Player input ──────────────────────────────────────────────────
-                    if (!isDying)
-                    {
-                        if (onLadder)
-                        {
-                            const Ladder& lad = ladders[currentLadder];
-                            if (ladderExitPlaying)
-                            {
-                                float exitTotalDuration = 2.0f * ladderExitFrameDuration;
-                                ladderProgress += (0.4f / exitTotalDuration) * dt;
-                                ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
-                                player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
-                                player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
-                                ladderExitTimer += dt;
-                                if (ladderExitTimer >= ladderExitFrameDuration) { ladderExitTimer = 0.0f; ladderExitStep++; }
-                                if (ladderExitStep == 0)      image = &imgMarioClimbEnd1;
-                                else if (ladderExitStep == 1) image = &imgMarioClimbEnd2;
-                                else
-                                {
-                                    image = &imgMarioClimbDown;
-                                    bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
-                                        || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
-                                        || IsKeyPressed(KEY_SPACE);
-                                    if (wants)
-                                    {
-                                        onLadder = false; currentLadder = -1;
-                                        ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                                        ladderEntryClamp = false;
-                                        velocityY = 0; isJumping = false;
-                                    }
-                                }
-                            }
-                            else if (ladderEntryClamp)
-                            {
-                                ladderEntryClampTimer += dt;
-                                float t = Clamp(ladderEntryClampTimer / 0.3f, 0.0f, 1.0f);
-                                ladderProgress = ladderEntryClampStart + (0.57f - ladderEntryClampStart) * t;
-                                player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
-                                player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
-                                velocityY = 0; velocityX = 0;
-                                ladderClimbTimer += dt;
-                                if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
-                                image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
-                                if (t >= 1.0f) ladderEntryClamp = false;
-                            }
-                            else
-                            {
-                                bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
-                                if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
-                                if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
-                                ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
-                                player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
-                                player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
-                                velocityY = 0; velocityX = 0;
-                                if (ladderProgress <= 0.0f)
-                                {
-                                    image = &imgMarioClimbDown;
-                                    bool wants = IsKeyDown(KEY_A) || IsKeyDown(KEY_D)
-                                        || IsKeyPressed(KEY_W) || IsKeyDown(KEY_S)
-                                        || IsKeyPressed(KEY_SPACE);
-                                    if (wants)
-                                    {
-                                        onLadder = false; currentLadder = -1;
-                                        ladderEntryClamp = false;
-                                        isGrounded = true; isJumping = false; ladderCooldown = 0.2f;
-                                    }
-                                }
-                                else if (ladderProgress >= 0.6f)
-                                {
-                                    ladderExitPlaying = true;
-                                    ladderExitStep = 0; ladderExitTimer = 0;
-                                    image = &imgMarioClimbEnd1;
-                                }
-                                else if (climbing)
-                                {
-                                    ladderClimbTimer += dt;
-                                    if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
-                                    image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
-                            if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
-
-                            if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
-                            {
-                                bool entered = false;
-                                if (!playerHasNuke && !playerHasBeatrice)
-                                {
-                                    for (int i = 0; i < (int)ladders.size(); i++)
-                                    {
-                                        Rectangle _lhb = ladders[i].GetHitbox();
-                                        float     _lnw = _lhb.width * 0.5f;
-                                        Rectangle _lnarrow = { _lhb.x + (_lhb.width - _lnw) * 0.5f, _lhb.y, _lnw, _lhb.height - 20.0f };
-                                        if (ladderCooldown <= 0 && CheckCollisionRecs(player, _lnarrow))
-                                        {
-                                            float ip = ladders[i].ProgressFromPlayerY(player.y, player.height);
-                                            ladderProgress = Clamp(ip, 0.01f, 0.99f);
-                                            ladderEntryClamp = false;
-                                            if (ladderProgress > 0.65f)
-                                            {
-                                                ladderEntryClamp = true;
-                                                ladderEntryClampStart = ladderProgress;
-                                                ladderEntryClampTimer = 0.0f;
-                                            }
-                                            onLadder = true;
-                                            currentLadder = i;
-                                            ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                                            ladderClimbFrame = 0;      ladderClimbTimer = 0;
-                                            player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
-                                            velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
-                                            entered = true; break;
-                                        }
-                                    }
-                                }
-                                if (!entered && IsKeyPressed(KEY_W) && !isJumping)
-                                {
-                                    velocityY = jumpForce; isJumping = true; isGrounded = false;
-                                }
-                            }
-
-                            if (IsKeyPressed(KEY_SPACE) && !isJumping)
-                            {
-                                velocityY = jumpForce; isJumping = true; isGrounded = false;
-                            }
-
-                            if (!isGrounded) velocityY += gravity;
-                            player.y += velocityY;
-
-                            CollisionResult col = CollisionManager::ResolveAll(
-                                player, velocityX, velocityY, platforms, prevX, prevY);
-                            isGrounded = col.grounded;
-                            if (col.grounded) isJumping = false;
-
-                            // ── Player animation selection ────────────────────────────
-                            if (isJumping)
-                            {
-                                if (playerHasBeatrice)      image = &Dk_Mario_Jump_Beatrice;
-                                else if (playerHasNuke)     image = &imgMarioJumpNuke;
-                                else                        image = &imgMarioJump;
-                            }
-                            else if (playerIsMoving)
-                            {
-                                if (animationTimer >= animationSpeed)
-                                {
-                                    walkFrame = (walkFrame + 1) % 2;
-                                    animationTimer = fmod(animationTimer, animationSpeed);
-                                }
-                                if (playerHasBeatrice)      image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
-                                else if (playerHasNuke)     image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
-                                else                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
-                            }
-                            else
-                            {
-                                if (playerHasBeatrice)      image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
-                                else if (playerHasNuke)     image = &imgMarioIdleNuke;
-                                else                        image = &imgMarioIdle;
-                                walkFrame = 0;
-                            }
-
-                            if (player.y > screenHeight + 40) TriggerDeath();
-                        }
-                    }
-
-                    if (isDying) image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
-
-                    // ── Win Condition ─────────────────────────────────────────────────
-                    if (CheckCollisionRecs(wincondition, player))
-                    {
-                        splashTimer = 0.0f;
-                        currentScreen = GAME_OVER;
-                    }
-
-                } // end GAMEPLAY update
-
-                else if (currentScreen == GAME_OVER)
-                {
-                    splashTimer += dt;
-                    if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER)) { splashTimer = 0.0f; FullReset(); currentScreen = MENU; }
                 }
 
-            rainScrollY += rainSpeed * dt;
-            rain2ScrollY += rain2Speed * dt;
-            if (rainScrollY >= Rain.height)  rainScrollY = 0.0f;
-            if (rain2ScrollY >= Rain2.height) rain2ScrollY = 0.0f;
-
-            // ─────────────────────────────────────────────────────────────────────
-            // DRAW
-            // ─────────────────────────────────────────────────────────────────────
-            BeginDrawing();
-            ClearBackground(BLACK);
-
-            if (currentScreen == SPLASH_SCREEN)
-            {
-                DrawText("A DONKEY KONG GAME PROJECT", 15, 400, 50, WHITE);
-                DrawText("Assignatura: Projecte 1 \nCurs: Disseny i Desenvolupament de videojocs 1 \nUniversitat: UPC", 50, 800, 20, GRAY);
-            }
-            else if (currentScreen == SPLASH_SCREEN2)
-            {
-                DrawText("Game by:\n\n Alejandro Perez\n Jonathan Bermello\n Marc Flores\n Biel Yubero", 300, 250, 30, WHITE);
-                DrawText("Tutor Alejandro Paris", 50, 800, 30, GRAY);
-            }
-            else if (currentScreen == MENU)
-            {
-                int   titleFont = 60, menuFont = 28, smallFont = 20, spacing = 30;
-                Color dkRed = { 255,  60,   0, 255 };
-                Color dkOrange = { 255, 140,   0, 255 };
-                Color dkWhite = WHITE;
-
-                const char* title = "DONKEY KONG";
-                const char* playText = "1 PLAYER GAME";
-                const char* exitText = "EXIT";
-                const char* controlText = "CONTROLS";
-                const char* editorText = "LEVEL EDITOR";
-                const char* subtitle = "1967 Skibidi Toiltet Defense & Co";
-
-                int titleW = MeasureText(title, titleFont);
-                int playW = MeasureText(playText, menuFont);
-                int exitW = MeasureText(exitText, menuFont);
-                int subW = MeasureText(subtitle, smallFont);
-                int controlW = MeasureText(controlText, menuFont);
-                int editorW = MeasureText(editorText, menuFont);
-
-                int totalH = titleFont + spacing + menuFont + spacing + menuFont + spacing + menuFont + spacing + smallFont;
-                int startY = (screenHeight - totalH) / 2;
-                int titleX = (screenWidth - titleW) / 2, titleY = startY;
-                int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
-                int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
-                int controlX = (screenWidth - controlW) / 2, controlY = exitY + menuFont + spacing;
-                int editorX = (screenWidth - editorW) / 2, editorY = controlY + menuFont + spacing;
-                int subX = (screenWidth - subW) / 2, subY = editorY + menuFont + spacing;
-
-                // Sync button rectangles to computed positions
-                btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)menuFont + 6 };
-                btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)menuFont + 6 };
-                btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)menuFont + 6 };
-                btnEditor = { (float)(editorX - 10), (float)editorY,  (float)(editorW + 20), (float)menuFont + 6 };
-
-                if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
-                if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
-                if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
-                if (selectedOption == 3) DrawText(">", editorX - 40, editorY, menuFont, dkOrange);
-
-                DrawText(title, titleX, titleY, titleFont, dkRed);
-                DrawText(playText, playX, playY, menuFont, dkWhite);
-                DrawText(exitText, exitX, exitY, menuFont, dkWhite);
-                DrawText(controlText, controlX, controlY, menuFont, dkWhite);
-                DrawText(editorText, editorX, editorY, menuFont, dkOrange);
-                DrawText(subtitle, subX, subY, smallFont, dkOrange);
+                // ── Beatrice item ─────────────────────────────────────────
+                if (!shown && !playerHasBeatrice)
+                {
+                    const float bcScale2 = 2.0f;
+                    const float bcW = Beatrice_Idle1.width * bcScale2;
+                    const float bcH = Beatrice_Idle1.height * bcScale2;
+                    for (const auto& bc : beatrices)
+                    {
+                        if (!bc.active) continue;
+                        // beatrice rect is drawn feet-up, so top = pos.y - bcH
+                        Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
+                        if (CheckCollisionRecs(player, bcRect))
+                        {
+                            float cx = bc.pos.x + bcW * 0.5f - ebW * 0.5f;
+                            float cy = bc.pos.y - bcH - ebH - 1.0f;
+                            DrawTexturePro(EButton,
+                                { 0, 0, (float)EButton.width, (float)EButton.height },
+                                { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
+                            break;
+                        }
+                    }
+                }
             }
 
-            // ── LEVEL EDITOR draw ─────────────────────────────────────────────────
-            else if (currentScreen == LEVEL_EDITOR)
+            // 9.6 Beatrice ability bar (above rain, bottom-left)
+            if (playerHasBeatrice)
             {
-                editor.Draw();
+                const float barMaxW = 180.0f;
+                const float barH = 14.0f;
+                const float barX = 20.0f;
+                const float barY = (float)screenHeight - 58.0f;
+                float       frac = Clamp(beatriceAbilityTimer / BEATRICE_DURATION, 0.0f, 1.0f);
+
+                // outer border
+                DrawRectangle((int)barX - 2, (int)barY - 2,
+                    (int)barMaxW + 4, (int)barH + 4, BLACK);
+                // dark background track
+                DrawRectangle((int)barX, (int)barY,
+                    (int)barMaxW, (int)barH, { 60, 0, 60, 220 });
+                // fill — colour shifts red when low
+                Color fillCol = (frac > 0.3f) ? MAGENTA : RED;
+                DrawRectangle((int)barX, (int)barY,
+                    (int)(barMaxW * frac), (int)barH, fillCol);
+                // label above bar
+                DrawText("BEATRICE", (int)barX, (int)barY - 18, 14, MAGENTA);
             }
-            // ── HOW HIGH screen (draw) ────────────────────────────────────────────
-            else if (currentScreen == HOW_HIGH)
+
+            // 10. Nuke flash
             {
+                float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
+                if (nukeFlashTimer < flashTotal)
+                {
+                    unsigned char alpha = 0;
+                    if (nukeFlashTimer < NUKE_FLASH_IN)
+                        alpha = (unsigned char)(255.0f * (nukeFlashTimer / NUKE_FLASH_IN));
+                    else
+                        alpha = (unsigned char)(255.0f * (1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT));
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
+                }
+            }
+
+            // 11. Death overlay
+            if (isDying || deathReachedBlack)
+            {
+                if (deathReachedBlack)
+                {
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, 255 });
+                }
+                else if (deathTimer < DEATH_FLASH_DURATION)
+                {
+                    float t = deathTimer / DEATH_FLASH_DURATION;
+                    unsigned char alpha = (unsigned char)(120.0f * t);
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
+                }
+                else
+                {
+                    float t = (deathTimer - DEATH_FLASH_DURATION) / DEATH_FADE_DURATION;
+                    if (t > 1.0f) t = 1.0f;
+                    unsigned char alpha = (unsigned char)(t * 255.0f);
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, alpha });
+                }
+            }
+        }
+        else if (currentScreen == GAME_OVER)
+        {
+            if (lives > 0)
+            {
+                splashTimer += dt;
+
+                // Advance Subaru animation at 5 fps
+                subaruTimer += dt;
+                if (subaruTimer >= 1.0f / SUBARU_ANIM_FPS)
+                {
+                    subaruTimer -= 1.0f / SUBARU_ANIM_FPS;
+                    subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
+                }
+
+                if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
+                {
+                    splashTimer = 0.0f;
+                    currentScreen = GAMEPLAY;
+                }
                 // 1. Background stretched to fill screen
                 DrawTexturePro(Subaru_Background,
                     { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
@@ -2005,499 +2394,74 @@ int main(void)
                     { 0, 0, (float)screenWidth, (float)screenHeight },
                     { 0, 0 }, 0.f, WHITE);
 
-                // 3. Text on top
-                const char* howHighTxt = "HOW HIGH CAN YOU GET?";
-                int hwW = MeasureText(howHighTxt, 50);
-                DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
-
-                const char* pressEnter = "PRESS ENTER TO PLAY";
-                int peW = MeasureText(pressEnter, 28);
-                DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
+                DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
+                DrawText("25", 200, 800, 30, WHITE);
+                DrawText("50", 200, 700, 30, WHITE);
             }
-            else if (currentScreen == CONTROLS)
+            else
             {
-
-                DrawText("- Move with", 10, 250, 30, WHITE);
-                DrawText("W, A, S, D", 195, 250, 30, ORANGE);
-                DrawText("E", 285, 300, 30, ORANGE);
-                DrawText("- Grab Items with", 10, 300, 30, WHITE);
-                DrawText("- Use items with", 10, 350, 30, WHITE);
-                DrawText("F", 260, 350, 30, ORANGE);
-                DrawText("- Climb stairs with ", 10, 400, 30, WHITE);
-                DrawText("W", 295, 400, 30, ORANGE);
-                DrawText("while you are close to them", 330, 400, 30, WHITE);
-
-                DrawText("Return", 350, 500, 30, WHITE);
+                DrawText("GAME OVER", 300, 380, 50, RED);
+                const char* scoreTxt = TextFormat("SCORE: %d", score);
+                int sw = MeasureText(scoreTxt, 32);
+                DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
             }
-
-            else if (currentScreen == GAMEPLAY)
-            {
-                Camera2D cam = { 0 };
-                cam.zoom = 1.0f;
-                cam.offset = { nukeShakeOffset.x + deathShakeOffset.x, nukeShakeOffset.y + deathShakeOffset.y };
-                BeginMode2D(cam);
-
-                // 1. Background
-                DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
-
-                // 1.5 Rain2
-                {
-                    float scaleX = (float)screenWidth / Rain2.width;
-                    float scaleY = (float)screenHeight / Rain2.height;
-                    float sW = Rain2.width * scaleX, sH = Rain2.height * scaleY;
-                    DrawTexturePro(Rain2, { 0, rain2ScrollY, (float)Rain2.width, (float)Rain2.height }, { 0, 0, sW, sH }, {}, 0.f, rain2Tint);
-                    DrawTexturePro(Rain2, { 0, 0, (float)Rain2.width, (float)Rain2.height }, { 0, -sH + rain2ScrollY, sW, sH }, {}, 0.f, rain2Tint);
-                }
-
-                // 2. Ladders
-                DrawTextureRec(ladderLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
-
-                // 3. Beams
-                DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
-                CollisionManager::DrawAll(platforms);
-
-                // 4. House
-                {
-                    Texture2D& houseTex = houseIsSnowed ? House2 : House1;
-                    DrawTexturePro(houseTex, { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H }, { houseX, houseY, houseW, houseH }, {}, 0.f, WHITE);
-                    if (houseIsSnowed)
-                    {
-                        float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE, sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
-                        DrawTexturePro(SnowFloor, { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H }, { houseX, 865.0f, sfW, sfH }, {}, 0.f, WHITE);
-                    }
-                    if (houseAnimPlaying && houseAnimFrame < CAVE_FRAME_COUNT)
-                    {
-                        Texture2D* caveTex = caveFrames[houseAnimFrame];
-                        float caveW = CAVE_NATIVE_W * CAVE_DRAW_SCALE, caveH = CAVE_NATIVE_H * CAVE_DRAW_SCALE;
-                        float caveX = houseX + houseW - caveW * 0.65f;
-                        float animProgress = houseAnimFrame / (float)(CAVE_FRAME_COUNT - 1);
-                        float caveY = houseY + houseH * 0.5f - caveH * 0.7f + 10.0f * animProgress;
-                        DrawTexturePro(*caveTex, { 0, 0, CAVE_NATIVE_W, CAVE_NATIVE_H }, { caveX, caveY, caveW, caveH }, {}, 0.f, WHITE);
-                    }
-                }
-
-                // 4.5 Nuke items
-                {
-                    float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                    for (const auto& nk : nukes)
-                    {
-                        if (!nk.active) continue;
-                        float bobY = nk.pos.y + sinf((float)GetTime() * 3.0f) * 4.0f;
-                        DrawTexturePro(Nuke, { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H }, { nk.pos.x, bobY, nkW, nkH }, {}, 0.f, WHITE);
-                    }
-                }
-
-                // 4.55 Flying nukes (in-air)
-                for (const auto& fn : flyingNukes)
-                {
-                    if (!fn.active) continue;
-                    DrawTexturePro(Nuke,
-                        { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
-                        { fn.rect.x, fn.rect.y, fn.rect.width, fn.rect.height },
-                        {}, 0.f, WHITE);
-                }
-
-                // 4.6 Beatrice items
-                {
-                    float      bcScale = 2.0f;
-                    Texture2D* bcTex = (beatriceItemAnimFrame == 0) ? &Beatrice_Idle1 : &Beatrice_Idle2;
-                    float bcW = bcTex->width * bcScale;
-                    float bcH = bcTex->height * bcScale;
-                    for (const auto& bc : beatrices)
-                    {
-                        if (!bc.active) continue;
-                        float bobY = bc.pos.y - bcH + sinf((float)GetTime() * 2.5f) * 4.0f;
-                        DrawTexturePro(*bcTex,
-                            { 0, 0, (float)bcTex->width, (float)bcTex->height },
-                            { bc.pos.x, bobY, bcW, bcH },
-                            {}, 0.f, WHITE);
-                    }
-                }
-
-                // 4.7 Regulus
-                {
-                    Texture2D* regTex = nullptr;
-                    if (regulusIsStunned)
-                    {
-                        if (regulusStunEnding)
-                        {
-                            int idx = regulusStunEndFrame < 5 ? regulusStunEndFrame : 4;
-                            regTex = regulusStunEndFrames[idx];
-                        }
-                        else
-                        {
-                            int idx = regulusStunFrame < 3 ? regulusStunFrame : 0;
-                            regTex = regulusStunFrames[idx];
-                        }
-                    }
-                    else
-                    {
-                        int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
-                        regTex = regulusThrowing ? regulusThrowFrames[throwIdx] : regulusIdleFrames[regulusIdleFrame];
-                    }
-
-                    float regW = regTex->width * REGULUS_SCALE;
-                    float regH = regTex->height * REGULUS_SCALE;
-                    float regY = 225.0f - regH + 20.0f;
-                    float regX = REGULUS_X + regW * 0.5f;
-
-                    if (!regulusIsStunned && regulusThrowing)
-                    {
-                        int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
-                        const float handOffX[3] = { 11.0f, 29.0f, 47.0f };
-                        const float handOffY[3] = { 40.0f, 19.0f, 40.0f };
-                        Texture2D* barrelHandTex = regulusForceBlue ? &BlueBarrelMov1 : &BarrelMov1;
-                        float barrelHandScale = REGULUS_SCALE * 0.55f;
-                        float barrelHandW = barrelHandTex->width * barrelHandScale;
-                        float barrelHandH = barrelHandTex->height * barrelHandScale;
-                        float handScrX = regX + handOffX[throwIdx] * REGULUS_SCALE - barrelHandW * 0.5f;
-                        float handScrY = regY + handOffY[throwIdx] * REGULUS_SCALE - barrelHandH * 0.5f;
-
-                        if (throwIdx == 0 || throwIdx == 2)
-                            DrawTexturePro(*barrelHandTex,
-                                { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
-                                { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
-                        DrawTexturePro(*regTex,
-                            { 0, 0, (float)regTex->width, (float)regTex->height },
-                            { regX, regY, regW, regH }, {}, 0.f, WHITE);
-                        if (throwIdx == 1)
-                            DrawTexturePro(*barrelHandTex,
-                                { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
-                                { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
-                    }
-                    else
-                    {
-                        DrawTexturePro(*regTex,
-                            { 0, 0, (float)regTex->width, (float)regTex->height },
-                            { regX, regY, regW, regH }, {}, 0.f, WHITE);
-                    }
-                }
-
-                // 5. Player
-                {
-                    bool showPlayer = isDying || !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
-                    if (showPlayer)
-                    {
-                        float scale = 3.8f * 0.85f * 1.05f;
-                        // Feet-aligned: shift Beatrice sprites up so feet stay at same Y
-                        float baseH = imgMarioIdle.height * scale;
-                        float thisH = image->height * scale;
-                        float drawY = player.y + 10.0f + (baseH - thisH);
-                        Rectangle src = { 0, 0, (float)image->width, (float)image->height };
-                        Rectangle dest = { player.x, drawY, image->width * scale, thisH };
-                        if (!facingRight && !onLadder) src.width *= -1;
-                        DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
-
-                        if (playerHasNuke && !isDying)
-                        {
-                            float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
-                            float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                            float nkX = player.x + dest.width * 0.5f - nkW * 0.5f;
-                            float nukeOffsetY = 5.0f;
-                            bool  moving = (!onLadder && !isJumping && walkFrame != 0);
-                            if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
-                            float nkY = drawY - nkH - 2.0f + nukeOffsetY;
-                            Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
-                            if (!facingRight) nukeSrc.width *= -1;
-                            DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, {}, 0.f, WHITE);
-                        }
-                    }
-                }
-
-                // 6. Barrels
-                for (const auto& b : barrels)
-                {
-                    if (!b.active) continue;
-                    Texture2D** rollSet = b.isBlue ? blueBarrelRoll : barrelRoll;
-                    Texture2D** fallSet = b.isBlue ? blueBarrelFall : barrelFall;
-                    Texture2D* tex;
-                    if (b.isFalling) tex = fallSet[b.animFrame % 2];
-                    else
-                    {
-                        int frame = b.movingLeft ? (3 - b.animFrame % 4) : (b.animFrame % 4);
-                        tex = rollSet[frame];
-                    }
-                    float drawW = b.hitbox.width * 2.0f;
-                    float drawH = b.hitbox.height * 2.0f;
-                    float drawX = b.hitbox.x - (drawW - b.hitbox.width) * 0.5f;
-                    float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f - 2.625f;
-                    DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
-                }
-
-                // 6.1 Enemies
-                for (const auto& en : enemies)
-                    DrawEnemy(en, rabbitWalkBlack, rabbitJumpBlack, rabbitWalkWhite, rabbitJumpWhite);
-
-
-                // 6.5 Beatrice bullets
-                {
-                    float bbScale = 2.0f;
-                    float bbW = texBeaBullet.width * bbScale;
-                    float bbH = texBeaBullet.height * bbScale;
-                    for (const auto& bb : beaBullets)
-                    {
-                        if (!bb.active) continue;
-                        float angle = atan2f(bb.vel.y, bb.vel.x) * RAD2DEG;
-                        DrawTexturePro(texBeaBullet,
-                            { 0, 0, (float)texBeaBullet.width, (float)texBeaBullet.height },
-                            { bb.pos.x - bbW * 0.5f, bb.pos.y - bbH * 0.5f, bbW, bbH },
-                            { bbW * 0.5f, bbH * 0.5f }, angle, WHITE);
-                    }
-                }
-
-                // 7. HUD
-                for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
-                {
-                    const char* scoreTxt = TextFormat("SCORE: %d", score);
-                    int sw = MeasureText(scoreTxt, 26);
-                    DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW);
-                }
-                DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
-                if (onLadder) DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
-                {
-                    int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
-                    DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
-                }
-                if (playerHasBeatrice)
-                    DrawText(TextFormat("BEATRICE: %.1fs", beatriceAbilityTimer),
-                        10, screenHeight - 105, 18, MAGENTA);
-                if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
-
-                // 8. Nuke explosion
-                if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT)
-                {
-                    Texture2D* exTex = explosionFrames[nukeExplosionFrame];
-                    float exScale = 4.0f;
-                    float exW = exTex->width * exScale, exH = exTex->height * exScale;
-                    DrawTexturePro(*exTex, { 0, 0, (float)exTex->width, (float)exTex->height },
-                        { nukeExplosionPos.x - exW * 0.5f, nukeExplosionPos.y - exH * 0.5f, exW, exH }, {}, 0.f, WHITE);
-                }
-
-                EndMode2D();
-
-                // 9. Rain overlay
-                {
-                    float scaleX = (float)screenWidth / Rain.width;
-                    float scaleY = (float)screenHeight / Rain.height;
-                    float sW = Rain.width * scaleX, sH = Rain.height * scaleY;
-                    DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height }, { 0, 0, sW, sH }, {}, 0.f, rainTint);
-                    DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height }, { 0, -sH + rainScrollY, sW, sH }, {}, 0.f, rainTint);
-                }
-
-                // 9.5 "Press E" prompt — drawn after rain so it's above everything
-                if (!isDying)
-                {
-                    const float ebScale = 1.75f;
-                    const float ebW = EButton.width * ebScale;
-                    const float ebH = EButton.height * ebScale;
-                    bool        shown = false;
-
-                    // ── Nuke item ─────────────────────────────────────────────
-                    if (!playerHasNuke)
-                    {
-                        const float nkW = NUKE_NATIVE_W * NUKE_SCALE;
-                        const float nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                        for (const auto& nk : nukes)
-                        {
-                            if (!nk.active) continue;
-                            Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
-                            if (CheckCollisionRecs(player, nkRect))
-                            {
-                                // centre horizontally over item, sit just above it
-                                float cx = nk.pos.x + nkW * 0.5f - ebW * 0.5f;
-                                float cy = nk.pos.y - ebH + 5.0f;
-                                DrawTexturePro(EButton,
-                                    { 0, 0, (float)EButton.width, (float)EButton.height },
-                                    { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
-                                shown = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // ── Beatrice item ─────────────────────────────────────────
-                    if (!shown && !playerHasBeatrice)
-                    {
-                        const float bcScale2 = 2.0f;
-                        const float bcW = Beatrice_Idle1.width * bcScale2;
-                        const float bcH = Beatrice_Idle1.height * bcScale2;
-                        for (const auto& bc : beatrices)
-                        {
-                            if (!bc.active) continue;
-                            // beatrice rect is drawn feet-up, so top = pos.y - bcH
-                            Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
-                            if (CheckCollisionRecs(player, bcRect))
-                            {
-                                float cx = bc.pos.x + bcW * 0.5f - ebW * 0.5f;
-                                float cy = bc.pos.y - bcH - ebH - 1.0f;
-                                DrawTexturePro(EButton,
-                                    { 0, 0, (float)EButton.width, (float)EButton.height },
-                                    { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // 9.6 Beatrice ability bar (above rain, bottom-left)
-                if (playerHasBeatrice)
-                {
-                    const float barMaxW = 180.0f;
-                    const float barH = 14.0f;
-                    const float barX = 20.0f;
-                    const float barY = (float)screenHeight - 58.0f;
-                    float       frac = Clamp(beatriceAbilityTimer / BEATRICE_DURATION, 0.0f, 1.0f);
-
-                    // outer border
-                    DrawRectangle((int)barX - 2, (int)barY - 2,
-                        (int)barMaxW + 4, (int)barH + 4, BLACK);
-                    // dark background track
-                    DrawRectangle((int)barX, (int)barY,
-                        (int)barMaxW, (int)barH, { 60, 0, 60, 220 });
-                    // fill — colour shifts red when low
-                    Color fillCol = (frac > 0.3f) ? MAGENTA : RED;
-                    DrawRectangle((int)barX, (int)barY,
-                        (int)(barMaxW * frac), (int)barH, fillCol);
-                    // label above bar
-                    DrawText("BEATRICE", (int)barX, (int)barY - 18, 14, MAGENTA);
-                }
-
-                // 10. Nuke flash
-                {
-                    float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
-                    if (nukeFlashTimer < flashTotal)
-                    {
-                        unsigned char alpha = 0;
-                        if (nukeFlashTimer < NUKE_FLASH_IN)
-                            alpha = (unsigned char)(255.0f * (nukeFlashTimer / NUKE_FLASH_IN));
-                        else
-                            alpha = (unsigned char)(255.0f * (1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT));
-                        DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
-                    }
-                }
-
-                // 11. Death overlay
-                if (isDying || deathReachedBlack)
-                {
-                    if (deathReachedBlack)
-                    {
-                        DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, 255 });
-                    }
-                    else if (deathTimer < DEATH_FLASH_DURATION)
-                    {
-                        float t = deathTimer / DEATH_FLASH_DURATION;
-                        unsigned char alpha = (unsigned char)(120.0f * t);
-                        DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
-                    }
-                    else
-                    {
-                        float t = (deathTimer - DEATH_FLASH_DURATION) / DEATH_FADE_DURATION;
-                        if (t > 1.0f) t = 1.0f;
-                        unsigned char alpha = (unsigned char)(t * 255.0f);
-                        DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, alpha });
-                    }
-                }
-            }
-            else if (currentScreen == GAME_OVER)
-            {
-                if (lives > 0)
-                {
-                    splashTimer += dt;
-
-                    // Advance Subaru animation at 5 fps
-                    subaruTimer += dt;
-                    if (subaruTimer >= 1.0f / SUBARU_ANIM_FPS)
-                    {
-                        subaruTimer -= 1.0f / SUBARU_ANIM_FPS;
-                        subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
-                    }
-
-                    if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
-                    {
-                        splashTimer = 0.0f;
-                        currentScreen = GAMEPLAY;
-                    }
-                    // 1. Background stretched to fill screen
-                    DrawTexturePro(Subaru_Background,
-                        { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
-                        { 0, 0, (float)screenWidth, (float)screenHeight },
-                        { 0, 0 }, 0.f, WHITE);
-
-                    // 2. Current Subaru animation frame, also full-screen
-                    Texture2D* subTex = subaruFrames[subaruFrame];
-                    DrawTexturePro(*subTex,
-                        { 0, 0, (float)subTex->width, (float)subTex->height },
-                        { 0, 0, (float)screenWidth, (float)screenHeight },
-                        { 0, 0 }, 0.f, WHITE);
-
-                    DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
-                    DrawText("25", 200, 800, 30, WHITE);
-                    DrawText("50", 200, 700, 30, WHITE);
-                }
-                else
-                {
-                    DrawText("GAME OVER", 300, 380, 50, RED);
-                    const char* scoreTxt = TextFormat("SCORE: %d", score);
-                    int sw = MeasureText(scoreTxt, 32);
-                    DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
-                }
-            }
-
-            EndDrawing();
         }
 
-        // ── Cleanup ───────────────────────────────────────────────────────────────
-        UnloadMusicStream(music);
-        UnloadSound(deathSound);
-        UnloadSound(HitSound);
-        UnloadSound(nukeSound);
-        UnloadSound(jumpBrlSound);
-
-        UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
-        UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
-        UnloadTexture(imgMarioFalling);
-        UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
-        UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
-        UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
-        UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
-        UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
-        UnloadTexture(BarrelFall1);       UnloadTexture(BarrelFall2);
-        UnloadTexture(BlueBarrelMov1);    UnloadTexture(BlueBarrelMov2);
-        UnloadTexture(BlueBarrelMov3);    UnloadTexture(BlueBarrelMov4);
-        UnloadTexture(BlueBarrelFall1);   UnloadTexture(BlueBarrelFall2);
-        UnloadTexture(House1);            UnloadTexture(House2);
-        UnloadTexture(SnowFloor);
-        UnloadTexture(Nuke);
-        UnloadTexture(imgMarioIdleNuke);  UnloadTexture(imgMarioWalk1Nuke);
-        UnloadTexture(imgMarioWalk2Nuke); UnloadTexture(imgMarioJumpNuke);
-        UnloadTexture(Explosion1); UnloadTexture(Explosion2); UnloadTexture(Explosion3);
-        UnloadTexture(Explosion4); UnloadTexture(Explosion5); UnloadTexture(Explosion6);
-        UnloadTexture(cave1);  UnloadTexture(cave2);  UnloadTexture(cave3);
-        UnloadTexture(cave4);  UnloadTexture(cave5);  UnloadTexture(cave6);
-        UnloadTexture(cave7);  UnloadTexture(cave8);  UnloadTexture(cave9);
-        UnloadTexture(cave10); UnloadTexture(cave11);
-        UnloadTexture(Rain);   UnloadTexture(Rain2);
-
-        UnloadTexture(RegulusGrab1);     UnloadTexture(RegulusGrab2);     UnloadTexture(RegulusGrab3);
-        UnloadTexture(RegulusIdle1);     UnloadTexture(RegulusIdle2);     UnloadTexture(RegulusIdle3);
-        UnloadTexture(RegulusStairs1);   UnloadTexture(RegulusStairs2);
-        UnloadTexture(Regulus_Stun1);    UnloadTexture(Regulus_Stun2);    UnloadTexture(Regulus_Stun3);
-        UnloadTexture(Regulus_StunEnd1); UnloadTexture(Regulus_StunEnd2); UnloadTexture(Regulus_StunEnd3);
-        UnloadTexture(Regulus_StunEnd4); UnloadTexture(Regulus_StunEnd5);
-
-        UnloadTexture(Dk_Mario_Idle1_Beatrice); UnloadTexture(Dk_Mario_Idle2_Beatrice);
-        UnloadTexture(Dk_Mario_Jump_Beatrice);
-        UnloadTexture(Dk_Mario_Walk1_Beatrice); UnloadTexture(Dk_Mario_Walk2_Beatrice);
-        UnloadTexture(Beatrice_Idle1);          UnloadTexture(Beatrice_Idle2);
-        UnloadTexture(texBeaBullet);
-
-        UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
-        UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
-
-        UnloadRenderTexture(ladderLayer);
-        UnloadRenderTexture(staticLayer);
-
-        CloseAudioDevice();
-        CloseWindow();
-        return 0;
+        EndDrawing();
     }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
+    UnloadMusicStream(music);
+    UnloadSound(deathSound);
+    UnloadSound(HitSound);
+    UnloadSound(nukeSound);
+    UnloadSound(jumpBrlSound);
+
+    UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
+    UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
+    UnloadTexture(imgMarioFalling);
+    UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
+    UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
+    UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
+    UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
+    UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
+    UnloadTexture(BarrelFall1);       UnloadTexture(BarrelFall2);
+    UnloadTexture(BlueBarrelMov1);    UnloadTexture(BlueBarrelMov2);
+    UnloadTexture(BlueBarrelMov3);    UnloadTexture(BlueBarrelMov4);
+    UnloadTexture(BlueBarrelFall1);   UnloadTexture(BlueBarrelFall2);
+    UnloadTexture(House1);            UnloadTexture(House2);
+    UnloadTexture(SnowFloor);
+    UnloadTexture(Nuke);
+    UnloadTexture(imgMarioIdleNuke);  UnloadTexture(imgMarioWalk1Nuke);
+    UnloadTexture(imgMarioWalk2Nuke); UnloadTexture(imgMarioJumpNuke);
+    UnloadTexture(Explosion1); UnloadTexture(Explosion2); UnloadTexture(Explosion3);
+    UnloadTexture(Explosion4); UnloadTexture(Explosion5); UnloadTexture(Explosion6);
+    UnloadTexture(cave1);  UnloadTexture(cave2);  UnloadTexture(cave3);
+    UnloadTexture(cave4);  UnloadTexture(cave5);  UnloadTexture(cave6);
+    UnloadTexture(cave7);  UnloadTexture(cave8);  UnloadTexture(cave9);
+    UnloadTexture(cave10); UnloadTexture(cave11);
+    UnloadTexture(Rain);   UnloadTexture(Rain2);
+
+    UnloadTexture(RegulusGrab1);     UnloadTexture(RegulusGrab2);     UnloadTexture(RegulusGrab3);
+    UnloadTexture(RegulusIdle1);     UnloadTexture(RegulusIdle2);     UnloadTexture(RegulusIdle3);
+    UnloadTexture(RegulusStairs1);   UnloadTexture(RegulusStairs2);
+    UnloadTexture(Regulus_Stun1);    UnloadTexture(Regulus_Stun2);    UnloadTexture(Regulus_Stun3);
+    UnloadTexture(Regulus_StunEnd1); UnloadTexture(Regulus_StunEnd2); UnloadTexture(Regulus_StunEnd3);
+    UnloadTexture(Regulus_StunEnd4); UnloadTexture(Regulus_StunEnd5);
+
+    UnloadTexture(Dk_Mario_Idle1_Beatrice); UnloadTexture(Dk_Mario_Idle2_Beatrice);
+    UnloadTexture(Dk_Mario_Jump_Beatrice);
+    UnloadTexture(Dk_Mario_Walk1_Beatrice); UnloadTexture(Dk_Mario_Walk2_Beatrice);
+    UnloadTexture(Beatrice_Idle1);          UnloadTexture(Beatrice_Idle2);
+    UnloadTexture(texBeaBullet);
+
+    UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
+    UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
+
+    UnloadRenderTexture(ladderLayer);
+    UnloadRenderTexture(staticLayer);
+
+    CloseAudioDevice();
+    CloseWindow();
+    return 0;
+}
