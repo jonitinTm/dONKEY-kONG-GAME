@@ -2212,7 +2212,7 @@ int main(void)
 
             // 3. Beams
             DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
-            CollisionManager::DrawAll(platforms);
+            // CollisionManager::DrawAll removed — collision boxes are editor-only
 
             // 4. House
             {
