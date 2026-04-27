@@ -1,182 +1,149 @@
 #pragma once
 // ============================================================
 //  LevelEditor.h  –  In-game level editor (raylib)
-//  Layout  (875 × 950 screen):
-//    Toolbar  y  0 – 45      level nav, grid, save, play, menu
-//    Canvas   y 45 – 785     875×740 → shows 875×950 world (zoom ≈ 0.779)
-//    Browser  y 785 – 950    tool palette + properties panel
 // ============================================================
 #include "raylib.h"
 #include "LevelData.h"
 #include <vector>
 #include <string>
 
-// ── Tool enum ─────────────────────────────────────────────────────────────────
-
 enum class EditorTool : int {
-    SELECT = 0,
-    PLAYER_SPAWN,
-    REGULUS,
-    CAVE,
-    PLATFORM,       // drag to set width
-    LADDER,         // drag to set height
-    BEAM,
-    PATH_NODE,
-    NUKE_SPAWN,
-    BEATRICE_SPAWN,
-    ENEMY_SPAWN,
+    SELECT = 0, PLAYER_SPAWN, REGULUS, CAVE,
+    PLATFORM, LADDER, BEAM, PATH_NODE,
+    NUKE_SPAWN, BEATRICE_SPAWN, ENEMY_SPAWN,
     TOOL_COUNT
 };
-
-// ── Connection mode for path-node editing ─────────────────────────────────────
-
 enum class ConnectMode { NONE, NEXT0, NEXT1 };
 
-// ── Selected-entity token ────────────────────────────────────────────────────
-
 struct SelectedEnt {
-    int type  = -1;    // cast to (int)EditorTool; -1 = nothing selected
+    int type = -1;
     int index = -1;
     bool valid() const { return type >= 0 && index >= 0; }
-    void clear()       { type = -1; index = -1; }
+    void clear() { type = -1; index = -1; }
+    bool operator==(const SelectedEnt& o) const { return type == o.type && index == o.index; }
 };
-
-// ── Editor class ─────────────────────────────────────────────────────────────
 
 class LevelEditor
 {
 public:
-    // ── Lifecycle ────────────────────────────────────────────────────────────
     void Init(int screenW = 875, int screenH = 950);
     void Update(float dt);
-
-    /// Call between BeginDrawing() … EndDrawing()
     void Draw();
 
-    // ── Level management ─────────────────────────────────────────────────────
     void LoadLevel(int id);
     void SaveCurrentLevel();
-    int  GetCurrentLevelId() const { return _levelId; }
-
-    /// Returns the level data ready to be applied to the game.
+    int  GetCurrentLevelId()   const { return _levelId; }
     const LevelData& GetLevel() const { return _level; }
 
-    // ── Screen-transition flags ───────────────────────────────────────────────
     bool WantsMenu() const { return _wantsMenu; }
     bool WantsPlay() const { return _wantsPlay; }
-    void ClearFlags()      { _wantsMenu = false; _wantsPlay = false; }
+    void ClearFlags() { _wantsMenu = false; _wantsPlay = false; }
 
-    // ── Optional textures for visual rendering in canvas ─────────────────────
-    /// Pass the game's background, beam-tile and ladder-tile textures so the
-    /// editor canvas renders them instead of plain primitives.
-    void SetTextures(Texture2D* bg, Texture2D* beamTile, Texture2D* ladderTile)
+    // playerTex = imgMarioIdle, regulusTex = RegulusIdle1, caveTex = House1
+    void SetGameTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder,
+        Texture2D* player, Texture2D* regulus, Texture2D* cave)
     {
-        _bgTex      = bg;
-        _beamTex    = beamTile;
-        _ladderTex  = ladderTile;
+        _bgTex = bg; _beamTex = beam; _ladderTex = ladder;
+        _playerTex = player; _regulusTex = regulus; _caveTex = cave;
+    }
+    void SetTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder)
+    {
+        _bgTex = bg; _beamTex = beam; _ladderTex = ladder;
     }
 
 private:
-    // ── Layout constants ──────────────────────────────────────────────────────
-    int   _sw = 875, _sh = 950;
-    static constexpr int TOOLBAR_H  = 45;
-    static constexpr int BROWSER_H  = 165;
-    static constexpr int GRID_SZ    = 16;
+    int _sw = 875, _sh = 950;
+    static constexpr int TOOLBAR_H = 45, BROWSER_H = 165, GRID_SZ = 16;
+    float    _canvasH = 740.f, _zoom = 1.f;
+    Camera2D _cam = {};
 
-    float    _canvasH = 740.f;
-    float    _zoom    = 1.f;
-    Camera2D _cam     = {};
-
-    // ── Level state ───────────────────────────────────────────────────────────
     int       _levelId = 1;
     LevelData _level;
 
-    // ── Optional render textures ──────────────────────────────────────────────
-    Texture2D* _bgTex     = nullptr;   // game background
-    Texture2D* _beamTex   = nullptr;   // beam floor tile
-    Texture2D* _ladderTex = nullptr;   // ladder tile
+    // Undo/Redo
+    std::vector<LevelData> _undoStack, _redoStack;
+    static constexpr int MAX_UNDO = 50;
+    void PushUndo(); void Undo(); void Redo();
 
-    // ── Editor state ─────────────────────────────────────────────────────────
-    EditorTool  _tool   = EditorTool::SELECT;
+    // Textures
+    Texture2D* _bgTex = nullptr, * _beamTex = nullptr, * _ladderTex = nullptr;
+    Texture2D* _playerTex = nullptr, * _regulusTex = nullptr, * _caveTex = nullptr;
+
+    // Editor state
+    EditorTool  _tool = EditorTool::SELECT;
     SelectedEnt _sel;
-    bool        _gridOn = true;
+    bool _gridOn = true;
+    int  _gridDiv = 1;               // 1 / 2 / 4
+    bool _wantsMenu = false, _wantsPlay = false;
 
-    bool _wantsMenu = false;
-    bool _wantsPlay = false;
-
-    // Entity drag
-    bool    _dragging   = false;
+    // Single drag
+    bool    _dragging = false;
     Vector2 _dragOffset = {};
 
-    // Platform drag-to-create
-    bool    _placingPlatform = false;
-    Vector2 _platStart       = {};
+    // Box selection
+    bool    _boxSelecting = false;
+    Vector2 _boxStart = {}, _boxEnd = {};
+    std::vector<SelectedEnt> _multiSel;
 
-    // Ladder drag-to-create
-    bool    _placingLadder = false;
-    Vector2 _ladStart      = {};
+    // Multi-drag
+    bool                 _multiDragging = false;
+    Vector2              _multiDragAnchor = {};
+    std::vector<Vector2> _multiDragOrigins;
 
-    // Path-node connections
+    // Placement
+    bool _placingPlatform = false; Vector2 _platStart = {};
+    bool _placingLadder = false;   Vector2 _ladStart = {};
+
     ConnectMode _connectMode = ConnectMode::NONE;
-    int         _connectFrom = -1;   // index of source node
+    int         _connectFrom = -1;
+    double      _lastThreshClick = -999.0;
 
-    // Roll threshold editing (+/- buttons)
-    double _lastThreshClick = -999.0;
+    char  _status[256] = {};
+    float _statusTimer = 0.f;
 
-    // Status bar
-    char   _status[256] = {};
-    float  _statusTimer  = 0.f;
+    // Helpers
+    Vector2   WorldMouse() const;
+    Vector2   Snap(Vector2 v) const;
+    bool InCanvas() const; bool InBrowser() const; bool InToolbar() const;
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-
-    Vector2 WorldMouse()          const;
-    Vector2 Snap(Vector2 v)       const;
-    bool    InCanvas()            const;
-    bool    InBrowser()           const;
-    bool    InToolbar()           const;
-
-    // Entity geometry
     Rectangle PlatRect(const PlatformData& p) const;
-    Rectangle LadRect (const LadderData&   l) const;
+    Rectangle LadRect(const LadderData& l) const;
     Rectangle BeamRect(Vector2 pos)           const;
 
-    // Pick the topmost entity at world position p; fills _sel.
+    Vector2 GetEntPos(const SelectedEnt& e)           const;
+    void    SetEntPos(const SelectedEnt& e, Vector2 p);
+
     bool PickEntity(Vector2 p);
-
-    // Delete the currently selected entity.
+    bool IsInMultiSel(const SelectedEnt& e)            const;
+    void BoxSelectEntities(Rectangle box);
     void DeleteSelected();
+    void DeleteMultiSelected();
 
-    // Get / set world position of the selected entity.
-    Vector2 GetSelPos()         const;
-    void    SetSelPos(Vector2 p);
+    Vector2 GetSelPos()          const { return GetEntPos(_sel); }
+    void    SetSelPos(Vector2 p) { SetEntPos(_sel, p); }
 
-    // ── Update sub-routines ───────────────────────────────────────────────────
-    void UpdateToolbar();
-    void UpdateBrowser();
-    void UpdateCanvas();
+    void UpdateToolbar(); void UpdateBrowser(); void UpdateCanvas();
 
-    // ── Draw sub-routines ─────────────────────────────────────────────────────
-    void DrawBackground()        const;
-    void DrawGrid()              const;
+    void DrawBackground()       const;
+    void DrawGrid()             const;
     void DrawLevelEntities();
-    void DrawPlacementPreview()  const;
-    void DrawToolbarUI()         const;
+    void DrawPlacementPreview() const;
+    void DrawToolbarUI()        const;
     void DrawBrowserUI();
     void DrawPropertiesPanel();
 
-    // Entity draw helpers
-    void DrawPlatEnt (const PlatformData& p, bool sel) const;
-    void DrawLadEnt  (const LadderData&   l, bool sel) const;
-    void DrawCircEnt (Vector2 pos, float r, Color c, bool sel, const char* lbl) const;
-    void DrawBeamEnt (Vector2 pos, bool sel) const;
+    void DrawPlatEnt(const PlatformData& p, bool sel, bool msel) const;
+    void DrawLadEnt(const LadderData& l, bool sel, bool msel) const;
+    void DrawCircEnt(Vector2 pos, float r, Color c,
+        bool sel, bool msel, const char* lbl)        const;
+    void DrawBeamEnt(Vector2 pos, bool sel, bool msel)            const;
     void DrawPathNodes();
+    void DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const;
+    void DrawRegulusEnt(Vector2 pos, bool sel, bool msel) const;
+    void DrawCaveEnt(Vector2 pos, bool sel, bool msel) const;
 
-    // Browser layout helper  (row 0/1, col 0..(cols-1))
     Rectangle BrowserBtn(int row, int col, int cols) const;
-
-    // Tool metadata
-    static const char* ToolName (EditorTool t);
+    static const char* ToolName(EditorTool t);
     static Color       ToolColor(EditorTool t);
-
     void SetStatus(const char* msg, float dur = 2.5f);
 };

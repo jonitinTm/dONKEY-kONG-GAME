@@ -932,7 +932,8 @@ int main(void)
     // NOTE: LadderPart texture is kept alive so RebuildLayers can rebake ladderLayer
 
     // ── Wire textures into the editor ─────────────────────────────────────────
-    editor.SetTextures(&background, &beam, &LadderPart);
+    editor.SetGameTextures(&background, &beam, &LadderPart,
+        &imgMarioIdle, &RegulusIdle1, &House1);
 
     // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
     auto RebuildLayers = [&]()
