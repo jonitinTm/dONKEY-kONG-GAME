@@ -4,6 +4,7 @@
 #include "Ladder.h"
 #include "LevelData.h"
 #include "LevelEditor.h"
+#include "CinematicPlayer.h"
 #include <ctime>
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR };
@@ -739,6 +740,7 @@ int main(void)
     // ── Window / audio / textures ─────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
     editor.Init(screenWidth, screenHeight);
+    Cinematic::Global.LoadAll();   // load all saved sequences from Cinematics/
     SetRandomSeed((unsigned int)time(NULL));   // truly random each run
     InitAudioDevice();
 
@@ -1257,12 +1259,56 @@ int main(void)
             }
         };
 
+    // ── Cinematic player apply callback — patches live game objects directly ──
+    // Call CinematicSequencer::Play("Name") anywhere to trigger a sequence.
+    Cinematic::Global.SetApplyCallback([&](const CinematicEntityState& st) {
+        int i = st.entityIndex;
+        switch (st.entityType) {
+        case 4: // PLATFORM — rebuild from cinematic state
+            if (i >= 0 && i < (int)platforms.size())
+                platforms[i] = Platform::Make(st.x, st.y,
+                    st.width > 0.f ? st.width : 128.f,
+                    0, st.tilt);
+            break;
+        case 5: // LADDER
+            if (i >= 0 && i < (int)ladders.size())
+                ladders[i] = Ladder::Make(st.x, st.y,
+                    ladders[i].width,
+                    st.height > 0.f ? st.height : ladders[i].height);
+            break;
+        case 6: // BEAM
+            if (i >= 0 && i < (int)beamPositions.size())
+                beamPositions[i] = { st.x, st.y };
+            break;
+        case 7: // PATH NODE
+            if (i >= 0 && i < (int)barrelPath.size()) {
+                barrelPath[i].pos.x = st.x;
+                barrelPath[i].pos.y = st.y;
+            } break;
+        case 3: // CAVE / HOUSE
+            houseX = st.x; houseY = st.y;
+            houseHitbox = { houseX, houseY, houseW, houseH };
+            break;
+        case 8:  if (i >= 0 && i < (int)nukeSpawnNodes.size())      nukeSpawnNodes[i] = { st.x,st.y };     break;
+        case 9:  if (i >= 0 && i < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[i] = { st.x,st.y }; break;
+        case 10: if (i >= 0 && i < (int)enemySpawnPositions.size())  enemySpawnPositions[i] = { st.x,st.y }; break;
+            // Types 1 (PLAYER_SPAWN) and 2 (REGULUS) are spawn points — not moved mid-game
+        default: break;
+        }
+        });
+
     // ─────────────────────────────────────────────────────────────────────────
     // MAIN LOOP
     // ─────────────────────────────────────────────────────────────────────────
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
+
+        // B = back to menu from anywhere, always
+        if (IsKeyPressed(KEY_B) && currentScreen != MENU) {
+            editor.ClearFlags();
+            currentScreen = MENU;
+        }
 
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
 
@@ -1305,52 +1351,59 @@ int main(void)
         // ── LEVEL EDITOR ──────────────────────────────────────────────────────
         else if (currentScreen == LEVEL_EDITOR)
         {
-            editor.Update(dt);
-            if (editor.WantsMenu() || IsKeyPressed(KEY_B)) {
+            // B key checked here FIRST, before any editor code runs
+            if (IsKeyPressed(KEY_B)) {
                 editor.ClearFlags();
+                Cinematic::Global.LoadAll();   // pick up any new sequences saved in editor
                 currentScreen = MENU;
             }
-            if (editor.WantsPlay()) {
-                editor.ClearFlags();
-                // Apply the editor's current level to the live game data
-                ApplyLevelData(editor.GetLevel());
-                currentLevelId = editor.GetCurrentLevelId();
-                // Full reset without reloading level 1 (we just applied editor data)
-                ClearDeathState();
-                ClearRoundEntities();
-                ResetPlayerPos();
-                ResetRegulus();
-                lives = 3; death = false; score = 0;
-                invincible = true; invincibleTimer = invincibleDuration;
-                spawnInterval = 10.0f; minuteTimer = 0.0f;
-                playerHasBeatrice = false; beatriceAbilityTimer = 0.0f;
-                beaBulletShootTimer = 0.0f;
-                for (auto& bb : beaBullets) bb.active = false;
-                beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
-                houseAnimPlaying = false; houseAnimFrame = 0;
-                houseAnimTimer = 0.0f; houseIsSnowed = false;
-                nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
-                nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
-                nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
-                for (auto& nk : nukes) nk.active = false;
-                nukes.clear();
-                if (!nukeSpawnNodes.empty()) {
-                    int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
-                    nukes.push_back({ nukeSpawnNodes[idx], true });
-                }
-                beatrices.clear();
-                if (!beatriceSpawnNodes.empty()) {
-                    int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
-                    beatrices.push_back({ beatriceSpawnNodes[idx], true });
-                }
-                regulusThrowing = true; regulusThrowFrame = 0;
-                regulusThrowTimer = 0.0f; regulusSpawnPending = true;
-                regulusForceBlue = true; regulusIdleFrame = 0;
-                regulusIdleTimer = 0.0f;
-                subaruFrame = 0; subaruTimer = 0.0f;
-                ResumeMusicStream(music);
-                currentScreen = GAMEPLAY;
-            }
+            else {
+                editor.Update(dt);
+                if (editor.WantsMenu()) { editor.ClearFlags(); currentScreen = MENU; }
+                if (editor.WantsPlay()) {
+                    editor.ClearFlags();
+                    // Apply the editor's current level to the live game data
+                    ApplyLevelData(editor.GetLevel());
+                    currentLevelId = editor.GetCurrentLevelId();
+                    // Reload cinematics — user may have created new sequences in editor
+                    Cinematic::Global.LoadAll();
+                    // Full reset without reloading level 1 (we just applied editor data)
+                    ClearDeathState();
+                    ClearRoundEntities();
+                    ResetPlayerPos();
+                    ResetRegulus();
+                    lives = 3; death = false; score = 0;
+                    invincible = true; invincibleTimer = invincibleDuration;
+                    spawnInterval = 10.0f; minuteTimer = 0.0f;
+                    playerHasBeatrice = false; beatriceAbilityTimer = 0.0f;
+                    beaBulletShootTimer = 0.0f;
+                    for (auto& bb : beaBullets) bb.active = false;
+                    beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
+                    houseAnimPlaying = false; houseAnimFrame = 0;
+                    houseAnimTimer = 0.0f; houseIsSnowed = false;
+                    nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
+                    nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
+                    nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
+                    for (auto& nk : nukes) nk.active = false;
+                    nukes.clear();
+                    if (!nukeSpawnNodes.empty()) {
+                        int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+                        nukes.push_back({ nukeSpawnNodes[idx], true });
+                    }
+                    beatrices.clear();
+                    if (!beatriceSpawnNodes.empty()) {
+                        int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
+                        beatrices.push_back({ beatriceSpawnNodes[idx], true });
+                    }
+                    regulusThrowing = true; regulusThrowFrame = 0;
+                    regulusThrowTimer = 0.0f; regulusSpawnPending = true;
+                    regulusForceBlue = true; regulusIdleFrame = 0;
+                    regulusIdleTimer = 0.0f;
+                    subaruFrame = 0; subaruTimer = 0.0f;
+                    ResumeMusicStream(music);
+                    currentScreen = GAMEPLAY;
+                } // end WantsPlay
+            } // end else (not KEY_B)
         }
         // ── HOW HIGH screen (update) ──────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
@@ -1376,6 +1429,14 @@ int main(void)
         else if (currentScreen == GAMEPLAY)
         {
             UpdateMusicStream(music);
+
+            // ── Cinematic sequences ───────────────────────────────────────────
+            // The SetApplyCallback set above patches live game objects directly.
+            {
+                static LevelData _cinematicDummy;
+                Cinematic::Global.Update(dt, _cinematicDummy);
+            }
+
             animationTimer += dt;
             if (ladderCooldown > 0.0f) ladderCooldown -= dt;
 
@@ -1927,8 +1988,8 @@ int main(void)
                     else
                     {
                         bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
-                        if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.height;
-                        if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.height;
+                        if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.ClimbHeight();
+                        if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.ClimbHeight();
                         ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
                         player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
                         player.y = lad.PlayerYAtProgress(ladderProgress, player.height);

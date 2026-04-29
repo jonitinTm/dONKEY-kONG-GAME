@@ -2,6 +2,7 @@
 //  LevelEditor.cpp
 // ============================================================
 #include "LevelEditor.h"
+#include "CinematicData.h"
 #include "raymath.h"
 #include <cstdio>
 #include <cstring>
@@ -9,139 +10,137 @@
 #include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Static metadata
+//  Metadata
 // ─────────────────────────────────────────────────────────────────────────────
-
-const char* LevelEditor::ToolName(EditorTool t)
-{
+const char* LevelEditor::ToolName(EditorTool t) {
     switch (t) {
-    case EditorTool::SELECT:         return "SELECT";
-    case EditorTool::PLAYER_SPAWN:   return "PLAYER";
-    case EditorTool::REGULUS:        return "REGULUS";
-    case EditorTool::CAVE:           return "CAVE";
-    case EditorTool::PLATFORM:       return "PLATFORM";
-    case EditorTool::LADDER:         return "LADDER";
-    case EditorTool::BEAM:           return "BEAM";
-    case EditorTool::PATH_NODE:      return "PATH NODE";
-    case EditorTool::NUKE_SPAWN:     return "NUKE";
-    case EditorTool::BEATRICE_SPAWN: return "BEATRICE";
-    case EditorTool::ENEMY_SPAWN:    return "ENEMY";
-    default:                         return "???";
+    case EditorTool::SELECT:return"SELECT"; case EditorTool::PLAYER_SPAWN:return"PLAYER";
+    case EditorTool::REGULUS:return"REGULUS"; case EditorTool::CAVE:return"CAVE";
+    case EditorTool::PLATFORM:return"PLATFORM"; case EditorTool::LADDER:return"LADDER";
+    case EditorTool::BEAM:return"BEAM"; case EditorTool::PATH_NODE:return"PATH NODE";
+    case EditorTool::NUKE_SPAWN:return"NUKE"; case EditorTool::BEATRICE_SPAWN:return"BEATRICE";
+    case EditorTool::ENEMY_SPAWN:return"ENEMY"; default:return"???";
     }
 }
-Color LevelEditor::ToolColor(EditorTool t)
-{
+Color LevelEditor::ToolColor(EditorTool t) {
     switch (t) {
-    case EditorTool::SELECT:         return LIGHTGRAY;
-    case EditorTool::PLAYER_SPAWN:   return GREEN;
-    case EditorTool::REGULUS:        return { 160,32,240,255 };
-    case EditorTool::CAVE:           return ORANGE;
-    case EditorTool::PLATFORM:       return { 80,120,255,255 };
-    case EditorTool::LADDER:         return YELLOW;
-    case EditorTool::BEAM:           return DARKGRAY;
-    case EditorTool::PATH_NODE:      return WHITE;
-    case EditorTool::NUKE_SPAWN:     return SKYBLUE;
-    case EditorTool::BEATRICE_SPAWN: return MAGENTA;
-    case EditorTool::ENEMY_SPAWN:    return RED;
-    default:                         return GRAY;
+    case EditorTool::SELECT:return LIGHTGRAY; case EditorTool::PLAYER_SPAWN:return GREEN;
+    case EditorTool::REGULUS:return{ 160,32,240,255 }; case EditorTool::CAVE:return ORANGE;
+    case EditorTool::PLATFORM:return{ 80,120,255,255 }; case EditorTool::LADDER:return YELLOW;
+    case EditorTool::BEAM:return{ 140,140,140,255 }; case EditorTool::PATH_NODE:return WHITE;
+    case EditorTool::NUKE_SPAWN:return SKYBLUE; case EditorTool::BEATRICE_SPAWN:return MAGENTA;
+    case EditorTool::ENEMY_SPAWN:return RED; default:return GRAY;
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Lifecycle
+//  Init
 // ─────────────────────────────────────────────────────────────────────────────
-
-void LevelEditor::Init(int screenW, int screenH)
-{
-    _sw = screenW; _sh = screenH;
+void LevelEditor::Init(int sw, int sh) {
+    _sw = sw; _sh = sh;
     _canvasH = (float)(_sh - TOOLBAR_H - BROWSER_H);
+    _canvasW = _sw - RIGHT_W;
     _zoom = _canvasH / (float)_sh;
-
-    _cam.offset = { 0.f, (float)TOOLBAR_H };
-    _cam.target = { 0.f, 0.f };
+    _cam.offset = { 0.f,(float)TOOLBAR_H };
+    _cam.target = { 0.f,0.f };
     _cam.rotation = 0.f;
     _cam.zoom = _zoom;
-
     LoadLevel(1);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Coordinate helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
 Vector2 LevelEditor::WorldMouse() const
 {
     return GetScreenToWorld2D(GetMousePosition(), _cam);
 }
 
-Vector2 LevelEditor::Snap(Vector2 v) const
-{
+Vector2 LevelEditor::Snap(Vector2 v) const {
     if (!_gridOn) return v;
     float gs = (float)GRID_SZ / _gridDiv;
-    return { roundf(v.x / gs) * gs, roundf(v.y / gs) * gs };
+    return { roundf(v.x / gs) * gs,roundf(v.y / gs) * gs };
 }
 
-bool LevelEditor::InCanvas()  const { Vector2 m = GetMousePosition(); return m.y >= TOOLBAR_H && m.y < (_sh - BROWSER_H); }
-bool LevelEditor::InBrowser() const { return GetMousePosition().y >= (_sh - BROWSER_H); }
-bool LevelEditor::InToolbar() const { return GetMousePosition().y < TOOLBAR_H; }
+Rectangle LevelEditor::RightPanelRect()  const { return { (float)_canvasW,(float)TOOLBAR_H,(float)RIGHT_W,(float)(_sh - TOOLBAR_H) }; }
+Rectangle LevelEditor::OutlinerRect()    const { int h = (_sh - TOOLBAR_H - BROWSER_H) / 2; return { (float)_canvasW,(float)TOOLBAR_H,(float)RIGHT_W,(float)h }; }
+Rectangle LevelEditor::DataPanelRect()   const {
+    int oh = (_sh - TOOLBAR_H - BROWSER_H) / 2;
+    return { (float)_canvasW,(float)(TOOLBAR_H + oh),(float)RIGHT_W,(float)(_sh - TOOLBAR_H - BROWSER_H - oh) };
+}
+
+bool LevelEditor::InCanvas()    const { Vector2 m = GetMousePosition(); int bottom = _seqOpen ? (_sh - SEQ_H) : (_sh - BROWSER_H); return m.x < _canvasW && m.y >= TOOLBAR_H + 13 && m.y < bottom; }
+bool LevelEditor::InBrowser()   const { if (_seqOpen) return false; return GetMousePosition().y >= (_sh - BROWSER_H); }
+bool LevelEditor::InToolbar()   const { return GetMousePosition().y < TOOLBAR_H; }
+bool LevelEditor::InRightPanel()const { Vector2 m = GetMousePosition(); return m.x >= _canvasW && m.y >= TOOLBAR_H && m.y < (_sh - BROWSER_H); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Entity geometry
+//  Entity geometry — accurate shapes
 // ─────────────────────────────────────────────────────────────────────────────
-
-Rectangle LevelEditor::PlatRect(const PlatformData& p) const
-{
+Rectangle LevelEditor::PlatRect(const PlatformData& p) const {
     float h = (p.h > 0.f) ? p.h : 12.f;
-    // Axis-aligned bounding box (accounts for tilt height change)
-    float yDrop = p.w * fabsf(tanf(p.tilt * DEG2RAD));
-    return { p.x, p.y, p.w, h + yDrop };
+    float tr = p.tilt * DEG2RAD, yr = p.w * tanf(tr);
+    float ymin = p.y + fminf(0.f, yr);
+    return { p.x,ymin,p.w,h + fabsf(yr) };
 }
-
-Rectangle LevelEditor::LadRect(const LadderData& l) const
-{
-    return { l.x, l.y, l.w, l.h };
+bool LevelEditor::PointInPlatform(Vector2 pt, const PlatformData& pd) const {
+    float h = (pd.h > 0.f) ? pd.h : 12.f, tr = pd.tilt * DEG2RAD, yr = pd.w * tanf(tr);
+    Vector2 TL = { pd.x,pd.y }, TR = { pd.x + pd.w,pd.y + yr }, BL = { pd.x,pd.y + h }, BR = { pd.x + pd.w,pd.y + yr + h };
+    auto Side = [](Vector2 p, Vector2 a, Vector2 b)->float { return (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y); };
+    auto InT = [&Side](Vector2 p, Vector2 a, Vector2 b, Vector2 c)->bool {
+        float d1 = Side(p, a, b), d2 = Side(p, b, c), d3 = Side(p, c, a);
+        return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+        };
+    return InT(pt, TL, TR, BL) || InT(pt, TR, BR, BL);
 }
-
-Rectangle LevelEditor::BeamRect(Vector2 pos) const
-{
-    if (_beamTex && _beamTex->id > 0) {
-        const float sc = 4.f;
-        return { pos.x, pos.y, _beamTex->width * sc, _beamTex->height * sc };
+Rectangle LevelEditor::LadRect(const LadderData& l)    const { return { l.x,l.y,l.w,l.h }; }
+Rectangle LevelEditor::BeamRect(Vector2 pos)             const {
+    if (_beamTex && _beamTex->id > 0) { float s = 4.f; return { pos.x,pos.y,_beamTex->width * s,_beamTex->height * s }; }
+    return { pos.x - 8.f,pos.y - 4.f,16.f,8.f };
+}
+Vector2 LevelEditor::PlatformCenter(const PlatformData& p) const {
+    float h = (p.h > 0.f) ? p.h : 12.f, yr = p.w * tanf(p.tilt * DEG2RAD);
+    return { p.x + p.w * .5f,p.y + yr * .5f + h * .5f };
+}
+Vector2 LevelEditor::EntityCenter(const SelectedEnt& e) const {
+    if (!e.valid()) return {};
+    int i = e.index;
+    switch ((EditorTool)e.type) {
+        // Platform: gizmo sits at the left origin point (x,y) — where the platform is defined
+    case EditorTool::PLATFORM: { const auto& p = _level.platforms[i]; return { p.x, p.y }; }
+    case EditorTool::LADDER: { auto& l = _level.ladders[i]; return { l.x + l.w * .5f,l.y + l.h * .5f }; }
+    case EditorTool::BEAM: { Rectangle r = BeamRect(_level.beams[i]); return { r.x + r.width * .5f,r.y + r.height * .5f }; }
+    default: return GetEntPos(e);
     }
-    return { pos.x - 8.f, pos.y - 4.f, 16.f, 8.f };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Entity position accessors (generic, by SelectedEnt)
+//  Entity position accessors
 // ─────────────────────────────────────────────────────────────────────────────
-
-Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const
-{
+Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const {
     if (!e.valid()) return {};
     int i = e.index;
     switch ((EditorTool)e.type) {
     case EditorTool::PLAYER_SPAWN:   return _level.playerSpawn;
     case EditorTool::REGULUS:        return _level.regulusPos;
     case EditorTool::CAVE:           return _level.cavePos;
-    case EditorTool::PLATFORM:       return { _level.platforms[i].x, _level.platforms[i].y };
-    case EditorTool::LADDER:         return { _level.ladders[i].x,   _level.ladders[i].y };
+    case EditorTool::PLATFORM:       return { _level.platforms[i].x,_level.platforms[i].y };
+    case EditorTool::LADDER:         return { _level.ladders[i].x,_level.ladders[i].y };
     case EditorTool::BEAM:           return _level.beams[i];
-    case EditorTool::PATH_NODE:      return { _level.pathNodes[i].x, _level.pathNodes[i].y };
+    case EditorTool::PATH_NODE:      return { _level.pathNodes[i].x,_level.pathNodes[i].y };
     case EditorTool::NUKE_SPAWN:     return _level.nukeSpawns[i];
     case EditorTool::BEATRICE_SPAWN: return _level.beatriceSpawns[i];
     case EditorTool::ENEMY_SPAWN:    return _level.enemySpawns[i];
     default: return {};
     }
 }
-
-void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p)
-{
+void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p) {
     if (!e.valid()) return;
     int i = e.index;
     switch ((EditorTool)e.type) {
     case EditorTool::PLAYER_SPAWN:   _level.playerSpawn = p; break;
-    case EditorTool::REGULUS:        _level.regulusPos = p; break;
-    case EditorTool::CAVE:           _level.cavePos = p; break;
+    case EditorTool::REGULUS:        _level.regulusPos = p;  break;
+    case EditorTool::CAVE:           _level.cavePos = p;     break;
     case EditorTool::PLATFORM:       _level.platforms[i].x = p.x; _level.platforms[i].y = p.y; break;
     case EditorTool::LADDER:         _level.ladders[i].x = p.x;   _level.ladders[i].y = p.y;   break;
     case EditorTool::BEAM:           _level.beams[i] = p; break;
@@ -154,421 +153,777 @@ void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Entity picking
+//  Picking — prioritised, accurate per-shape
 // ─────────────────────────────────────────────────────────────────────────────
-
-bool LevelEditor::PickEntity(Vector2 p)
-{
+bool LevelEditor::PickEntity(Vector2 p) {
     _sel.clear();
-    const float R = 14.f;
-
-    if (_level.hasPlayerSpawn && CheckCollisionPointCircle(p, _level.playerSpawn, R))
-    {
-        _sel = { (int)EditorTool::PLAYER_SPAWN,0 }; return true;
-    }
-    if (_level.hasRegulus && CheckCollisionPointCircle(p, _level.regulusPos, R))
-    {
-        _sel = { (int)EditorTool::REGULUS,0 }; return true;
-    }
-    if (_level.hasCave && CheckCollisionPointRec(p, { _level.cavePos.x,_level.cavePos.y,50,50 }))
-    {
-        _sel = { (int)EditorTool::CAVE,0 }; return true;
-    }
-
+    const float R = 13.f;
+    // Smallest / most precise first
     for (int i = 0; i < (int)_level.pathNodes.size(); i++) {
         Vector2 np = { _level.pathNodes[i].x,_level.pathNodes[i].y };
         if (CheckCollisionPointCircle(p, np, 10.f)) { _sel = { (int)EditorTool::PATH_NODE,i }; return true; }
     }
-    for (int i = 0; i < (int)_level.platforms.size(); i++)
-        if (CheckCollisionPointRec(p, PlatRect(_level.platforms[i])))
-        {
-            _sel = { (int)EditorTool::PLATFORM,i }; return true;
-        }
-    for (int i = 0; i < (int)_level.ladders.size(); i++)
-        if (CheckCollisionPointRec(p, LadRect(_level.ladders[i])))
-        {
-            _sel = { (int)EditorTool::LADDER,i }; return true;
-        }
-    for (int i = 0; i < (int)_level.beams.size(); i++)
-        if (CheckCollisionPointRec(p, BeamRect(_level.beams[i])))
-        {
-            _sel = { (int)EditorTool::BEAM,i }; return true;
-        }
+    if (_level.hasPlayerSpawn && CheckCollisionPointCircle(p, _level.playerSpawn, R)) { _sel = { (int)EditorTool::PLAYER_SPAWN,0 }; return true; }
+    if (_level.hasRegulus && CheckCollisionPointCircle(p, _level.regulusPos, R)) { _sel = { (int)EditorTool::REGULUS,0 }; return true; }
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)
-        if (CheckCollisionPointCircle(p, _level.nukeSpawns[i], R))
-        {
-            _sel = { (int)EditorTool::NUKE_SPAWN,i }; return true;
-        }
+        if (CheckCollisionPointCircle(p, _level.nukeSpawns[i], R)) { _sel = { (int)EditorTool::NUKE_SPAWN,i }; return true; }
     for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++)
-        if (CheckCollisionPointCircle(p, _level.beatriceSpawns[i], R))
-        {
-            _sel = { (int)EditorTool::BEATRICE_SPAWN,i }; return true;
-        }
+        if (CheckCollisionPointCircle(p, _level.beatriceSpawns[i], R)) { _sel = { (int)EditorTool::BEATRICE_SPAWN,i }; return true; }
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)
-        if (CheckCollisionPointCircle(p, _level.enemySpawns[i], R))
-        {
-            _sel = { (int)EditorTool::ENEMY_SPAWN,i }; return true;
-        }
+        if (CheckCollisionPointCircle(p, _level.enemySpawns[i], R)) { _sel = { (int)EditorTool::ENEMY_SPAWN,i }; return true; }
+    // Cave by sprite rect
+    if (_level.hasCave) {
+        float cw = (_caveTex && _caveTex->id > 0) ? 64.f * 3.5f : 50.f;
+        float ch = (_caveTex && _caveTex->id > 0) ? 32.f * 3.5f : 50.f;
+        if (CheckCollisionPointRec(p, { _level.cavePos.x,_level.cavePos.y,cw,ch })) { _sel = { (int)EditorTool::CAVE,0 }; return true; }
+    }
+    // Beams (exact texture rect)
+    for (int i = 0; i < (int)_level.beams.size(); i++)
+        if (CheckCollisionPointRec(p, BeamRect(_level.beams[i]))) { _sel = { (int)EditorTool::BEAM,i }; return true; }
+    // Ladders
+    for (int i = 0; i < (int)_level.ladders.size(); i++)
+        if (CheckCollisionPointRec(p, LadRect(_level.ladders[i]))) { _sel = { (int)EditorTool::LADDER,i }; return true; }
+    // Platforms — accurate parallelogram test
+    for (int i = 0; i < (int)_level.platforms.size(); i++)
+        if (PointInPlatform(p, _level.platforms[i])) { _sel = { (int)EditorTool::PLATFORM,i }; return true; }
     return false;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Multi-selection helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 bool LevelEditor::IsInMultiSel(const SelectedEnt& e) const
 {
-    for (const auto& s : _multiSel) if (s == e) return true;
-    return false;
+    for (const auto& s : _multiSel) if (s == e) return true; return false;
 }
 
-void LevelEditor::BoxSelectEntities(Rectangle box)
-{
+void LevelEditor::BoxSelectEntities(Rectangle box) {
     _multiSel.clear();
-    // Normalise (user may have dragged left/up)
-    if (box.width < 0) { box.x += box.width;  box.width = -box.width; }
+    if (box.width < 0) { box.x += box.width; box.width = -box.width; }
     if (box.height < 0) { box.y += box.height; box.height = -box.height; }
-
-    auto AddCirc = [&](EditorTool t, Vector2 pos, int idx) {
-        if (CheckCollisionPointRec(pos, box)) _multiSel.push_back({ (int)t,idx });
-        };
-    for (int i = 0; i < (int)_level.platforms.size(); i++)
-        if (CheckCollisionRecs(PlatRect(_level.platforms[i]), box))
-            _multiSel.push_back({ (int)EditorTool::PLATFORM,i });
-    for (int i = 0; i < (int)_level.ladders.size(); i++)
-        if (CheckCollisionRecs(LadRect(_level.ladders[i]), box))
-            _multiSel.push_back({ (int)EditorTool::LADDER,i });
-    for (int i = 0; i < (int)_level.beams.size(); i++)
-        if (CheckCollisionRecs(BeamRect(_level.beams[i]), box))
-            _multiSel.push_back({ (int)EditorTool::BEAM,i });
-    for (int i = 0; i < (int)_level.pathNodes.size(); i++)
-        AddCirc(EditorTool::PATH_NODE, { _level.pathNodes[i].x,_level.pathNodes[i].y }, i);
-    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)
-        AddCirc(EditorTool::NUKE_SPAWN, _level.nukeSpawns[i], i);
-    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++)
-        AddCirc(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns[i], i);
-    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)
-        AddCirc(EditorTool::ENEMY_SPAWN, _level.enemySpawns[i], i);
-    if (_level.hasPlayerSpawn && CheckCollisionPointRec(_level.playerSpawn, box))
-        _multiSel.push_back({ (int)EditorTool::PLAYER_SPAWN,0 });
-    if (_level.hasRegulus && CheckCollisionPointRec(_level.regulusPos, box))
-        _multiSel.push_back({ (int)EditorTool::REGULUS,0 });
-    if (_level.hasCave && CheckCollisionPointRec(_level.cavePos, box))
-        _multiSel.push_back({ (int)EditorTool::CAVE,0 });
-
+    auto AC = [&](EditorTool t, Vector2 v, int i) { if (CheckCollisionPointRec(v, box)) _multiSel.push_back({ (int)t,i }); };
+    for (int i = 0; i < (int)_level.platforms.size(); i++) if (CheckCollisionRecs(PlatRect(_level.platforms[i]), box)) _multiSel.push_back({ (int)EditorTool::PLATFORM,i });
+    for (int i = 0; i < (int)_level.ladders.size(); i++)   if (CheckCollisionRecs(LadRect(_level.ladders[i]), box))   _multiSel.push_back({ (int)EditorTool::LADDER,i });
+    for (int i = 0; i < (int)_level.beams.size(); i++)     if (CheckCollisionRecs(BeamRect(_level.beams[i]), box))    _multiSel.push_back({ (int)EditorTool::BEAM,i });
+    for (int i = 0; i < (int)_level.pathNodes.size(); i++)     AC(EditorTool::PATH_NODE, { _level.pathNodes[i].x,_level.pathNodes[i].y }, i);
+    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)    AC(EditorTool::NUKE_SPAWN, _level.nukeSpawns[i], i);
+    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++)AC(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns[i], i);
+    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)   AC(EditorTool::ENEMY_SPAWN, _level.enemySpawns[i], i);
+    if (_level.hasPlayerSpawn && CheckCollisionPointRec(_level.playerSpawn, box)) _multiSel.push_back({ (int)EditorTool::PLAYER_SPAWN,0 });
+    if (_level.hasRegulus && CheckCollisionPointRec(_level.regulusPos, box))      _multiSel.push_back({ (int)EditorTool::REGULUS,0 });
+    if (_level.hasCave && CheckCollisionPointRec(_level.cavePos, box))            _multiSel.push_back({ (int)EditorTool::CAVE,0 });
     if (!_multiSel.empty()) _sel = _multiSel[0];
-    SetStatus(TextFormat("%d entities selected.", (int)_multiSel.size()));
+    SetStatus(TextFormat("%d selected.", (int)_multiSel.size()));
+}
+
+void LevelEditor::SelectEnt(SelectedEnt e) {
+    _sel = e; _multiSel.clear();
+    // scroll outliner to show it
+    for (int i = 0; i < (int)_outline.size(); i++) {
+        if (_outline[i].ent == e) {
+            int vis = ((int)OutlinerRect().height - 20) / OUTLINE_ROW;
+            if (i < _outlineScroll) _outlineScroll = i;
+            else if (i >= _outlineScroll + vis) _outlineScroll = i - vis + 1; break;
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Delete
 // ─────────────────────────────────────────────────────────────────────────────
-
-void LevelEditor::DeleteSelected()
-{
+void LevelEditor::DeleteSelected() {
     if (!_sel.valid()) return;
     PushUndo();
-    auto erase = [](auto& vec, int i) { if (i >= 0 && i < (int)vec.size()) vec.erase(vec.begin() + i); };
-
-    EditorTool t = (EditorTool)_sel.type;
-    int i = _sel.index;
+    auto Er = [](auto& v, int i) { if (i >= 0 && i < (int)v.size()) v.erase(v.begin() + i); };
+    EditorTool t = (EditorTool)_sel.type; int i = _sel.index;
     switch (t) {
     case EditorTool::PLAYER_SPAWN:   _level.hasPlayerSpawn = false; break;
     case EditorTool::REGULUS:        _level.hasRegulus = false; break;
     case EditorTool::CAVE:           _level.hasCave = false; break;
-    case EditorTool::PLATFORM:       erase(_level.platforms, i); break;
-    case EditorTool::LADDER:         erase(_level.ladders, i); break;
-    case EditorTool::BEAM:           erase(_level.beams, i); break;
+    case EditorTool::PLATFORM:       Er(_level.platforms, i); break;
+    case EditorTool::LADDER:         Er(_level.ladders, i); break;
+    case EditorTool::BEAM:           Er(_level.beams, i); break;
     case EditorTool::PATH_NODE: {
         for (auto& n : _level.pathNodes) {
-            if (n.next[0] == i) n.next[0] = -1; if (n.next[1] == i) n.next[1] = -1;
-            if (n.next[0] > i) n.next[0]--;   if (n.next[1] > i) n.next[1]--;
+            if (n.next[0] == i)n.next[0] = -1; if (n.next[1] == i)n.next[1] = -1;
+            if (n.next[0] > i)n.next[0]--;   if (n.next[1] > i)n.next[1]--;
         }
-        erase(_level.pathNodes, i); break;
+        Er(_level.pathNodes, i); break;
     }
-    case EditorTool::NUKE_SPAWN:     erase(_level.nukeSpawns, i); break;
-    case EditorTool::BEATRICE_SPAWN: erase(_level.beatriceSpawns, i); break;
-    case EditorTool::ENEMY_SPAWN:    erase(_level.enemySpawns, i); break;
+    case EditorTool::NUKE_SPAWN:     Er(_level.nukeSpawns, i); break;
+    case EditorTool::BEATRICE_SPAWN: Er(_level.beatriceSpawns, i); break;
+    case EditorTool::ENEMY_SPAWN:    Er(_level.enemySpawns, i); break;
     default: break;
     }
-    _sel.clear(); _multiSel.clear();
-    _connectMode = ConnectMode::NONE;
-    SetStatus("Entity deleted.");
+    _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
+    SetStatus("Deleted.");
 }
-
-void LevelEditor::DeleteMultiSelected()
-{
+void LevelEditor::DeleteMultiSelected() {
     if (_multiSel.empty() && !_sel.valid()) return;
     PushUndo();
-    auto erase = [](auto& vec, int i) { if (i >= 0 && i < (int)vec.size()) vec.erase(vec.begin() + i); };
-
-    // Helper: collect indices for a given type, sort descending, erase
-    auto DelType = [&](EditorTool t, auto& vec) {
+    auto Er = [](auto& v, int i) { if (i >= 0 && i < (int)v.size()) v.erase(v.begin() + i); };
+    auto DT = [&](EditorTool t, auto& vec) {
         std::vector<int> idx;
         for (const auto& e : _multiSel) if (e.type == (int)t) idx.push_back(e.index);
-        if (_sel.valid() && _sel.type == (int)t)
-            if (std::find(idx.begin(), idx.end(), _sel.index) == idx.end()) idx.push_back(_sel.index);
-        std::sort(idx.rbegin(), idx.rend());
-        for (int i : idx) erase(vec, i);
+        if (_sel.valid() && _sel.type == (int)t && std::find(idx.begin(), idx.end(), _sel.index) == idx.end()) idx.push_back(_sel.index);
+        std::sort(idx.rbegin(), idx.rend()); for (int x : idx) Er(vec, x);
         };
-    DelType(EditorTool::PLATFORM, _level.platforms);
-    DelType(EditorTool::LADDER, _level.ladders);
-    DelType(EditorTool::BEAM, _level.beams);
-    DelType(EditorTool::NUKE_SPAWN, _level.nukeSpawns);
-    DelType(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns);
-    DelType(EditorTool::ENEMY_SPAWN, _level.enemySpawns);
-
-    // Path nodes require reference re-indexing — delete in reverse order
-    std::vector<int> pathIdx;
-    for (const auto& e : _multiSel) if (e.type == (int)EditorTool::PATH_NODE) pathIdx.push_back(e.index);
-    if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE)
-        if (std::find(pathIdx.begin(), pathIdx.end(), _sel.index) == pathIdx.end()) pathIdx.push_back(_sel.index);
-    std::sort(pathIdx.rbegin(), pathIdx.rend());
-    for (int i : pathIdx) {
-        for (auto& n : _level.pathNodes) {
-            if (n.next[0] == i) n.next[0] = -1; if (n.next[1] == i) n.next[1] = -1;
-            if (n.next[0] > i) n.next[0]--;   if (n.next[1] > i) n.next[1]--;
-        }
-        erase(_level.pathNodes, i);
-    }
-
-    // Singletons
+    DT(EditorTool::PLATFORM, _level.platforms); DT(EditorTool::LADDER, _level.ladders);
+    DT(EditorTool::BEAM, _level.beams); DT(EditorTool::NUKE_SPAWN, _level.nukeSpawns);
+    DT(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns); DT(EditorTool::ENEMY_SPAWN, _level.enemySpawns);
+    std::vector<int> pi;
+    for (const auto& e : _multiSel) if (e.type == (int)EditorTool::PATH_NODE) pi.push_back(e.index);
+    if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && std::find(pi.begin(), pi.end(), _sel.index) == pi.end()) pi.push_back(_sel.index);
+    std::sort(pi.rbegin(), pi.rend());
+    for (int x : pi) { for (auto& n : _level.pathNodes) { if (n.next[0] == x)n.next[0] = -1; if (n.next[1] == x)n.next[1] = -1; if (n.next[0] > x)n.next[0]--; if (n.next[1] > x)n.next[1]--; } Er(_level.pathNodes, x); }
     for (const auto& e : _multiSel) {
         if (e.type == (int)EditorTool::PLAYER_SPAWN) _level.hasPlayerSpawn = false;
         if (e.type == (int)EditorTool::REGULUS)      _level.hasRegulus = false;
         if (e.type == (int)EditorTool::CAVE)         _level.hasCave = false;
     }
-
-    _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE;
-    SetStatus("Deleted selected entities.");
+    _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
+    SetStatus("Deleted selection.");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Load / Save
+//  Load / Save / Undo
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  Copy / Paste / Duplicate
 // ─────────────────────────────────────────────────────────────────────────────
 
-void LevelEditor::LoadLevel(int id)
-{
-    _levelId = id; _level = LevelData{};
+void LevelEditor::CopySelected() {
+    _clipboard.clear();
+
+    // Build a list of all entities to copy
+    auto AddEnt = [&](const SelectedEnt& e) {
+        if (!e.valid()) return;
+        ClipboardEntry ce; ce.type = e.type; int i = e.index;
+        switch ((EditorTool)e.type) {
+        case EditorTool::PLATFORM:       ce.plat = _level.platforms[i]; break;
+        case EditorTool::LADDER:         ce.lad = _level.ladders[i]; break;
+        case EditorTool::PATH_NODE:      ce.node = _level.pathNodes[i];
+            ce.node.next[0] = -1; ce.node.next[1] = -1; break; // reset links
+        case EditorTool::BEAM:           ce.pos = _level.beams[i]; break;
+        case EditorTool::NUKE_SPAWN:     ce.pos = _level.nukeSpawns[i]; break;
+        case EditorTool::BEATRICE_SPAWN: ce.pos = _level.beatriceSpawns[i]; break;
+        case EditorTool::ENEMY_SPAWN:    ce.pos = _level.enemySpawns[i]; break;
+        case EditorTool::PLAYER_SPAWN:   ce.pos = _level.playerSpawn; break;
+        case EditorTool::REGULUS:        ce.pos = _level.regulusPos; break;
+        case EditorTool::CAVE:           ce.pos = _level.cavePos; break;
+        default: return;
+        }
+        _clipboard.push_back(ce);
+        };
+
+    if (_multiSel.size() > 1)
+        for (const auto& e : _multiSel) AddEnt(e);
+    else if (_sel.valid())
+        AddEnt(_sel);
+
+    SetStatus(TextFormat("Copied %d entity/entities.", (int)_clipboard.size()));
+}
+
+void LevelEditor::PasteClipboard(bool grabAfter) {
+    if (_clipboard.empty()) { SetStatus("Clipboard is empty."); return; }
+    PushUndo();
+
+    const float OFF = 32.f;   // paste offset so it doesn't land exactly on top
+    std::vector<SelectedEnt> pasted;
+
+    for (auto& ce : _clipboard) {
+        SelectedEnt ne; ne.type = ce.type;
+        switch ((EditorTool)ce.type) {
+        case EditorTool::PLATFORM: {
+            PlatformData p = ce.plat; p.x += OFF; p.y += OFF;
+            ne.index = (int)_level.platforms.size();
+            _level.platforms.push_back(p); break;
+        }
+        case EditorTool::LADDER: {
+            LadderData l = ce.lad; l.x += OFF; l.y += OFF;
+            ne.index = (int)_level.ladders.size();
+            _level.ladders.push_back(l); break;
+        }
+        case EditorTool::PATH_NODE: {
+            PathNodeData n = ce.node; n.x += OFF; n.y += OFF;
+            ne.index = (int)_level.pathNodes.size();
+            _level.pathNodes.push_back(n); break;
+        }
+        case EditorTool::BEAM: {
+            ne.index = (int)_level.beams.size();
+            _level.beams.push_back({ ce.pos.x + OFF,ce.pos.y + OFF }); break;
+        }
+        case EditorTool::NUKE_SPAWN: {
+            ne.index = (int)_level.nukeSpawns.size();
+            _level.nukeSpawns.push_back({ ce.pos.x + OFF,ce.pos.y + OFF }); break;
+        }
+        case EditorTool::BEATRICE_SPAWN: {
+            ne.index = (int)_level.beatriceSpawns.size();
+            _level.beatriceSpawns.push_back({ ce.pos.x + OFF,ce.pos.y + OFF }); break;
+        }
+        case EditorTool::ENEMY_SPAWN: {
+            ne.index = (int)_level.enemySpawns.size();
+            _level.enemySpawns.push_back({ ce.pos.x + OFF,ce.pos.y + OFF }); break;
+        }
+                                    // Singletons: move them instead of duplicating
+        case EditorTool::PLAYER_SPAWN:
+            _level.hasPlayerSpawn = true;
+            _level.playerSpawn = { ce.pos.x + OFF,ce.pos.y + OFF };
+            ne.index = 0; break;
+        case EditorTool::REGULUS:
+            _level.hasRegulus = true;
+            _level.regulusPos = { ce.pos.x + OFF,ce.pos.y + OFF };
+            ne.index = 0; break;
+        case EditorTool::CAVE:
+            _level.hasCave = true;
+            _level.cavePos = { ce.pos.x + OFF,ce.pos.y + OFF };
+            ne.index = 0; break;
+        default: continue;
+        }
+        pasted.push_back(ne);
+    }
+
+    if (pasted.empty()) return;
+
+    // Select the pasted entities
+    _sel = pasted[0]; _multiSel.clear();
+    if (pasted.size() > 1) _multiSel = pasted;
+
+    if (grabAfter) {
+        // Immediately enter grab so user can place them
+        StartDirectOp(DirectOp::MOVE);
+        SetStatus(TextFormat("Pasted %d — drag to place, Enter=confirm, ESC=cancel", (int)pasted.size()));
+    }
+    else {
+        SetStatus(TextFormat("Pasted %d entity/entities.", (int)pasted.size()));
+    }
+}
+
+void LevelEditor::DuplicateSelected() {
+    if (!_sel.valid() && _multiSel.empty()) { SetStatus("Nothing to duplicate."); return; }
+    CopySelected();          // fill clipboard from current selection
+    PasteClipboard(true);   // paste + grab so user can place immediately
+}
+
+void LevelEditor::LoadLevel(int id) {
+    _levelId = id;
     if (!::LoadLevel(_level, id)) {
         if (id == 1) { _level = GetDefaultLevel1(); SetStatus("Loaded built-in level 1."); }
-        else { _level.id = id; _level.valid = true; SetStatus("New empty level."); }
+        else { _level = LevelData{}; _level.id = id; _level.valid = true; SetStatus("New empty level."); }
     }
-    else SetStatus(TextFormat("Loaded level %d from disk.", id));
-    _sel.clear(); _multiSel.clear();
-    _placingPlatform = false; _placingLadder = false;
-    _dragging = false; _multiDragging = false; _boxSelecting = false;
-    _connectMode = ConnectMode::NONE;
+    else SetStatus(TextFormat("Loaded level %d.", id));
+    _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
+    _placingPlatform = _placingLadder = _dragging = _multiDragging = _boxSelecting = false;
+    _connectMode = ConnectMode::NONE; _outlineScroll = 0;
     _undoStack.clear(); _redoStack.clear();
 }
-
-void LevelEditor::SaveCurrentLevel()
-{
+void LevelEditor::SaveCurrentLevel() {
     _level.id = _levelId;
-    if (SaveLevel(_level)) SetStatus(TextFormat("Level %d saved.", _levelId));
-    else                   SetStatus("ERROR: Could not save level!");
+    SaveLevel(_level) ? SetStatus(TextFormat("Level %d saved.", _levelId)) : SetStatus("Save FAILED!");
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Undo / Redo
-// ─────────────────────────────────────────────────────────────────────────────
-
-void LevelEditor::PushUndo()
-{
+void LevelEditor::PushUndo() {
     _undoStack.push_back(_level);
     if ((int)_undoStack.size() > MAX_UNDO) _undoStack.erase(_undoStack.begin());
     _redoStack.clear();
 }
-
-void LevelEditor::Undo()
-{
+void LevelEditor::Undo() {
     if (_undoStack.empty()) { SetStatus("Nothing to undo."); return; }
     _redoStack.push_back(_level);
     _level = _undoStack.back(); _undoStack.pop_back();
-    _sel.clear(); _multiSel.clear();
+    _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
     SetStatus("Undo.");
 }
-
-void LevelEditor::Redo()
-{
+void LevelEditor::Redo() {
     if (_redoStack.empty()) { SetStatus("Nothing to redo."); return; }
     _undoStack.push_back(_level);
     _level = _redoStack.back(); _redoStack.pop_back();
-    _sel.clear(); _multiSel.clear();
+    _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
     SetStatus("Redo.");
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Status bar
-// ─────────────────────────────────────────────────────────────────────────────
-
 void LevelEditor::SetStatus(const char* msg, float dur)
 {
     strncpy(_status, msg, sizeof(_status) - 1); _statusTimer = dur;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  UpdateToolbar
+//  Grab (Blender G)
 // ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::StartDirectOp(DirectOp op) {
+    if (!_sel.valid() && _multiSel.empty()) return;
+    // R (rotate) and S (scale) only make sense for certain entity types
+    if (op == DirectOp::ROTATE && _sel.type != (int)EditorTool::PLATFORM) return;
+    if (op == DirectOp::SCALE && _sel.type != (int)EditorTool::PLATFORM
+        && _sel.type != (int)EditorTool::LADDER) return;
+    PushUndo();
+    _directOp = op; _grabAxisX = false; _grabAxisY = false;
+    _grabMouseStart = WorldMouse();
+    _grabSingleOrigin = GetSelPos();
+    _grabOrigins.clear(); _grabValOrigins.clear();
+    // Store scalar originals
+    if (_sel.valid()) {
+        if (op == DirectOp::ROTATE && _sel.type == (int)EditorTool::PLATFORM)
+            _grabValOrigin = _level.platforms[_sel.index].tilt;
+        else if (op == DirectOp::SCALE && _sel.type == (int)EditorTool::PLATFORM)
+            _grabValOrigin = _level.platforms[_sel.index].w;
+        else if (op == DirectOp::SCALE && _sel.type == (int)EditorTool::LADDER)
+            _grabValOrigin = _level.ladders[_sel.index].h;
+        else _grabValOrigin = 0.f;
+    }
+    if (_multiSel.size() > 1) {
+        for (const auto& e : _multiSel) {
+            _grabOrigins.push_back(GetEntPos(e));
+            float v = 0.f;
+            if (op == DirectOp::ROTATE && e.type == (int)EditorTool::PLATFORM && e.index < (int)_level.platforms.size()) v = _level.platforms[e.index].tilt;
+            if (op == DirectOp::SCALE && e.type == (int)EditorTool::PLATFORM && e.index < (int)_level.platforms.size()) v = _level.platforms[e.index].w;
+            if (op == DirectOp::SCALE && e.type == (int)EditorTool::LADDER && e.index < (int)_level.ladders.size())   v = _level.ladders[e.index].h;
+            _grabValOrigins.push_back(v);
+        }
+    }
+    const char* hints[] = { "G: move | X/Y=lock | Enter/LMB=OK | ESC/RMB=cancel",
+                         "R: rotate | drag horizontal | Enter/LMB=OK | ESC/RMB=cancel",
+                         "S: scale | drag horizontal | X=width Y=height | Enter/LMB=OK | ESC/RMB=cancel" };
+    SetStatus(hints[(int)op - 1]);
+}
 
-void LevelEditor::UpdateToolbar()
-{
+void LevelEditor::UpdateDirectOp() {
+    if (_directOp == DirectOp::NONE) return;
+
+    // Axis constraint toggle (G and S support X/Y)
+    if (_directOp != DirectOp::ROTATE) {
+        if (IsKeyPressed(KEY_X)) { _grabAxisX = true; _grabAxisY = false; SetStatus("X axis locked"); }
+        if (IsKeyPressed(KEY_Y)) { _grabAxisY = true; _grabAxisX = false; SetStatus("Y axis locked"); }
+    }
+
+    Vector2 wm = WorldMouse();
+    Vector2 delta = Vector2Subtract(wm, _grabMouseStart);
+
+    if (_directOp == DirectOp::MOVE) {
+        if (_grabAxisX) delta.y = 0.f;
+        if (_grabAxisY) delta.x = 0.f;
+        if (_multiSel.size() > 1)
+            for (int i = 0; i < (int)_multiSel.size(); i++)
+                SetEntPos(_multiSel[i], Snap(Vector2Add(_grabOrigins[i], delta)));
+        else if (_sel.valid())
+            SetSelPos(Snap(Vector2Add(_grabSingleOrigin, delta)));
+    }
+    else if (_directOp == DirectOp::ROTATE) {
+        // Horizontal drag = tilt degrees (0.3°/px)
+        float newTilt = fmaxf(-89.f, fminf(89.f, _grabValOrigin + delta.x * 0.3f));
+        if (_sel.valid() && _sel.type == (int)EditorTool::PLATFORM)
+            _level.platforms[_sel.index].tilt = newTilt;
+        // Multi-sel: rotate each platform independently
+        for (int i = 0; i < (int)_multiSel.size(); i++) {
+            const auto& e = _multiSel[i];
+            if (e.type == (int)EditorTool::PLATFORM && e.index < (int)_level.platforms.size())
+                _level.platforms[e.index].tilt = fmaxf(-89.f, fminf(89.f, _grabValOrigins[i] + delta.x * 0.3f));
+        }
+    }
+    else if (_directOp == DirectOp::SCALE) {
+        // Default: horizontal=width, vertical=height; axis locks override
+        bool doW = (!_grabAxisX && !_grabAxisY) || _grabAxisX;
+        bool doH = (!_grabAxisX && !_grabAxisY) || _grabAxisY;
+        if (_sel.valid()) {
+            if (_sel.type == (int)EditorTool::PLATFORM && doW)
+                _level.platforms[_sel.index].w = fmaxf((float)GRID_SZ, _grabValOrigin + delta.x);
+            if (_sel.type == (int)EditorTool::LADDER && doH)
+                _level.ladders[_sel.index].h = fmaxf((float)GRID_SZ, _grabValOrigin - delta.y);
+        }
+        for (int i = 0; i < (int)_multiSel.size(); i++) {
+            const auto& e = _multiSel[i];
+            if (e.type == (int)EditorTool::PLATFORM && doW && e.index < (int)_level.platforms.size())
+                _level.platforms[e.index].w = fmaxf((float)GRID_SZ, _grabValOrigins[i] + delta.x);
+            if (e.type == (int)EditorTool::LADDER && doH && e.index < (int)_level.ladders.size())
+                _level.ladders[e.index].h = fmaxf((float)GRID_SZ, _grabValOrigins[i] - delta.y);
+        }
+    }
+
+    if (IsKeyPressed(KEY_ENTER) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) ConfirmDirectOp();
+    if (IsKeyPressed(KEY_ESCAPE) || IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) CancelDirectOp();
+}
+
+void LevelEditor::ConfirmDirectOp() {
+    const char* msgs[] = { "Moved.","Rotated.","Scaled." };
+    SetStatus(msgs[(int)_directOp - 1]);
+    _directOp = DirectOp::NONE; _grabAxisX = false; _grabAxisY = false;
+}
+
+void LevelEditor::CancelDirectOp() {
+    // Restore
+    if (_directOp == DirectOp::MOVE) {
+        if (_multiSel.size() > 1)
+            for (int i = 0; i < (int)_multiSel.size(); i++) SetEntPos(_multiSel[i], _grabOrigins[i]);
+        else if (_sel.valid()) SetSelPos(_grabSingleOrigin);
+    }
+    else {
+        // Undo handles restoring scalar values
+        if (!_undoStack.empty()) { _level = _undoStack.back(); _undoStack.pop_back(); }
+    }
+    _directOp = DirectOp::NONE; _grabAxisX = false; _grabAxisY = false;
+    SetStatus("Cancelled.");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gizmo hit test
+// ─────────────────────────────────────────────────────────────────────────────
+GizmoAxis LevelEditor::GizmoHitTest(Vector2 center, Vector2 wm) const {
+    const float R = GIZMO_R, tip = 10.f, cs = 9.f;
+    if (CheckCollisionPointRec(wm, { center.x - cs,center.y - cs,cs * 2,cs * 2 })) return GizmoAxis::FREE;
+    if (_gizmo == GizmoMode::ROTATE) {
+        float d = Vector2Distance(center, wm);
+        return (d >= R - 10.f && d <= R + 10.f) ? GizmoAxis::RING : GizmoAxis::NONE;
+    }
+    if (_gizmo == GizmoMode::MOVE || _gizmo == GizmoMode::SCALE) {
+        if (CheckCollisionPointCircle(wm, { center.x + R,center.y }, tip)) return GizmoAxis::X;
+        if (CheckCollisionPointCircle(wm, { center.x,center.y - R }, tip)) return GizmoAxis::Y;
+    }
+    return GizmoAxis::NONE;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gizmo update
+// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::UpdateGizmo() {
+    if (!_sel.valid() || _gizmo == GizmoMode::SELECT || _directOp != DirectOp::NONE) return;
+    Vector2 wm = WorldMouse(), center = EntityCenter(_sel); (void)wm;
+    bool lP = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool lD = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
+    bool lR = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
+    _gizmoHot = GizmoHitTest(center, wm);
+    if (!_gizmoDragging) {
+        if (lP && _gizmoHot != GizmoAxis::NONE) {
+            PushUndo();
+            _gizmoDragging = true; _gizmoDragAxis = _gizmoHot; _gizmoDragStart = wm;
+            _gizmoPosStart = GetEntPos(_sel);
+            _gizmoValStart = (_sel.type == (int)EditorTool::PLATFORM) ? _level.platforms[_sel.index].tilt
+                : (_sel.type == (int)EditorTool::LADDER) ? _level.ladders[_sel.index].h : 0.f;
+        }
+    }
+    else {
+        if (lD) {
+            Vector2 d = Vector2Subtract(wm, _gizmoDragStart);
+            if (_gizmo == GizmoMode::MOVE) {
+                Vector2 np = _gizmoPosStart;
+                if (_gizmoDragAxis == GizmoAxis::X || _gizmoDragAxis == GizmoAxis::FREE) np.x = Snap({ _gizmoPosStart.x + d.x,0 }).x;
+                if (_gizmoDragAxis == GizmoAxis::Y || _gizmoDragAxis == GizmoAxis::FREE) np.y = Snap({ 0,_gizmoPosStart.y + d.y }).y;
+                SetEntPos(_sel, np);
+            }
+            else if (_gizmo == GizmoMode::ROTATE && _sel.type == (int)EditorTool::PLATFORM) {
+                float t = fmaxf(-89.f, fminf(89.f, _gizmoValStart + d.x * .3f));
+                _level.platforms[_sel.index].tilt = t;
+            }
+            else if (_gizmo == GizmoMode::SCALE) {
+                if (_sel.type == (int)EditorTool::PLATFORM && (_gizmoDragAxis == GizmoAxis::X || _gizmoDragAxis == GizmoAxis::FREE))
+                    _level.platforms[_sel.index].w = fmaxf((float)GRID_SZ, _gizmoValStart + d.x);
+                if (_sel.type == (int)EditorTool::LADDER && (_gizmoDragAxis == GizmoAxis::Y || _gizmoDragAxis == GizmoAxis::FREE))
+                    _level.ladders[_sel.index].h = fmaxf((float)GRID_SZ, _gizmoValStart - d.y);
+            }
+        }
+        if (lR) { _gizmoDragging = false; _gizmoDragAxis = GizmoAxis::NONE; }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Outliner list builder
+// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::BuildOutline() {
+    _outline.clear();
+    auto Add = [&](EditorTool t, int i, const char* icon, Color c) {
+        OutlineRow row; row.ent = { (int)t,i }; row.icon = icon; row.color = c;
+        if (i >= 0) snprintf(row.name, sizeof(row.name), "%s %d", ToolName(t), i);
+        else     snprintf(row.name, sizeof(row.name), "%s", ToolName(t));
+        _outline.push_back(row);
+        };
+    if (_level.hasPlayerSpawn) Add(EditorTool::PLAYER_SPAWN, -1, "[P]", GREEN);
+    if (_level.hasRegulus)     Add(EditorTool::REGULUS, -1, "[R]", { 160,32,240,255 });
+    if (_level.hasCave)        Add(EditorTool::CAVE, -1, "[C]", ORANGE);
+    for (int i = 0; i < (int)_level.platforms.size(); i++)    Add(EditorTool::PLATFORM, i, "[=]", { 80,120,255,255 });
+    for (int i = 0; i < (int)_level.ladders.size(); i++)      Add(EditorTool::LADDER, i, "[|]", YELLOW);
+    for (int i = 0; i < (int)_level.beams.size(); i++)        Add(EditorTool::BEAM, i, "[-]", { 140,140,140,255 });
+    for (int i = 0; i < (int)_level.pathNodes.size(); i++)    Add(EditorTool::PATH_NODE, i, "[o]", WHITE);
+    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)   Add(EditorTool::NUKE_SPAWN, i, "[N]", SKYBLUE);
+    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) Add(EditorTool::BEATRICE_SPAWN, i, "[B]", MAGENTA);
+    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)  Add(EditorTool::ENEMY_SPAWN, i, "[E]", RED);
+    // Clamp scroll
+    int vis = (int)(OutlinerRect().height - 20) / OUTLINE_ROW;
+    int maxScroll = (int)_outline.size() - vis;
+    if (_outlineScroll > maxScroll) _outlineScroll = std::max(0, maxScroll);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Numeric field widget (click+drag to change, like Blender)
+// ─────────────────────────────────────────────────────────────────────────────
+bool LevelEditor::NumField(const char* label, float& val, float sens, float minV, float maxV, float x, float y, float fw) {
+    // Label
+    DrawText(label, (int)x, (int)y + 3, 11, { 160,165,180,255 });
+    float lw = MeasureText(label, 11) + 6;
+    // Value rect
+    Rectangle vr = { x + lw,y,fw - lw,16 };
+    Vector2 mp = GetMousePosition();
+    bool hov = CheckCollisionPointRec(mp, vr);
+    Color bg = hov ? Color{ 55,58,75,255 } : Color{ 38,40,54,255 };
+    DrawRectangleRec(vr, bg);
+    DrawRectangleLinesEx(vr, 1, hov ? Color{ 90,100,140,255 } : Color{ 55,60,80,255 });
+
+    // Value text
+    char vbuf[32]; snprintf(vbuf, sizeof(vbuf), "%.2f", val);
+    int vtw = MeasureText(vbuf, 11);
+    DrawText(vbuf, (int)(vr.x + vr.width / 2 - vtw / 2), (int)vr.y + 3, 11, WHITE);
+    // Drag cursor hint
+    if (hov) DrawText("↔", (int)(vr.x + 2), (int)vr.y + 1, 11, { 100,200,255,180 });
+
+    bool changed = false;
+    // Start drag
+    if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !_fieldDrag) {
+        _fieldDrag = true; _fieldPtr = &val;
+        _fieldDragStartX = mp.x; _fieldDragStartVal = val;
+        _fieldDragSens = sens; _fieldMin = minV; _fieldMax = maxV;
+        SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
+    }
+    // Active drag on this field
+    if (_fieldDrag && _fieldPtr == &val) {
+        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+            float dx = mp.x - _fieldDragStartX;
+            val = fmaxf(minV, fminf(maxV, _fieldDragStartVal + dx * sens));
+            changed = true;
+        }
+        else {
+            _fieldDrag = false; _fieldPtr = nullptr;
+            SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        }
+    }
+    return changed;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Update sub-routines
+// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::UpdateToolbar() {
     bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    if (ctrl && IsKeyPressed(KEY_S)) SaveCurrentLevel();
+    if (ctrl && IsKeyPressed(KEY_Z)) Undo();
+    if (ctrl && IsKeyPressed(KEY_Y)) Redo();
+    if (ctrl && IsKeyPressed(KEY_C)) CopySelected();
+    if (ctrl && IsKeyPressed(KEY_V)) PasteClipboard(true);
+    if (ctrl && IsKeyPressed(KEY_D)) DuplicateSelected();
 
-    // Keyboard shortcuts
-    if (ctrl && IsKeyPressed(KEY_S))  SaveCurrentLevel();
-    if (ctrl && IsKeyPressed(KEY_Z))  Undo();
-    if (ctrl && IsKeyPressed(KEY_Y))  Redo();
-    if (IsKeyPressed(KEY_G)) { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
-    if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
-        _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
-    if (IsKeyPressed(KEY_ESCAPE))
-    {
-        _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT;
-        _sel.clear(); _multiSel.clear(); _boxSelecting = false; SetStatus("Cancelled.");
-    }
-    // [ / ] cycle grid division
-    if (IsKeyPressed(KEY_LEFT_BRACKET))
-    {
-        _gridDiv = (_gridDiv == 1) ? 4 : (_gridDiv == 4 ? 2 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv));
-    }
-    if (IsKeyPressed(KEY_RIGHT_BRACKET))
-    {
-        _gridDiv = (_gridDiv == 1) ? 2 : (_gridDiv == 2 ? 4 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv));
-    }
+    // H = grid (was G)
+    if (IsKeyPressed(KEY_H)) { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
 
-    // Level nav keyboard
-    if (!ctrl) {
-        if (IsKeyPressed(KEY_LEFT) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
-        if (IsKeyPressed(KEY_RIGHT) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(_levelId + 1); }
+    // G = grab (Blender style) — only when select tool active
+    if (IsKeyPressed(KEY_G) && _tool == EditorTool::SELECT && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::MOVE);
+
+    // Q/W/E/R = gizmo modes (AND auto-select the SELECT tool)
+    // 1/2/3/4  +  Q/W/E  = gizmo mode switches
+    if (IsKeyPressed(KEY_ONE) || IsKeyPressed(KEY_Q)) { _gizmo = GizmoMode::SELECT; _tool = EditorTool::SELECT; SetStatus("1/Q: SELECT mode"); }
+    if (IsKeyPressed(KEY_TWO) || IsKeyPressed(KEY_W)) { _gizmo = GizmoMode::MOVE;  _tool = EditorTool::SELECT; SetStatus("2/W: MOVE gizmo"); }
+    if (IsKeyPressed(KEY_THREE) || IsKeyPressed(KEY_E)) { _gizmo = GizmoMode::ROTATE; _tool = EditorTool::SELECT; SetStatus("3/E: ROTATE gizmo"); }
+    if (IsKeyPressed(KEY_FOUR)) { _gizmo = GizmoMode::SCALE; _tool = EditorTool::SELECT; SetStatus("4: SCALE gizmo"); }
+    // G/R/S = direct Blender-style ops (immediate, no gizmo click needed)
+    if (IsKeyPressed(KEY_R) && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::ROTATE);
+    if (IsKeyPressed(KEY_S) && !ctrl && _directOp == DirectOp::NONE) {
+        if (_seqOpen && _activeSeq >= 0 && _sel.valid()) SeqAddKeyframe();
+        else StartDirectOp(DirectOp::SCALE);
     }
 
-    // Toolbar button clicks  —  8 buttons
-    Vector2 mouse = GetMousePosition();
+    if (_directOp == DirectOp::NONE) {
+        if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
+            _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT; _gizmo = GizmoMode::SELECT;
+            _sel.clear(); _multiSel.clear(); _boxSelecting = false; _gizmoDragging = false;
+            SetStatus("Cancelled.");
+        }
+        // Tab = toggle sequencer panel
+        if (IsKeyPressed(KEY_TAB)) { _seqOpen = !_seqOpen; if (!_seqOpen) SeqPreviewStop(); SeqLoad(); SetStatus(_seqOpen ? "Sequencer open (Tab to close)" : "Sequencer closed"); }
+        if (IsKeyPressed(KEY_LEFT_BRACKET)) { _gridDiv = (_gridDiv == 1) ? 4 : (_gridDiv == 4 ? 2 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
+        if (IsKeyPressed(KEY_RIGHT_BRACKET)) { _gridDiv = (_gridDiv == 1) ? 2 : (_gridDiv == 2 ? 4 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
+        if (!ctrl) {
+            if (IsKeyPressed(KEY_LEFT) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
+            if (IsKeyPressed(KEY_RIGHT) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(_levelId + 1); }
+        }
+    }
+
+    // Toolbar buttons
     if (!IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || !InToolbar()) return;
-    auto TBtn = [&](int col)->Rectangle { float w = (float)_sw / 8.f; return { col * w,0,w - 2,(float)TOOLBAR_H - 2 }; };
-
-    if (CheckCollisionPointRec(mouse, TBtn(0))) { if (_levelId > 1) { SaveCurrentLevel(); LoadLevel(--_levelId); } }
-    if (CheckCollisionPointRec(mouse, TBtn(2))) { if (_levelId < 10) { SaveCurrentLevel(); LoadLevel(++_levelId); } }
+    Vector2 mouse = GetMousePosition();
+    auto TBtn = [&](int c)->Rectangle {float w = (float)_sw / 8.f; return{ c * w,0,w - 2,(float)TOOLBAR_H - 2 }; };
+    if (CheckCollisionPointRec(mouse, TBtn(0)) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(--_levelId); }
+    if (CheckCollisionPointRec(mouse, TBtn(2)) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(++_levelId); }
     if (CheckCollisionPointRec(mouse, TBtn(3))) { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
     if (CheckCollisionPointRec(mouse, TBtn(4))) { _gridDiv = (_gridDiv == 1) ? 2 : (_gridDiv == 2) ? 4 : 1; SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
     if (CheckCollisionPointRec(mouse, TBtn(5))) SaveCurrentLevel();
     if (CheckCollisionPointRec(mouse, TBtn(6))) { SaveCurrentLevel(); _wantsPlay = true; }
-    if (CheckCollisionPointRec(mouse, TBtn(7))) { _wantsMenu = true; }
+    if (CheckCollisionPointRec(mouse, TBtn(7))) _wantsMenu = true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  UpdateBrowser
-// ─────────────────────────────────────────────────────────────────────────────
-
-Rectangle LevelEditor::BrowserBtn(int row, int col, int cols) const
-{
-    float bw = (float)_sw / cols, bh = 38.f;
-    float by = (float)(_sh - BROWSER_H) + 6 + row * (bh + 4);
+Rectangle LevelEditor::BrowserBtn(int row, int col, int cols) const {
+    float bw = (float)_canvasW / cols, bh = 36.f;
+    float by = (float)(_sh - BROWSER_H) + 4 + row * (bh + 4);
     return { col * bw + 2,by,bw - 4,bh };
 }
-
-void LevelEditor::UpdateBrowser()
-{
-    if (!IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) return;
+void LevelEditor::UpdateBrowser() {
+    if (!IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || !InBrowser()) return;
     Vector2 mouse = GetMousePosition();
-    if (!InBrowser()) return;
-
-    const int row0tools[] = { 0,1,2,3,4,5 };
-    const int row1tools[] = { 6,7,8,9,10 };
-    for (int c = 0; c < 6; c++)
-        if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6)))
-        {
-            _tool = (EditorTool)row0tools[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
-        }
-    for (int c = 0; c < 5; c++)
-        if (CheckCollisionPointRec(mouse, BrowserBtn(1, c, 5)))
-        {
-            _tool = (EditorTool)row1tools[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
-        }
+    if (mouse.x >= _canvasW) return; // right panel
+    const int r0[] = { 0,1,2,3,4,5 };
+    const int r1[] = { 6,7,8,9,10 };
+    for (int c = 0; c < 6; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6)))
+    {
+        _tool = (EditorTool)r0[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
+    }
+    for (int c = 0; c < 5; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(1, c, 5)))
+    {
+        _tool = (EditorTool)r1[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
+    }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  UpdateCanvas
-// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::UpdateRightPanel() {
+    if (!InRightPanel()) return;
+    Rectangle or_ = OutlinerRect();
+    Vector2 mouse = GetMousePosition();
 
-void LevelEditor::UpdateCanvas()
-{
+    // Outliner scroll
+    float wheel = GetMouseWheelMove();
+    if (CheckCollisionPointRec(mouse, or_) && wheel != 0) {
+        _outlineScroll = (int)(_outlineScroll - wheel);
+        _outlineScroll = std::max(0, _outlineScroll);
+    }
+
+    // Outliner row click
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, or_)) {
+        int vis = (int)(or_.height - 20) / OUTLINE_ROW;
+        for (int r = 0; r < vis; r++) {
+            int idx = r + _outlineScroll;
+            if (idx >= (int)_outline.size()) break;
+            Rectangle rr = { or_.x + 2,or_.y + 18 + (float)r * OUTLINE_ROW,or_.width - 4,(float)OUTLINE_ROW };
+            if (CheckCollisionPointRec(mouse, rr)) {
+                SelectEnt(_outline[idx].ent);
+                _tool = EditorTool::SELECT;
+                SetStatus(TextFormat("Selected %s", _outline[idx].name));
+                break;
+            }
+        }
+    }
+
+    // Data panel field drags are handled inside NumField during Draw
+}
+
+void LevelEditor::UpdateCanvas() {
+    if (_directOp != DirectOp::NONE) { UpdateDirectOp(); return; }
     Vector2 wm = WorldMouse(), swm = Snap(wm);
-    bool lmbP = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-    bool lmbD = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
-    bool lmbR = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
-    bool rmbP = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
+    bool lP = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool lD = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
+    bool lR = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
+    bool rP = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
 
-    // Right-click = delete under cursor
-    if (rmbP) { PickEntity(wm); if (_sel.valid()) { DeleteSelected(); return; } }
+    if (rP) { PickEntity(wm); if (_sel.valid())DeleteSelected(); return; }
 
-    // Path-node connection mode
     if (_connectMode != ConnectMode::NONE) {
-        if (lmbP) {
+        if (lP) {
             for (int i = 0; i < (int)_level.pathNodes.size(); i++) {
                 Vector2 np = { _level.pathNodes[i].x,_level.pathNodes[i].y };
                 if (CheckCollisionPointCircle(wm, np, 12.f)) {
                     PushUndo();
                     auto& src = _level.pathNodes[_connectFrom];
-                    if (_connectMode == ConnectMode::NEXT0) src.next[0] = i;
-                    else                                  src.next[1] = i;
-                    _connectMode = ConnectMode::NONE;
-                    SetStatus(TextFormat("Node %d connected.", i)); return;
+                    if (_connectMode == ConnectMode::NEXT0)src.next[0] = i; else src.next[1] = i;
+                    _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Node %d connected.", i)); return;
                 }
             }
         }
         return;
     }
 
-    // ── SELECT tool ──────────────────────────────────────────────────────────
-    if (_tool == EditorTool::SELECT)
-    {
-        if (lmbP) {
-            bool hitEntity = PickEntity(wm);
-            if (hitEntity) {
-                // Check if clicked entity is already in multi-selection → multi-drag
-                if (_multiSel.size() > 1 && IsInMultiSel(_sel)) {
-                    PushUndo();
-                    _multiDragging = true;
-                    _multiDragAnchor = wm;
-                    _multiDragOrigins.clear();
-                    for (const auto& e : _multiSel) _multiDragOrigins.push_back(GetEntPos(e));
+    if (_tool == EditorTool::SELECT) {
+        // Gizmo (MOVE/ROTATE/SCALE) takes priority when entity selected
+        if (_sel.valid() && _gizmo != GizmoMode::SELECT) {
+            UpdateGizmo();
+            if (_gizmoDragging) return;
+        }
+        if (lP) {
+            // Check if clicking on gizmo first (already handled above if dragging)
+            if (_sel.valid() && _gizmo != GizmoMode::SELECT) {
+                Vector2 center = EntityCenter(_sel);
+                GizmoAxis hit = GizmoHitTest(center, wm);
+                if (hit != GizmoAxis::NONE) {
+                    // gizmo will handle it next frame via _gizmoDragging
+                    return;
+                }
+            }
+            bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            bool hit = PickEntity(wm);    // fills _sel with whatever is under the mouse
+            if (hit) {
+                if (shift) {
+                    // Shift+click: toggle entity in/out of multi-selection
+                    SelectedEnt clicked = _sel;   // PickEntity already set _sel
+                    bool already = IsInMultiSel(clicked);
+                    if (already) {
+                        // Remove from multi-sel
+                        _multiSel.erase(std::remove_if(_multiSel.begin(), _multiSel.end(),
+                            [&clicked](const SelectedEnt& e) {return e == clicked; }), _multiSel.end());
+                        // Move primary selection to last remaining, or clear
+                        _sel = _multiSel.empty() ? SelectedEnt{} : _multiSel.back();
+                    }
+                    else {
+                        // Add current primary to multi-sel if it's valid and not already there
+                        if (_sel.valid() && !IsInMultiSel(_sel)) _multiSel.push_back(_sel);
+                        // Add the newly clicked one
+                        _multiSel.push_back(clicked);
+                        _sel = clicked;
+                    }
+                    SetStatus(TextFormat("%d selected.", (int)_multiSel.size()));
+                }
+                else if (_multiSel.size() > 1 && IsInMultiSel(_sel)) {
+                    // Plain click inside existing multi-sel → start multi-drag
+                    PushUndo(); _multiDragging = true; _multiDragAnchor = wm;
+                    _multiDragOrigins.clear(); for (const auto& e : _multiSel)_multiDragOrigins.push_back(GetEntPos(e));
                 }
                 else {
-                    // Single select + drag
+                    // Plain click on new entity → single select + drag
                     _multiSel.clear(); _boxSelecting = false;
-                    PushUndo();
-                    _dragging = true;
-                    _dragOffset = Vector2Subtract(wm, GetSelPos());
-                    SetStatus(TextFormat("Selected %s #%d — drag to move, DEL to delete", ToolName((EditorTool)_sel.type), _sel.index));
+                    PushUndo(); _dragging = true; _dragOffset = Vector2Subtract(wm, GetSelPos());
                 }
             }
             else {
-                // Start box selection
-                _sel.clear(); _multiSel.clear();
-                _dragging = false; _multiDragging = false;
-                _boxSelecting = true;
-                _boxStart = _boxEnd = wm;
+                if (shift) {
+                    // Shift+click on empty space → start additive box select
+                    _boxSelecting = true; _boxStart = _boxEnd = wm;
+                    // don't clear existing multiSel yet — BoxSelectEntities will merge
+                }
+                else {
+                    _sel.clear(); _multiSel.clear();
+                    _dragging = false; _multiDragging = false;
+                    _boxSelecting = true; _boxStart = _boxEnd = wm;
+                }
             }
         }
-        if (lmbD) {
+        if (lD) {
             if (_dragging) SetSelPos(Snap(Vector2Subtract(wm, _dragOffset)));
             if (_multiDragging) {
-                Vector2 delta = Vector2Subtract(wm, _multiDragAnchor);
-                for (int i = 0; i < (int)_multiSel.size(); i++)
-                    SetEntPos(_multiSel[i], Snap(Vector2Add(_multiDragOrigins[i], delta)));
+                Vector2 d = Vector2Subtract(wm, _multiDragAnchor);
+                for (int i = 0; i < (int)_multiSel.size(); i++) SetEntPos(_multiSel[i], Snap(Vector2Add(_multiDragOrigins[i], d)));
             }
             if (_boxSelecting) _boxEnd = wm;
         }
-        if (lmbR) {
+        if (lR) {
             if (_boxSelecting) {
-                Rectangle box = {
-                    fminf(_boxStart.x,_boxEnd.x), fminf(_boxStart.y,_boxEnd.y),
-                    fabsf(_boxEnd.x - _boxStart.x),  fabsf(_boxEnd.y - _boxStart.y)
-                };
-                if (box.width > 4.f || box.height > 4.f) BoxSelectEntities(box);
-                else { _sel.clear(); _multiSel.clear(); }
+                Rectangle box = { fminf(_boxStart.x,_boxEnd.x),fminf(_boxStart.y,_boxEnd.y),
+                                fabsf(_boxEnd.x - _boxStart.x),fabsf(_boxEnd.y - _boxStart.y) };
+                bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                if (box.width > 4 || box.height > 4) {
+                    if (shift) {
+                        // Additive: merge new box results with existing multi-sel
+                        std::vector<SelectedEnt> prev = _multiSel;
+                        BoxSelectEntities(box);   // fills _multiSel fresh
+                        // Re-add previous entries that aren't already in the new list
+                        for (const auto& e : prev)
+                            if (!IsInMultiSel(e)) _multiSel.push_back(e);
+                        if (!_multiSel.empty()) _sel = _multiSel[0];
+                        SetStatus(TextFormat("%d selected.", (int)_multiSel.size()));
+                    }
+                    else {
+                        BoxSelectEntities(box);
+                    }
+                }
+                else {
+                    if (!shift) { _sel.clear(); _multiSel.clear(); }
+                }
                 _boxSelecting = false;
             }
             _dragging = false; _multiDragging = false;
@@ -576,88 +931,77 @@ void LevelEditor::UpdateCanvas()
         return;
     }
 
-    // ── PLATFORM (drag to define width) ─────────────────────────────────────
+    // Placement tools
     if (_tool == EditorTool::PLATFORM) {
-        if (lmbP) { _placingPlatform = true; _platStart = swm; }
-        if (_placingPlatform && lmbR) {
+        if (lP) { _placingPlatform = true; _platStart = swm; }
+        if (_placingPlatform && lR) {
             float w = swm.x - _platStart.x;
             if (fabsf(w) < GRID_SZ) w = (float)(GRID_SZ * 4);
             PushUndo();
-            PlatformData p;
-            if (w >= 0) { p.x = _platStart.x; p.w = w; }
-            else { p.x = swm.x;        p.w = -w; }
-            p.y = _platStart.y; p.h = 0.f; p.tilt = 0.f;
-            _level.platforms.push_back(p);
-            _placingPlatform = false;
-            SetStatus("Platform placed.");
+            PlatformData p; p.x = (w >= 0) ? _platStart.x : swm.x; p.w = fabsf(w); p.y = _platStart.y; p.h = 0.f; p.tilt = 0.f;
+            _level.platforms.push_back(p); _placingPlatform = false; SetStatus("Platform placed.");
         }
         return;
     }
-
-    // ── LADDER (drag to define height) ───────────────────────────────────────
     if (_tool == EditorTool::LADDER) {
-        if (lmbP) { _placingLadder = true; _ladStart = swm; }
-        if (_placingLadder && lmbR) {
+        if (lP) { _placingLadder = true; _ladStart = swm; }
+        if (_placingLadder && lR) {
             float h = swm.y - _ladStart.y;
             if (fabsf(h) < GRID_SZ) h = (float)(GRID_SZ * 4);
             PushUndo();
-            LadderData l;
-            l.x = _ladStart.x; l.y = (h >= 0) ? _ladStart.y : swm.y;
-            l.w = 40.f;        l.h = fabsf(h);
-            _level.ladders.push_back(l);
-            _placingLadder = false;
-            SetStatus("Ladder placed.");
+            LadderData l; l.x = _ladStart.x; l.y = (h >= 0) ? _ladStart.y : swm.y; l.w = 40.f; l.h = fabsf(h);
+            _level.ladders.push_back(l); _placingLadder = false; SetStatus("Ladder placed.");
         }
         return;
     }
-
-    // ── PATH_NODE ────────────────────────────────────────────────────────────
     if (_tool == EditorTool::PATH_NODE) {
-        if (lmbP) {
-            PushUndo();
-            PathNodeData n; n.x = swm.x; n.y = swm.y;
+        if (lP) {
+            PushUndo(); PathNodeData n; n.x = swm.x; n.y = swm.y;
             _level.pathNodes.push_back(n);
             _sel = { (int)EditorTool::PATH_NODE,(int)_level.pathNodes.size() - 1 };
-            SetStatus(TextFormat("Path node %d placed.", _sel.index));
+            SetStatus(TextFormat("Node %d placed.", _sel.index));
         }
         return;
     }
-
-    // ── Single-click placement ───────────────────────────────────────────────
-    if (lmbP) {
+    if (lP) {
         PushUndo();
         switch (_tool) {
-        case EditorTool::PLAYER_SPAWN:
-            _level.hasPlayerSpawn = true; _level.playerSpawn = swm; SetStatus("Player spawn set."); break;
-        case EditorTool::REGULUS:
-            _level.hasRegulus = true; _level.regulusPos = swm; SetStatus("Regulus set."); break;
-        case EditorTool::CAVE:
-            _level.hasCave = true; _level.cavePos = swm; SetStatus("Cave set."); break;
-        case EditorTool::BEAM:
-            _level.beams.push_back(swm); SetStatus("Beam placed."); break;
-        case EditorTool::NUKE_SPAWN:
-            _level.nukeSpawns.push_back(swm); SetStatus("Nuke spawn placed."); break;
-        case EditorTool::BEATRICE_SPAWN:
-            _level.beatriceSpawns.push_back(swm); SetStatus("Beatrice spawn placed."); break;
-        case EditorTool::ENEMY_SPAWN:
-            _level.enemySpawns.push_back(swm); SetStatus("Enemy spawn placed."); break;
+        case EditorTool::PLAYER_SPAWN:   _level.hasPlayerSpawn = true; _level.playerSpawn = swm; SetStatus("Player spawn set."); break;
+        case EditorTool::REGULUS:        _level.hasRegulus = true; _level.regulusPos = swm; SetStatus("Regulus set."); break;
+        case EditorTool::CAVE:           _level.hasCave = true; _level.cavePos = swm; SetStatus("Cave set."); break;
+        case EditorTool::BEAM:           _level.beams.push_back(swm); SetStatus("Beam placed."); break;
+        case EditorTool::NUKE_SPAWN:     _level.nukeSpawns.push_back(swm); SetStatus("Nuke spawn."); break;
+        case EditorTool::BEATRICE_SPAWN: _level.beatriceSpawns.push_back(swm); SetStatus("Beatrice spawn."); break;
+        case EditorTool::ENEMY_SPAWN:    _level.enemySpawns.push_back(swm); SetStatus("Enemy spawn."); break;
         default: break;
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Master Update
+//  Master Update  — B checked first, then grab, then everything
 // ─────────────────────────────────────────────────────────────────────────────
-
-void LevelEditor::Update(float dt)
-{
+void LevelEditor::Update(float dt) {
     if (_statusTimer > 0.f) _statusTimer -= dt;
-    // B = back to menu, absolute top priority before any other input
-    if (IsKeyPressed(KEY_B)) { _wantsMenu = true; return; }
+
+    BuildOutline();
+
+    if (_fieldDrag && !IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+        _fieldDrag = false; _fieldPtr = nullptr;
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+    }
+
+    if (_seqPlaying) SeqPreviewUpdate(dt);
+
     UpdateToolbar();
     if (_wantsMenu || _wantsPlay) return;
+
+    if (_directOp != DirectOp::NONE) { UpdateDirectOp(); return; }
+
+    if (_seqOpen) UpdateSequencer();
+
     UpdateBrowser();
+    UpdateRightPanel();
     if (InCanvas()) UpdateCanvas();
 }
 
@@ -665,178 +1009,122 @@ void LevelEditor::Update(float dt)
 //  DRAW
 // =============================================================================
 
-// ── Entity draw helpers ────────────────────────────────────────────────────────
-
-void LevelEditor::DrawPlatEnt(const PlatformData& p, bool sel, bool msel) const
-{
-    const float platH = (p.h > 0.f) ? p.h : 12.f;
-    const float tiltRad = p.tilt * DEG2RAD;
-    const float yRight = p.w * tanf(tiltRad);       // y-drop at right edge
-
-    // Filled parallelogram (no beam texture on platforms — beams are separate)
-    Color fill = msel ? Color{ 255,200,0,40 } : (sel ? Color{ 255,220,0,30 } : Color{ 0,140,255,35 });
-    // Draw as two triangles to form the tilted quad
-    Vector2 TL = { p.x,       p.y };
-    Vector2 TR = { p.x + p.w,   p.y + yRight };
-    Vector2 BL = { p.x,       p.y + platH };
-    Vector2 BR = { p.x + p.w,   p.y + yRight + platH };
-    DrawTriangle(TL, BL, TR, fill);
-    DrawTriangle(BL, BR, TR, fill);
-
-    // Outline
-    Color bc = sel ? YELLOW : (msel ? Color{ 255,200,0,240 } : Color{ 0,160,255,220 });
+void LevelEditor::DrawPlatEnt(const PlatformData& p, bool sel, bool msel) const {
+    float h = (p.h > 0.f) ? p.h : 12.f, tr = p.tilt * DEG2RAD, yr = p.w * tanf(tr);
+    Vector2 TL = { p.x,p.y }, TR = { p.x + p.w,p.y + yr }, BL = { p.x,p.y + h }, BR = { p.x + p.w,p.y + yr + h };
+    Color fill = msel ? Color{ 255,200,0,35 } : (sel ? Color{ 255,220,0,28 } : Color{ 0,140,255,28 });
+    DrawTriangle(TL, BL, TR, fill); DrawTriangle(BL, BR, TR, fill);
+    Color bc = sel ? YELLOW : (msel ? Color{ 255,200,0,240 } : Color{ 0,160,255,200 });
     float lw = sel ? 2.5f : 1.5f;
-    DrawLineEx(TL, TR, lw, bc);
-    DrawLineEx(BL, BR, lw, bc);
-    DrawLineEx(TL, BL, lw, bc);
-    DrawLineEx(TR, BR, lw, bc);
-
-    // Tilt label
-    if (fabsf(p.tilt) > 0.1f) {
-        char buf[32]; snprintf(buf, sizeof(buf), "%.1f°", p.tilt);
-        DrawText(buf, (int)p.x + 2, (int)p.y - 12, 9, bc);
-    }
-
-    // Corner handles when selected
-    if (sel || msel) {
-        const float hs = 5.f;
-        auto H = [hs](Vector2 c) { DrawRectangle((int)(c.x - hs), (int)(c.y - hs), (int)(hs * 2), (int)(hs * 2), YELLOW); };
-        H(TL); H(TR); H(BL); H(BR);
-    }
+    DrawLineEx(TL, TR, lw, bc); DrawLineEx(BL, BR, lw, bc); DrawLineEx(TL, BL, lw, bc); DrawLineEx(TR, BR, lw, bc);
+    if (fabsf(p.tilt) > 0.1f) { char b[32]; snprintf(b, sizeof(b), "%.1f°", p.tilt); DrawText(b, (int)p.x + 2, (int)p.y - 12, 9, bc); }
 }
-
-void LevelEditor::DrawLadEnt(const LadderData& l, bool sel, bool msel) const
-{
+void LevelEditor::DrawLadEnt(const LadderData& l, bool sel, bool msel) const {
     Rectangle r = LadRect(l);
+    const float trim = 18.f;   // must match Ladder::BOTTOM_TRIM
+    float climbH = r.height - trim;
     Color bc = sel ? YELLOW : (msel ? Color{ 255,200,0,240 } : Color{ 255,220,0,200 });
 
+    // ── Ladder texture tiled over full visual height ───────────────────────
     if (_ladderTex && _ladderTex->id > 0) {
-        const float sc = 4.f, tileW = 16.f * sc, tileH = 16.f * sc;
-        float drawX = r.x + r.width * 0.5f - tileW * 0.5f;
-        for (float y = r.y; y < r.y + r.height; y += tileH) {
-            float dh = fminf(tileH, r.y + r.height - y), srh = dh / sc;
-            DrawTexturePro(*_ladderTex, { 0,0,16.f,srh }, { drawX,y,tileW,dh }, {}, 0.f, WHITE);
+        const float sc = 4.f, tw = 16.f * sc, th = 16.f * sc;
+        float dx = r.x + r.width * .5f - tw * .5f;
+        for (float y = r.y; y < r.y + r.height; y += th) {
+            float dh = fminf(th, r.y + r.height - y);
+            DrawTexturePro(*_ladderTex, { 0,0,16.f,dh / sc }, { dx,y,tw,dh }, {}, 0.f, WHITE);
         }
     }
     else {
         DrawRectangleRec(r, { 255,220,0,50 });
     }
-    DrawRectangleLinesEx(r, sel ? 2.f : 1.5f, bc);
-    if (sel || msel) {
-        const float hs = 5.f;
-        DrawRectangle((int)(r.x - hs), (int)(r.y + r.height * 0.5f - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
-        DrawRectangle((int)(r.x + r.width - hs), (int)(r.y + r.height * 0.5f - hs), (int)(hs * 2), (int)(hs * 2), YELLOW);
-    }
-}
 
-void LevelEditor::DrawCircEnt(Vector2 pos, float radius, Color c, bool sel, bool msel, const char* lbl) const
-{
-    if (msel && !sel) DrawCircleV(pos, radius + 5.f, { 255,200,0,180 });
-    DrawCircleV(pos, radius + (sel ? 3.f : 0.f), sel ? YELLOW : c);
-    DrawCircleV(pos, radius, c);
+    // ── Interactive zone outline (climbable part only) ─────────────────────
+    DrawRectangleLinesEx({ r.x,r.y,r.width,climbH }, sel ? 2.f : 1.5f, bc);
+
+    // ── Decorative-only trim: diagonal hatch + dim overlay ────────────────
+    Rectangle trimR = { r.x,r.y + climbH,r.width,trim };
+    DrawRectangleRec(trimR, { 0,0,0,80 });   // darken
+    // Hatch lines
+    Color hc = { 255,220,0,60 };
+    for (float ox = 0; ox < trimR.width + trimR.height; ox += 8.f) {
+        float x1 = trimR.x + ox, y1 = trimR.y;
+        float x2 = trimR.x + ox - trimR.height, y2 = trimR.y + trimR.height;
+        x1 = fmaxf(x1, trimR.x); x2 = fmaxf(x2, trimR.x);
+        x1 = fminf(x1, trimR.x + trimR.width); x2 = fminf(x2, trimR.x + trimR.width);
+        DrawLineEx({ x1,y1 }, { x2,y2 }, 1.f, hc);
+    }
+    DrawRectangleLinesEx(trimR, 1.f, { 255,220,0,100 });
+    DrawText("vis", (int)(trimR.x + 2), (int)(trimR.y + 2), 8, { 255,220,0,140 });
+}
+void LevelEditor::DrawCircEnt(Vector2 pos, float rad, Color c, bool sel, bool msel, const char* lbl) const {
+    if (msel && !sel) DrawCircleV(pos, rad + 5.f, { 255,200,0,180 });
+    DrawCircleV(pos, rad + (sel ? 3.f : 0.f), sel ? YELLOW : c);
+    DrawCircleV(pos, rad, c);
     if (lbl) { int tw = MeasureText(lbl, 9); DrawText(lbl, (int)pos.x - tw / 2, (int)pos.y - 4, 9, BLACK); }
 }
-
-void LevelEditor::DrawBeamEnt(Vector2 pos, bool sel, bool msel) const
-{
+void LevelEditor::DrawBeamEnt(Vector2 pos, bool sel, bool msel) const {
     if (_beamTex && _beamTex->id > 0) {
-        const float sc = 4.f;
-        float w = _beamTex->width * sc, h = _beamTex->height * sc;
+        float s = 4.f, w = _beamTex->width * s, h = _beamTex->height * s;
         DrawTexturePro(*_beamTex, { 0,0,(float)_beamTex->width,(float)_beamTex->height }, { pos.x,pos.y,w,h }, {}, 0.f, WHITE);
-        if (sel)  DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, YELLOW);
+        if (sel) DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, YELLOW);
         if (msel && !sel) DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, { 255,200,0,200 });
     }
     else {
-        Rectangle r = BeamRect(pos);
-        DrawRectangleRec(r, { 120,120,120,80 });
+        Rectangle r = BeamRect(pos); DrawRectangleRec(r, { 120,120,120,80 });
         DrawRectangleLinesEx(r, 1.f, sel ? YELLOW : (msel ? Color{ 255,200,0,200 } : GRAY));
     }
 }
-
-// ── Sprite-based entity renderers ─────────────────────────────────────────────
-
-void LevelEditor::DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const
-{
+void LevelEditor::DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const {
     if (_playerTex && _playerTex->id > 0) {
-        const float sc = 3.5f;
-        float w = _playerTex->width * sc, h = _playerTex->height * sc;
-        Color tint = (msel && !sel) ? Color{ 255,220,100,220 } : WHITE;
-        DrawTexturePro(*_playerTex, { 0,0,(float)_playerTex->width,(float)_playerTex->height },
-            { pos.x - w * 0.5f,pos.y - h,w,h }, {}, 0.f, tint);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x - w * 0.5f,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,220 });
+        float s = 3.5f, w = _playerTex->width * s, h = _playerTex->height * s;
+        DrawTexturePro(*_playerTex, { 0,0,(float)_playerTex->width,(float)_playerTex->height }, { pos.x - w * .5f,pos.y - h,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx({ pos.x - w * .5f,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
-    else {
-        DrawCircEnt(pos, 12.f, GREEN, sel, msel, "P");
-    }
+    else DrawCircEnt(pos, 12.f, GREEN, sel, msel, "P");
     DrawCircleV(pos, 4.f, sel ? YELLOW : GREEN);
-    DrawText("SPAWN", (int)pos.x + 6, (int)pos.y - 5, 8, GREEN);
+    DrawText("SPAWN", (int)pos.x + 6, (int)pos.y - 4, 8, GREEN);
 }
-
-void LevelEditor::DrawRegulusEnt(Vector2 pos, bool sel, bool msel) const
-{
+void LevelEditor::DrawRegulusEnt(Vector2 pos, bool sel, bool msel) const {
     if (_regulusTex && _regulusTex->id > 0) {
-        const float sc = 3.5f * 0.7f * 1.2f;   // REGULUS_SCALE
-        float w = _regulusTex->width * sc, h = _regulusTex->height * sc;
-        Color tint = (msel && !sel) ? Color{ 255,220,100,220 } : WHITE;
-        DrawTexturePro(*_regulusTex, { 0,0,(float)_regulusTex->width,(float)_regulusTex->height },
-            { pos.x,pos.y - h,w,h }, {}, 0.f, tint);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,220 });
+        float s = 3.5f * .7f * 1.2f, w = _regulusTex->width * s, h = _regulusTex->height * s;
+        DrawTexturePro(*_regulusTex, { 0,0,(float)_regulusTex->width,(float)_regulusTex->height }, { pos.x,pos.y - h,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx({ pos.x,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
-    else {
-        DrawCircEnt(pos, 16.f, { 160,32,240,255 }, sel, msel, "R");
-    }
+    else DrawCircEnt(pos, 16.f, { 160,32,240,255 }, sel, msel, "R");
     DrawCircleV(pos, 3.f, sel ? YELLOW : Color{ 160,32,240,255 });
 }
-
-void LevelEditor::DrawCaveEnt(Vector2 pos, bool sel, bool msel) const
-{
+void LevelEditor::DrawCaveEnt(Vector2 pos, bool sel, bool msel) const {
     if (_caveTex && _caveTex->id > 0) {
-        const float sc = 3.5f;              // HOUSE_DRAW_SCALE
-        float w = 64.f * sc, h = 32.f * sc;      // HOUSE_NATIVE_W/H * scale
-        Color tint = (msel && !sel) ? Color{ 255,220,100,220 } : WHITE;
-        DrawTexturePro(*_caveTex, { 0,0,64.f,32.f }, { pos.x,pos.y,w,h }, {}, 0.f, tint);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,220 });
+        float w = 64.f * 3.5f, h = 32.f * 3.5f;
+        DrawTexturePro(*_caveTex, { 0,0,64.f,32.f }, { pos.x,pos.y,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
     else {
-        Rectangle r = { pos.x,pos.y,224.f,112.f };
-        DrawRectangleRec(r, { 255,165,0,60 });
-        DrawRectangleLinesEx(r, sel ? 2.f : 1.5f, sel ? YELLOW : ORANGE);
-        DrawText("CAVE", (int)r.x + 2, (int)r.y + 17, 9, ORANGE);
+        Rectangle r = { pos.x,pos.y,224.f,112.f }; DrawRectangleRec(r, { 255,165,0,60 });
+        DrawRectangleLinesEx(r, sel ? 2.f : 1.5f, sel ? YELLOW : ORANGE); DrawText("CAVE", (int)r.x + 4, (int)r.y + 18, 9, ORANGE);
     }
 }
-
-// ── Path nodes ────────────────────────────────────────────────────────────────
-
-void LevelEditor::DrawPathNodes()
-{
+void LevelEditor::DrawPathNodes() {
     const auto& nodes = _level.pathNodes;
     for (int i = 0; i < (int)nodes.size(); i++) {
-        const auto& n = nodes[i];
-        Vector2 from = { n.x,n.y };
+        const auto& n = nodes[i]; Vector2 from = { n.x,n.y };
         for (int b = 0; b < 2; b++) {
             if (n.next[b] < 0 || n.next[b] >= (int)nodes.size()) continue;
             Vector2 to = { nodes[n.next[b]].x,nodes[n.next[b]].y };
             Color lc = (b == 0) ? Color{ 255,140,0,200 } : Color{ 0,200,255,200 };
-            DrawLineEx(from, to, 2.f, lc);
-            DrawCircleV(Vector2Lerp(from, to, 0.65f), 3.f, lc);
+            DrawLineEx(from, to, 2.f, lc); DrawCircleV(Vector2Lerp(from, to, .65f), 3.f, lc);
         }
     }
     for (int i = 0; i < (int)nodes.size(); i++) {
         const auto& n = nodes[i];
         bool sel = (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && _sel.index == i);
         bool ms = IsInMultiSel({ (int)EditorTool::PATH_NODE,i });
-        Color fill;
-        if (i == 0)                                      fill = WHITE;
-        else if (n.next[0] == -1 && n.next[1] == -1)         fill = RED;
-        else if (n.isSplitNode && n.rollThreshold == 10)   fill = ORANGE;
-        else if (n.isSplitNode)                        fill = GREEN;
-        else                                           fill = YELLOW;
+        Color fill = (i == 0) ? WHITE : (n.next[0] == -1 && n.next[1] == -1) ? RED : n.isSplitNode ? GREEN : YELLOW;
         Vector2 pos = { n.x,n.y };
         if (ms && !sel) DrawCircleV(pos, 14.f, { 255,200,0,180 });
         if (sel) DrawCircleV(pos, 13.f, YELLOW);
         DrawCircleV(pos, 10.f, BLACK); DrawCircleV(pos, 8.f, fill);
-        char lbl[8]; snprintf(lbl, sizeof(lbl), "%d", i);
-        int tw = MeasureText(lbl, 8); DrawText(lbl, (int)pos.x - tw / 2, (int)pos.y - 4, 8, BLACK);
+        char lb[8]; snprintf(lb, sizeof(lb), "%d", i); int tw = MeasureText(lb, 8); DrawText(lb, (int)pos.x - tw / 2, (int)pos.y - 4, 8, BLACK);
     }
     if (_connectMode != ConnectMode::NONE && _connectFrom >= 0 && _connectFrom < (int)nodes.size()) {
         Vector2 src = { nodes[_connectFrom].x,nodes[_connectFrom].y };
@@ -845,93 +1133,88 @@ void LevelEditor::DrawPathNodes()
     }
 }
 
-// ── Background ────────────────────────────────────────────────────────────────
+void LevelEditor::DrawGizmo() const {
+    if (!_sel.valid() || _gizmo == GizmoMode::SELECT || _directOp != DirectOp::NONE) return;
+    Vector2 c = EntityCenter(_sel);
+    const float R = GIZMO_R, tip = 9.f, cs = 8.f;
+    // Centre
+    Color ctrC = (_gizmoHot == GizmoAxis::FREE || _gizmoDragAxis == GizmoAxis::FREE) ? WHITE : Color{ 220,220,220,220 };
+    DrawCircleV(c, cs, ctrC); DrawCircleLines((int)c.x, (int)c.y, (int)cs, { 60,60,60,255 });
 
-void LevelEditor::DrawBackground() const
-{
+    if (_gizmo == GizmoMode::ROTATE) {
+        Color rc = (_gizmoHot == GizmoAxis::RING || _gizmoDragAxis == GizmoAxis::RING) ? WHITE : Color{ 220,150,0,220 };
+        DrawCircleLines((int)c.x, (int)c.y, (int)R, rc);
+        if (_sel.type == (int)EditorTool::PLATFORM) {
+            float tilt = _level.platforms[_sel.index].tilt * DEG2RAD;
+            Vector2 tip2 = { c.x + R * cosf(tilt),c.y + R * sinf(tilt) };
+            DrawLineEx(c, tip2, 3.f, rc); DrawCircleV(tip2, tip, rc);
+        }
+        // drag hint
+        if (_gizmoDragging) DrawText("←drag→ = tilt", (int)c.x + 4, (int)c.y - (int)R - 14, 10, { 220,150,0,255 });
+        return;
+    }
+    bool mv = (_gizmo == GizmoMode::MOVE);
+    // X (red)
+    Vector2 xTip = { c.x + R,c.y };
+    Color xc = (_gizmoHot == GizmoAxis::X || _gizmoDragAxis == GizmoAxis::X) ? WHITE : Color{ 230,60,60,255 };
+    DrawLineEx(c, xTip, 3.f, xc);
+    if (mv) DrawTriangle({ xTip.x - 9,xTip.y - 5 }, { xTip.x - 9,xTip.y + 5 }, { xTip.x + tip,xTip.y }, xc);
+    else   DrawRectangle((int)(xTip.x - tip * .5f), (int)(xTip.y - tip * .5f), (int)tip, (int)tip, xc);
+    DrawText("X", (int)xTip.x + tip + 2, (int)xTip.y - 6, 10, xc);
+
+    // Y (green, up)
+    Vector2 yTip = { c.x,c.y - R };
+    Color yc = (_gizmoHot == GizmoAxis::Y || _gizmoDragAxis == GizmoAxis::Y) ? WHITE : Color{ 60,210,60,255 };
+    DrawLineEx(c, yTip, 3.f, yc);
+    if (mv) DrawTriangle({ yTip.x - 5,yTip.y + 9 }, { yTip.x + 5,yTip.y + 9 }, { yTip.x,yTip.y - tip }, yc);
+    else   DrawRectangle((int)(yTip.x - tip * .5f), (int)(yTip.y - tip), (int)tip, (int)tip, yc);
+    DrawText("Y", (int)yTip.x + tip, (int)yTip.y - 8, 10, yc);
+
+    // Mode label
+    const char* ml = mv ? "W: MOVE" : "R: SCALE";
+    DrawText(ml, (int)c.x + 4, (int)c.y - (int)R - 14, 10, mv ? Color{ 230,60,60,255 } : Color{ 60,210,60,255 });
+}
+
+void LevelEditor::DrawBackground() const {
     if (_bgTex && _bgTex->id > 0) {
         DrawTexturePro(*_bgTex, { 0,0,(float)_bgTex->width,(float)_bgTex->height }, { 0,0,(float)_sw,(float)_sh }, {}, 0.f, WHITE);
         DrawRectangle(0, 0, _sw, _sh, { 0,0,0,55 });
     }
-    else {
-        DrawRectangle(0, 0, _sw, _sh, { 20,22,30,255 });
-    }
+    else DrawRectangle(0, 0, _sw, _sh, { 20,22,30,255 });
     DrawRectangleLinesEx({ 0,0,(float)_sw,(float)_sh }, 2.f, { 60,60,80,200 });
 }
-
-// ── Grid ──────────────────────────────────────────────────────────────────────
-
-void LevelEditor::DrawGrid() const
-{
+void LevelEditor::DrawGrid() const {
     if (!_gridOn) return;
     float gs = (float)GRID_SZ / _gridDiv;
-    // Major gridlines every GRID_SZ, minor every gs
-    for (float x = 0; x <= (float)_sw; x += gs) {
-        bool major = (fmodf(x, (float)GRID_SZ) < 0.5f);
-        Color c = major ? Color{ 55,60,80,255 } : Color{ 35,38,52,255 };
-        DrawLine((int)x, 0, (int)x, _sh, c);
-    }
-    for (float y = 0; y <= (float)_sh; y += gs) {
-        bool major = (fmodf(y, (float)GRID_SZ) < 0.5f);
-        Color c = major ? Color{ 55,60,80,255 } : Color{ 35,38,52,255 };
-        DrawLine(0, (int)y, _sw, (int)y, c);
-    }
+    for (float x = 0; x <= (float)_sw; x += gs) { bool maj = (fmodf(x, (float)GRID_SZ) < .5f); DrawLine((int)x, 0, (int)x, _sh, maj ? Color{ 55,60,80,255 } : Color{ 35,38,52,255 }); }
+    for (float y = 0; y <= (float)_sh; y += gs) { bool maj = (fmodf(y, (float)GRID_SZ) < .5f); DrawLine(0, (int)y, _sw, (int)y, maj ? Color{ 55,60,80,255 } : Color{ 35,38,52,255 }); }
 }
-
-// ── Draw all level entities ───────────────────────────────────────────────────
-
-void LevelEditor::DrawLevelEntities()
-{
-    auto IsSel = [&](EditorTool t, int i) { return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
-    auto IsMSel = [&](EditorTool t, int i) { return IsInMultiSel({ (int)t,i }); };
-
-    for (int i = 0; i < (int)_level.platforms.size(); i++)
-        DrawPlatEnt(_level.platforms[i], IsSel(EditorTool::PLATFORM, i), IsMSel(EditorTool::PLATFORM, i));
-    for (int i = 0; i < (int)_level.ladders.size(); i++)
-        DrawLadEnt(_level.ladders[i], IsSel(EditorTool::LADDER, i), IsMSel(EditorTool::LADDER, i));
-    for (int i = 0; i < (int)_level.beams.size(); i++)
-        DrawBeamEnt(_level.beams[i], IsSel(EditorTool::BEAM, i), IsMSel(EditorTool::BEAM, i));
+void LevelEditor::DrawLevelEntities() {
+    auto IS = [&](EditorTool t, int i) {return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
+    auto IMS = [&](EditorTool t, int i) {return IsInMultiSel({ (int)t,i }); };
+    for (int i = 0; i < (int)_level.platforms.size(); i++) DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
+    for (int i = 0; i < (int)_level.ladders.size(); i++)   DrawLadEnt(_level.ladders[i], IS(EditorTool::LADDER, i), IMS(EditorTool::LADDER, i));
+    for (int i = 0; i < (int)_level.beams.size(); i++)     DrawBeamEnt(_level.beams[i], IS(EditorTool::BEAM, i), IMS(EditorTool::BEAM, i));
     DrawPathNodes();
-    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)
-        DrawCircEnt(_level.nukeSpawns[i], 10.f, SKYBLUE, IsSel(EditorTool::NUKE_SPAWN, i), IsMSel(EditorTool::NUKE_SPAWN, i), "N");
-    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++)
-        DrawCircEnt(_level.beatriceSpawns[i], 10.f, MAGENTA, IsSel(EditorTool::BEATRICE_SPAWN, i), IsMSel(EditorTool::BEATRICE_SPAWN, i), "B");
-    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)
-        DrawCircEnt(_level.enemySpawns[i], 10.f, RED, IsSel(EditorTool::ENEMY_SPAWN, i), IsMSel(EditorTool::ENEMY_SPAWN, i), "E");
-    if (_level.hasPlayerSpawn)
-        DrawPlayerSpawn(_level.playerSpawn, IsSel(EditorTool::PLAYER_SPAWN, 0), IsMSel(EditorTool::PLAYER_SPAWN, 0));
-    if (_level.hasRegulus)
-        DrawRegulusEnt(_level.regulusPos, IsSel(EditorTool::REGULUS, 0), IsMSel(EditorTool::REGULUS, 0));
-    if (_level.hasCave)
-        DrawCaveEnt(_level.cavePos, IsSel(EditorTool::CAVE, 0), IsMSel(EditorTool::CAVE, 0));
+    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)     DrawCircEnt(_level.nukeSpawns[i], 10.f, SKYBLUE, IS(EditorTool::NUKE_SPAWN, i), IMS(EditorTool::NUKE_SPAWN, i), "N");
+    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) DrawCircEnt(_level.beatriceSpawns[i], 10.f, MAGENTA, IS(EditorTool::BEATRICE_SPAWN, i), IMS(EditorTool::BEATRICE_SPAWN, i), "B");
+    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)    DrawCircEnt(_level.enemySpawns[i], 10.f, RED, IS(EditorTool::ENEMY_SPAWN, i), IMS(EditorTool::ENEMY_SPAWN, i), "E");
+    if (_level.hasPlayerSpawn) DrawPlayerSpawn(_level.playerSpawn, IS(EditorTool::PLAYER_SPAWN, 0), IMS(EditorTool::PLAYER_SPAWN, 0));
+    if (_level.hasRegulus)     DrawRegulusEnt(_level.regulusPos, IS(EditorTool::REGULUS, 0), IMS(EditorTool::REGULUS, 0));
+    if (_level.hasCave)        DrawCaveEnt(_level.cavePos, IS(EditorTool::CAVE, 0), IMS(EditorTool::CAVE, 0));
+    if (_tool == EditorTool::SELECT) DrawGizmo();
 }
-
-// ── Placement preview ─────────────────────────────────────────────────────────
-
-void LevelEditor::DrawPlacementPreview() const
-{
+void LevelEditor::DrawPlacementPreview() const {
     Vector2 wm = WorldMouse(), swm = Snap(wm);
-
-    // Drag move indicator
-    if (_tool == EditorTool::SELECT && (_dragging || _multiDragging)) {
-        const float A = 10.f;
-        DrawLineEx({ wm.x - A,wm.y }, { wm.x + A,wm.y }, 2.f, { 255,255,0,200 });
-        DrawLineEx({ wm.x,wm.y - A }, { wm.x,wm.y + A }, 2.f, { 255,255,0,200 });
-    }
-
-    // Box selection rectangle
     if (_boxSelecting) {
         float x = fminf(_boxStart.x, _boxEnd.x), y = fminf(_boxStart.y, _boxEnd.y);
-        float w = fabsf(_boxEnd.x - _boxStart.x), h = fabsf(_boxEnd.y - _boxStart.y);
-        DrawRectangle((int)x, (int)y, (int)w, (int)h, { 0,200,255,18 });
-        DrawRectangleLinesEx({ x,y,w,h }, 1.5f, { 0,200,255,220 });
+        DrawRectangle((int)x, (int)y, (int)fabsf(_boxEnd.x - _boxStart.x), (int)fabsf(_boxEnd.y - _boxStart.y), { 0,200,255,18 });
+        DrawRectangleLinesEx({ x,y,fabsf(_boxEnd.x - _boxStart.x),fabsf(_boxEnd.y - _boxStart.y) }, 1.5f, { 0,200,255,220 });
     }
-
     if (_placingPlatform) {
         float w = swm.x - _platStart.x;
-        Rectangle r;
-        if (w >= 0) r = { _platStart.x,_platStart.y,w > 0 ? w : 8.f,12.f };
-        else      r = { swm.x,_platStart.y,-w > 0 ? -w : 8.f,12.f };
+        Rectangle r; r.y = _platStart.y; r.height = 12.f;
+        r.x = (w >= 0) ? _platStart.x : swm.x; r.width = fabsf(w) > 0 ? fabsf(w) : 8.f;
         DrawRectangleLinesEx(r, 1.5f, { 80,120,255,180 });
         DrawText(TextFormat("w=%.0f", fabsf(w)), (int)r.x, (int)r.y - 14, 10, { 80,120,255,220 });
     }
@@ -941,234 +1224,726 @@ void LevelEditor::DrawPlacementPreview() const
         DrawRectangleLinesEx(r, 1.5f, { 255,220,0,180 });
         DrawText(TextFormat("h=%.0f", fabsf(h)), (int)r.x, (int)r.y - 14, 10, { 255,220,0,220 });
     }
-
-    // Crosshair
-    DrawLine((int)swm.x - 8, (int)swm.y, (int)swm.x + 8, (int)swm.y, { 255,255,255,100 });
-    DrawLine((int)swm.x, (int)swm.y - 8, (int)swm.x, (int)swm.y + 8, { 255,255,255,100 });
+    // Grab mode ghost arrow
+    if (_directOp != DirectOp::NONE) {
+        const char* opLabel[] = { "","G MOVE","R ROTATE","S SCALE" };
+        const char* axLbl = _grabAxisX ? " [X]" : _grabAxisY ? " [Y]" : "";
+        DrawText(TextFormat("%s%s", opLabel[(int)_directOp], axLbl), 10, TOOLBAR_H + 6, 14, { 255,220,0,255 });
+        DrawCircleLines((int)wm.x, (int)wm.y, 12, YELLOW);
+        DrawLineEx(_grabMouseStart, wm, 1.5f, { 255,220,0,150 });
+    }
+    DrawLine((int)swm.x - 8, (int)swm.y, (int)swm.x + 8, (int)swm.y, { 255,255,255,80 });
+    DrawLine((int)swm.x, (int)swm.y - 8, (int)swm.x, (int)swm.y + 8, { 255,255,255,80 });
 }
 
-// ── Toolbar UI ────────────────────────────────────────────────────────────────
-
-void LevelEditor::DrawToolbarUI() const
-{
+// ── Toolbar & Browser ─────────────────────────────────────────────────────────
+void LevelEditor::DrawToolbarUI() const {
     DrawRectangle(0, 0, _sw, TOOLBAR_H, { 30,32,42,255 });
     DrawLine(0, TOOLBAR_H - 1, _sw, TOOLBAR_H - 1, { 70,80,110,255 });
-
     float bw = (float)_sw / 8.f;
-    auto TBtn = [&](int c)->Rectangle { return { c * bw + 1,1,bw - 2,(float)TOOLBAR_H - 2 }; };
-    auto DrawTB = [&](int c, const char* label, Color bg, Color fg) {
-        Rectangle r = TBtn(c);
-        DrawRectangleRec(r, bg); DrawRectangleLinesEx(r, 1, { 80,90,120,255 });
-        int tw = MeasureText(label, 13);
-        DrawText(label, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 7), 13, fg);
+    auto TBtn = [&](int c)->Rectangle {return{ c * bw + 1,1,bw - 2,(float)TOOLBAR_H - 2 }; };
+    auto TB = [&](int c, const char* l, Color bg, Color fg) {
+        Rectangle r = TBtn(c); DrawRectangleRec(r, bg); DrawRectangleLinesEx(r, 1, { 80,90,120,255 });
+        int tw = MeasureText(l, 12); DrawText(l, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 6), 12, fg);
         };
-
-    DrawTB(0, "<", { 40,42,55,255 }, WHITE);
-    DrawTB(1, TextFormat("Lv%d", _levelId), { 50,55,75,255 }, YELLOW);
-    DrawTB(2, ">", { 40,42,55,255 }, WHITE);
-    DrawTB(3, _gridOn ? "Grid:ON" : "Grid:OFF", { 40,42,55,255 }, _gridOn ? GREEN : GRAY);
-    DrawTB(4, TextFormat("÷%d", _gridDiv), { 40,42,55,255 }, { 100,200,255,255 });
-    DrawTB(5, "SAVE [^S]", { 30,80,50,255 }, WHITE);
-    DrawTB(6, "PLAY", { 30,60,100,255 }, WHITE);
-    DrawTB(7, "MENU [B]", { 80,30,30,255 }, WHITE);
+    TB(0, "<", { 40,42,55,255 }, WHITE); TB(1, TextFormat("Lv%d", _levelId), { 50,55,75,255 }, YELLOW);
+    TB(2, ">", { 40,42,55,255 }, WHITE); TB(3, _gridOn ? "H:Grid ON" : "H:Grid OFF", { 40,42,55,255 }, _gridOn ? GREEN : GRAY);
+    TB(4, TextFormat("÷%d", _gridDiv), { 40,42,55,255 }, { 100,200,255,255 });
+    TB(5, "^S Save", { 30,80,50,255 }, WHITE); TB(6, "PLAY", { 30,60,100,255 }, WHITE); TB(7, "B: MENU", { 80,30,30,255 }, WHITE);
+    // Gizmo mode row
+    const char* gn[] = { "1/Q:SEL","2/W:MOV","3/E:ROT","4:SCL" };
+    Color gc[] = { LIGHTGRAY,{230,60,60,255},{220,150,0,255},{60,210,60,255} };
+    float gx = 4.f;
+    for (int g = 0; g < 4; g++) {
+        bool act = (_gizmo == (GizmoMode)g);
+        DrawRectangle((int)gx, TOOLBAR_H + 1, 54, 11, act ? Color{ (unsigned char)(gc[g].r / 2),(unsigned char)(gc[g].g / 2),(unsigned char)(gc[g].b / 2),255 } : Color{ 20,22,32,255 });
+        int tw = MeasureText(gn[g], 9); DrawText(gn[g], (int)(gx + 27 - tw / 2), TOOLBAR_H + 2, 9, act ? gc[g] : Color{ 90,95,110,255 });
+        gx += 57.f;
+    }
 }
-
-// ── Browser UI ────────────────────────────────────────────────────────────────
-
-void LevelEditor::DrawBrowserUI()
-{
+void LevelEditor::DrawBrowserUI() {
     int by0 = _sh - BROWSER_H;
-    DrawRectangle(0, by0, _sw, BROWSER_H, { 24,26,36,255 });
-    DrawLine(0, by0, _sw, by0, { 70,80,110,255 });
-
-    const EditorTool row0[] = { EditorTool::SELECT,EditorTool::PLAYER_SPAWN,EditorTool::REGULUS,EditorTool::CAVE,EditorTool::PLATFORM,EditorTool::LADDER };
-    const EditorTool row1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN };
-
-    auto DrawTool = [&](int row, int col, int cols, EditorTool t) {
-        Rectangle r = BrowserBtn(row, col, cols);
-        bool active = (_tool == t);
-        Color tc = ToolColor(t);
-        Color bg = active ? Color{ (unsigned char)(tc.r / 3),(unsigned char)(tc.g / 3),(unsigned char)(tc.b / 3),255 } : Color{ 30,32,44,255 };
-        DrawRectangleRec(r, bg);
-        DrawRectangleLinesEx(r, active ? 2.f : 1.f, active ? tc : Color{ 60,65,85,255 });
-        const char* nm = ToolName(t); int tw = MeasureText(nm, 11);
-        DrawText(nm, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 5), 11, active ? tc : Color{ 180,185,200,255 });
+    DrawRectangle(0, by0, _canvasW, BROWSER_H, { 24,26,36,255 });
+    DrawLine(0, by0, _canvasW, by0, { 70,80,110,255 });
+    const EditorTool r0[] = { EditorTool::SELECT,EditorTool::PLAYER_SPAWN,EditorTool::REGULUS,EditorTool::CAVE,EditorTool::PLATFORM,EditorTool::LADDER };
+    const EditorTool r1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN };
+    auto DT = [&](int row, int col, int cols, EditorTool t) {
+        Rectangle r = BrowserBtn(row, col, cols); bool act = (_tool == t); Color tc = ToolColor(t);
+        DrawRectangleRec(r, act ? Color{ (unsigned char)(tc.r / 3),(unsigned char)(tc.g / 3),(unsigned char)(tc.b / 3),255 } : Color{ 30,32,44,255 });
+        DrawRectangleLinesEx(r, act ? 2.f : 1.f, act ? tc : Color{ 60,65,85,255 });
+        const char* nm = ToolName(t); int tw = MeasureText(nm, 10);
+        DrawText(nm, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 5), 10, act ? tc : Color{ 170,175,190,255 });
         };
-    for (int c = 0; c < 6; c++) DrawTool(0, c, 6, row0[c]);
-    for (int c = 0; c < 5; c++) DrawTool(1, c, 5, row1[c]);
-
-    float sy = (float)(_sh - 24);
-    DrawRectangle(0, (int)sy - 2, _sw, 26, { 18,20,28,255 });
-    Color sc = _statusTimer > 0.f ? YELLOW : Color{ 100,105,120,255 };
-    const char* smsg = _statusTimer > 0.f ? _status
-        : "LMB=Place  RMB=Delete  DEL=Del  B=Menu  G=Grid  [/]=GridDiv  ^Z=Undo  ^Y=Redo  ^S=Save";
-    DrawText(smsg, 8, (int)sy, 12, sc);
+    for (int c = 0; c < 6; c++) DT(0, c, 6, r0[c]);
+    for (int c = 0; c < 5; c++) DT(1, c, 5, r1[c]);
+    // Status bar
+    float sy = (float)(_sh - 18);
+    DrawRectangle(0, (int)sy - 2, _canvasW, 20, { 18,20,28,255 });
+    const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Menu";
+    DrawText(smsg, 6, (int)sy, 10, _statusTimer > 0.f ? YELLOW : Color{ 90,95,110,255 });
 }
 
-// ── Properties panel ──────────────────────────────────────────────────────────
+// ── Outliner ──────────────────────────────────────────────────────────────────
+void LevelEditor::DrawOutliner() {
+    Rectangle or_ = OutlinerRect();
+    DrawRectangleRec(or_, { 22,24,34,255 });
+    DrawRectangleLinesEx(or_, 1, { 55,60,85,255 });
+    // Header
+    DrawRectangle((int)or_.x, (int)or_.y, (int)or_.width, 18, { 30,34,50,255 });
+    DrawText("OUTLINER", (int)or_.x + 6, (int)or_.y + 3, 11, { 180,185,210,255 });
+    DrawText(TextFormat("%d objects", (int)_outline.size()), (int)or_.x + 80, (int)or_.y + 4, 9, { 100,105,130,255 });
 
-void LevelEditor::DrawPropertiesPanel()
-{
-    float py = (float)(_sh - BROWSER_H) + 6 + 2 * (38 + 4) + 4;
-    float ph = (float)(_sh - 26) - py;
-    if (ph < 10) return;
+    int vis = (int)(or_.height - 20) / OUTLINE_ROW;
+    Vector2 mp = GetMousePosition();
+    for (int r = 0; r < vis; r++) {
+        int idx = r + _outlineScroll;
+        if (idx >= (int)_outline.size()) break;
+        const OutlineRow& row = _outline[idx];
+        bool isSel = (row.ent == _sel || IsInMultiSel(row.ent));
+        bool hov = CheckCollisionPointRec(mp, { or_.x + 2,or_.y + 18 + (float)r * OUTLINE_ROW,or_.width - 4,(float)OUTLINE_ROW });
+        float ry = or_.y + 18 + r * OUTLINE_ROW;
+        // Row background
+        Color rowBg = isSel ? Color{ 45,55,90,255 } : hov ? Color{ 35,38,55,255 } : Color{ 22,24,34,255 };
+        DrawRectangle((int)or_.x + 2, (int)ry, (int)or_.width - 4, OUTLINE_ROW - 1, rowBg);
+        // Colour stripe
+        DrawRectangle((int)or_.x + 2, (int)ry, 3, OUTLINE_ROW - 1, row.color);
+        // Icon
+        DrawText(row.icon, (int)or_.x + 8, (int)ry + 3, 9, row.color);
+        // Name
+        DrawText(row.name, (int)or_.x + 38, (int)ry + 3, 10, isSel ? WHITE : Color{ 180,185,210,255 });
+        if (isSel) DrawText("●", (int)(or_.x + or_.width - 14), (int)ry + 3, 9, YELLOW);
+    }
+
+    // Scroll indicator
+    if ((int)_outline.size() > vis) {
+        float frac = (float)vis / _outline.size();
+        float pos2 = (float)_outlineScroll / _outline.size();
+        float barH = or_.height * frac;
+        float barY = or_.y + 18 + (or_.height - 18) * pos2;
+        DrawRectangle((int)(or_.x + or_.width - 4), (int)barY, 3, (int)barH, { 80,90,130,255 });
+    }
+}
+
+// ── Data panel ────────────────────────────────────────────────────────────────
+void LevelEditor::DrawDataPanel() {
+    Rectangle dr = DataPanelRect();
+    DrawRectangleRec(dr, { 20,22,32,255 });
+    DrawRectangleLinesEx(dr, 1, { 55,60,85,255 });
+    DrawRectangle((int)dr.x, (int)dr.y, (int)dr.width, 18, { 28,32,48,255 });
+    DrawText("PROPERTIES", (int)dr.x + 6, (int)dr.y + 3, 11, { 180,185,210,255 });
 
     if (!_sel.valid()) {
-        DrawText(TextFormat("Level %d  |  Plat:%d  Lad:%d  Nodes:%d  Beams:%d  Nukes:%d  Bea:%d  Enemies:%d  |  Undo:%d",
-            _levelId, (int)_level.platforms.size(), (int)_level.ladders.size(),
-            (int)_level.pathNodes.size(), (int)_level.beams.size(),
-            (int)_level.nukeSpawns.size(), (int)_level.beatriceSpawns.size(),
-            (int)_level.enemySpawns.size(), (int)_undoStack.size()),
-            8, (int)py, 11, { 140,145,160,255 });
+        DrawText("Nothing selected", (int)dr.x + 8, (int)dr.y + 26, 10, { 80,85,110,255 });
         return;
     }
 
-    EditorTool t = (EditorTool)_sel.type;
-    int i = _sel.index;
+    float px = dr.x + 6, fw = dr.width - 12;
+    float cy = dr.y + 22;
+    float rowH = 20.f;
+
+    auto SectionHeader = [&](const char* title) {
+        DrawLine((int)px, (int)cy, (int)(px + fw), (int)cy, { 60,65,90,255 });
+        DrawText(title, (int)px, (int)cy + 2, 10, { 130,140,170,255 });
+        cy += 14;
+        };
+
+    // ── Transform ──────────────────────────────────────────────────────────
+    SectionHeader("── Transform ─────────────");
+
+    // Location X
+    float& refX = (_sel.type == (int)EditorTool::PLATFORM) ? _level.platforms[_sel.index].x
+        : (_sel.type == (int)EditorTool::LADDER) ? _level.ladders[_sel.index].x
+        : (_sel.type == (int)EditorTool::BEAM) ? _level.beams[_sel.index].x
+        : (_sel.type == (int)EditorTool::PATH_NODE) ? _level.pathNodes[_sel.index].x
+        : (_sel.type == (int)EditorTool::NUKE_SPAWN) ? _level.nukeSpawns[_sel.index].x
+        : (_sel.type == (int)EditorTool::BEATRICE_SPAWN) ? _level.beatriceSpawns[_sel.index].x
+        : (_sel.type == (int)EditorTool::ENEMY_SPAWN) ? _level.enemySpawns[_sel.index].x
+        : (_sel.type == (int)EditorTool::PLAYER_SPAWN) ? _level.playerSpawn.x
+        : (_sel.type == (int)EditorTool::REGULUS) ? _level.regulusPos.x
+        : _level.cavePos.x;
+    float& refY = (_sel.type == (int)EditorTool::PLATFORM) ? _level.platforms[_sel.index].y
+        : (_sel.type == (int)EditorTool::LADDER) ? _level.ladders[_sel.index].y
+        : (_sel.type == (int)EditorTool::BEAM) ? _level.beams[_sel.index].y
+        : (_sel.type == (int)EditorTool::PATH_NODE) ? _level.pathNodes[_sel.index].y
+        : (_sel.type == (int)EditorTool::NUKE_SPAWN) ? _level.nukeSpawns[_sel.index].y
+        : (_sel.type == (int)EditorTool::BEATRICE_SPAWN) ? _level.beatriceSpawns[_sel.index].y
+        : (_sel.type == (int)EditorTool::ENEMY_SPAWN) ? _level.enemySpawns[_sel.index].y
+        : (_sel.type == (int)EditorTool::PLAYER_SPAWN) ? _level.playerSpawn.y
+        : (_sel.type == (int)EditorTool::REGULUS) ? _level.regulusPos.y
+        : _level.cavePos.y;
+
+    if (NumField("X ", refX, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
+    if (NumField("Y ", refY, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
+
+    // ── Rotation (tilt for platforms) ──────────────────────────────────────
+    if (_sel.type == (int)EditorTool::PLATFORM) {
+        SectionHeader("── Rotation ───────────────");
+        auto& p = _level.platforms[_sel.index];
+        if (NumField("Tilt", p.tilt, .3f, -89, 89, px, cy, fw)) {} cy += rowH;
+        // Quick presets
+        float bw2 = (fw - 4) / 4.f;
+        const float presets[] = { -45,-15,15,45 }; const char* plabels[] = { "-45","-15","15","45" };
+        for (int pi = 0; pi < 4; pi++) {
+            Rectangle br = { px + pi * (bw2 + 1),cy,bw2,14 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), br);
+            DrawRectangleRec(br, hov ? Color{ 60,65,90,255 } : Color{ 35,38,55,255 });
+            int tw = MeasureText(plabels[pi], 9); DrawText(plabels[pi], (int)(br.x + br.width / 2 - tw / 2), (int)br.y + 2, 9, { 180,185,210,255 });
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); p.tilt = presets[pi]; }
+        }
+        cy += 17;
+    }
+
+    // ── Scale / Size ───────────────────────────────────────────────────────
+    if (_sel.type == (int)EditorTool::PLATFORM) {
+        SectionHeader("── Scale ──────────────────");
+        auto& p = _level.platforms[_sel.index];
+        if (NumField("W  ", p.w, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
+        if (NumField("H  ", p.h, .5f, 0, 200, px, cy, fw)) {} cy += rowH;
+    }
+    else if (_sel.type == (int)EditorTool::LADDER) {
+        SectionHeader("── Scale ──────────────────");
+        auto& l = _level.ladders[_sel.index];
+        if (NumField("W  ", l.w, 1.f, 8, 200, px, cy, fw)) {} cy += rowH;
+        if (NumField("H  ", l.h, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
+    }
+
+    // ── Entity-specific ────────────────────────────────────────────────────
+    if (_sel.type == (int)EditorTool::PATH_NODE) {
+        SectionHeader("── Node Settings ──────────");
+        auto& n = _level.pathNodes[_sel.index];
+        // Next connections display
+        DrawText(TextFormat("Next[0]: %d", n.next[0]), (int)px, (int)cy + 2, 10, { 180,185,210,255 }); cy += rowH;
+        DrawText(TextFormat("Next[1]: %d", n.next[1]), (int)px, (int)cy + 2, 10, { 180,185,210,255 }); cy += rowH;
+        // Set connections
+        float bw3 = (fw - 4) / 2.f;
+        Rectangle rN0 = { px,cy,bw3,16 }, rN1 = { px + bw3 + 4,cy,bw3,16 };
+        bool h0 = CheckCollisionPointRec(GetMousePosition(), rN0), h1 = CheckCollisionPointRec(GetMousePosition(), rN1);
+        DrawRectangleRec(rN0, h0 ? Color{ 180,80,0,255 } : Color{ 80,40,0,255 }); DrawText("Set N0", (int)rN0.x + 4, (int)rN0.y + 2, 10, WHITE);
+        DrawRectangleRec(rN1, h1 ? Color{ 0,100,180,255 } : Color{ 0,50,100,255 }); DrawText("Set N1", (int)rN1.x + 4, (int)rN1.y + 2, 10, WHITE);
+        if (h0 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT0; _connectFrom = _sel.index; SetStatus("Click node → N0"); }
+        if (h1 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT1; _connectFrom = _sel.index; SetStatus("Click node → N1"); }
+        cy += 20;
+        // Split toggle + roll threshold
+        float bwS = (fw - 4) / 2.f;
+        Rectangle rSpl = { px,cy,bwS,16 };
+        bool hs = CheckCollisionPointRec(GetMousePosition(), rSpl);
+        DrawRectangleRec(rSpl, n.isSplitNode ? (hs ? Color{ 20,120,20,255 } : Color{ 10,80,10,255 }) : (hs ? Color{ 60,60,80,255 } : Color{ 35,38,55,255 }));
+        DrawText(n.isSplitNode ? "Split: ON" : "Split: OFF", (int)rSpl.x + 4, (int)rSpl.y + 2, 10, WHITE);
+        if (hs && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); n.isSplitNode = !n.isSplitNode; }
+        cy += 20;
+        float rv = n.rollThreshold;
+        if (NumField("Roll", rv, 0.05f, 0, 10, px, cy, fw)) { PushUndo(); n.rollThreshold = (int)roundf(rv); } cy += rowH;
+    }
 
     // Delete button
-    Rectangle delBtn = { (float)_sw - 72,py,68,22 };
-    bool delHov = CheckCollisionPointRec(GetMousePosition(), delBtn);
-    DrawRectangleRec(delBtn, delHov ? Color{ 180,30,30,255 } : Color{ 100,20,20,255 });
-    DrawText("DELETE", (int)delBtn.x + 6, (int)delBtn.y + 5, 11, WHITE);
-    if (delHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+    Rectangle delR = { px,dr.y + dr.height - 22,fw,18 };
+    bool delH = CheckCollisionPointRec(GetMousePosition(), delR);
+    DrawRectangleRec(delR, delH ? Color{ 180,30,30,255 } : Color{ 100,20,20,255 });
+    int dtw = MeasureText("DELETE", 11); DrawText("DELETE", (int)(delR.x + delR.width / 2 - dtw / 2), (int)delR.y + 3, 11, WHITE);
+    if (delH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
-    }
-
-    char buf[512] = {};
-    switch (t)
-    {
-    case EditorTool::PLATFORM: {
-        auto& p = _level.platforms[i];
-        snprintf(buf, sizeof(buf), "PLATFORM #%d  x=%.0f  y=%.0f  w=%.0f  h=%.0f  tilt=%.1f", i, p.x, p.y, p.w, p.h, p.tilt);
-        DrawText(buf, 8, (int)py, 12, ToolColor(t));
-
-        float bx = 8, brow = py + 16;
-        auto SBtn = [&](const char* lbl, float x, float bw, Color c)->Rectangle {
-            Rectangle r = { x,brow,bw,18 };
-            DrawRectangleRec(r, c);
-            int tw = MeasureText(lbl, 10); DrawText(lbl, (int)(x + bw / 2 - tw / 2), (int)brow + 4, 10, WHITE);
-            return r;
-            };
-        Vector2 mp = GetMousePosition(); bool lp = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-
-        // Tilt controls
-        Rectangle rTM = SBtn("-1", bx, 28, { 50,50,70,255 }); bx += 31;
-        Rectangle rTP = SBtn("+1", bx, 28, { 50,50,70,255 }); bx += 31;
-        Rectangle rTM10 = SBtn("-10", bx, 34, { 40,40,65,255 }); bx += 37;
-        Rectangle rTP10 = SBtn("+10", bx, 34, { 40,40,65,255 }); bx += 37;
-        Rectangle rT0 = SBtn("0°", bx, 28, { 60,40,40,255 }); bx += 31;
-        Rectangle rT90 = SBtn("90°", bx, 34, { 40,60,40,255 }); bx += 37;
-        DrawText(TextFormat("=%.0f°", p.tilt), (int)bx, (int)brow + 4, 11, LIGHTGRAY); bx += 50;
-
-        // Width controls
-        Rectangle rWM = SBtn("W-", bx, 28, { 50,50,70,255 }); bx += 31;
-        Rectangle rWP = SBtn("W+", bx, 28, { 50,50,70,255 }); bx += 31;
-
-        if (lp) {
-            if (CheckCollisionPointRec(mp, rTM)) { PushUndo(); p.tilt -= 1.f; }
-            if (CheckCollisionPointRec(mp, rTP)) { PushUndo(); p.tilt += 1.f; }
-            if (CheckCollisionPointRec(mp, rTM10)) { PushUndo(); p.tilt -= 10.f; }
-            if (CheckCollisionPointRec(mp, rTP10)) { PushUndo(); p.tilt += 10.f; }
-            if (CheckCollisionPointRec(mp, rT0)) { PushUndo(); p.tilt = 0.f; }
-            if (CheckCollisionPointRec(mp, rT90)) { PushUndo(); p.tilt = 90.f; }
-            if (CheckCollisionPointRec(mp, rWM) && p.w > GRID_SZ) { PushUndo(); p.w -= (float)GRID_SZ; }
-            if (CheckCollisionPointRec(mp, rWP)) { PushUndo(); p.w += (float)GRID_SZ; }
-        }
-        break;
-    }
-    case EditorTool::LADDER: {
-        auto& l = _level.ladders[i];
-        snprintf(buf, sizeof(buf), "LADDER #%d  x=%.0f  y=%.0f  w=%.0f  h=%.0f", i, l.x, l.y, l.w, l.h);
-        DrawText(buf, 8, (int)py, 12, ToolColor(t));
-        // H controls
-        float bx = 8, brow = py + 16;
-        auto SBtn = [&](const char* lbl, float x, Color c)->Rectangle {
-            Rectangle r = { x,brow,30,18 };
-            DrawRectangleRec(r, c);
-            int tw = MeasureText(lbl, 10); DrawText(lbl, (int)(x + 15 - tw / 2), (int)brow + 4, 10, WHITE);
-            return r;
-            };
-        Rectangle rHM = SBtn("H-", bx, { 50,50,70,255 }); bx += 33;
-        Rectangle rHP = SBtn("H+", bx, { 50,50,70,255 });
-        Vector2 mp = GetMousePosition(); bool lp = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-        if (lp) {
-            if (CheckCollisionPointRec(mp, rHM) && l.h > GRID_SZ) { PushUndo(); l.h -= (float)GRID_SZ; }
-            if (CheckCollisionPointRec(mp, rHP)) { PushUndo(); l.h += (float)GRID_SZ; }
-        }
-        break;
-    }
-    case EditorTool::PATH_NODE: {
-        auto& n = _level.pathNodes[i];
-        snprintf(buf, sizeof(buf), "NODE #%d  pos=(%.0f,%.0f)  split=%s  roll=%d", i, n.x, n.y, n.isSplitNode ? "YES" : "NO", n.rollThreshold);
-        DrawText(buf, 8, (int)py, 12, ToolColor(t));
-
-        float bx = 8, brow = py + 16;
-        auto SBtn = [&](const char* lbl, float x, Color c)->Rectangle {
-            Rectangle r = { x,brow,58,18 };
-            DrawRectangleRec(r, c);
-            int tw = MeasureText(lbl, 10); DrawText(lbl, (int)(x + r.width / 2 - tw / 2), (int)brow + 4, 10, WHITE);
-            return r;
-            };
-        Vector2 mp = GetMousePosition(); bool lp = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-        Rectangle rN0 = SBtn("Set N0", bx, { 180,80,0,255 }); bx += 62;
-        Rectangle rN1 = SBtn("Set N1", bx, { 0,100,180,255 }); bx += 62;
-        Rectangle rSpl = SBtn(n.isSplitNode ? "Split:ON" : "Split:OFF", bx, { 50,50,80,255 }); bx += 62;
-        Rectangle rRM = SBtn("Roll-", bx, { 50,50,70,255 }); bx += 62;
-        Rectangle rRP = SBtn("Roll+", bx, { 50,50,70,255 }); bx += 62;
-        DrawText(TextFormat("=%d", n.rollThreshold), (int)bx, (int)brow + 4, 11, LIGHTGRAY);
-
-        if (lp) {
-            double now = GetTime();
-            if (CheckCollisionPointRec(mp, rN0)) { _connectMode = ConnectMode::NEXT0; _connectFrom = i; SetStatus(TextFormat("Click node to set N0 of node %d", i)); }
-            if (CheckCollisionPointRec(mp, rN1)) { _connectMode = ConnectMode::NEXT1; _connectFrom = i; SetStatus(TextFormat("Click node to set N1 of node %d", i)); }
-            if (CheckCollisionPointRec(mp, rSpl)) { PushUndo(); n.isSplitNode = !n.isSplitNode; }
-            if (CheckCollisionPointRec(mp, rRM) && now - _lastThreshClick > 0.15) { PushUndo(); n.rollThreshold = std::max(0, n.rollThreshold - 1); _lastThreshClick = now; }
-            if (CheckCollisionPointRec(mp, rRP) && now - _lastThreshClick > 0.15) { PushUndo(); n.rollThreshold = std::min(10, n.rollThreshold + 1); _lastThreshClick = now; }
-        }
-        char cnx[64]; snprintf(cnx, sizeof(cnx), "N0→%d  N1→%d", n.next[0], n.next[1]);
-        DrawText(cnx, (int)(8 + 5 * 62), (int)brow + 4, 11, { 200,200,200,255 });
-        break;
-    }
-    default: {
-        snprintf(buf, sizeof(buf), "%s @ (%.0f, %.0f)", ToolName(t), GetSelPos().x, GetSelPos().y);
-        DrawText(buf, 8, (int)py, 12, ToolColor(t));
-        break;
-    }
-    }
 }
 
 // ── Master Draw ───────────────────────────────────────────────────────────────
-
-void LevelEditor::Draw()
-{
+void LevelEditor::Draw() {
     BeginMode2D(_cam);
-    DrawBackground();
-    DrawGrid();
-    DrawLevelEntities();
-    DrawPlacementPreview();
+    DrawBackground(); DrawGrid(); DrawLevelEntities(); DrawPlacementPreview();
     EndMode2D();
 
-    DrawRectangleLinesEx({ 0,(float)TOOLBAR_H,(float)_sw,_canvasH }, 1.f, { 60,70,100,255 });
+    int canvasBottom = _seqOpen ? (_sh - SEQ_H) : (_sh - BROWSER_H);
+    DrawRectangleLinesEx({ 0,(float)TOOLBAR_H,(float)_canvasW,(float)(canvasBottom - TOOLBAR_H) }, 1, { 60,70,100,200 });
 
     DrawToolbarUI();
-    DrawBrowserUI();
-    DrawPropertiesPanel();
 
-    if (_connectMode != ConnectMode::NONE) {
-        const char* hint = (_connectMode == ConnectMode::NEXT0)
-            ? ">> Click a node to set NEXT[0]  (ESC = cancel)"
-            : ">> Click a node to set NEXT[1]  (ESC = cancel)";
-        int tw = MeasureText(hint, 14), tx = _sw / 2 - tw / 2, ty = _sh / 2 - 10;
-        DrawRectangle(tx - 8, ty - 6, tw + 16, 26, { 0,0,0,200 });
-        DrawText(hint, tx, ty, 14, (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,255 } : Color{ 0,200,255,255 });
+    if (_seqOpen) DrawSequencer();
+    else         DrawBrowserUI();
+
+    DrawLine(_canvasW, TOOLBAR_H, _canvasW, _sh - BROWSER_H, { 70,80,110,255 });
+    DrawOutliner();
+    DrawDataPanel();
+
+    // SEQ tab button
+    {
+        Rectangle r = { (float)(_sw - RIGHT_W - 52),(float)(TOOLBAR_H + 1),50,12 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        DrawRectangleRec(r, _seqOpen ? Color{ 30,80,120,255 } : Color{ 20,22,32,255 });
+        DrawRectangleLinesEx(r, 1, _seqOpen ? Color{ 60,160,220,255 } : Color{ 55,60,85,255 });
+        int tw = MeasureText("TAB:SEQ", 9); DrawText("TAB:SEQ", (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + 2), 9, _seqOpen ? Color{ 60,200,255,255 } : Color{ 100,105,130,255 });
+        if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _seqOpen = !_seqOpen; if (!_seqOpen) SeqPreviewStop(); SeqLoad(); }
     }
 
-    // Multi-sel count overlay
+    if (_connectMode != ConnectMode::NONE) {
+        const char* h = (_connectMode == ConnectMode::NEXT0) ? ">> Click node → NEXT[0]  (ESC=cancel)" : ">> Click node → NEXT[1]  (ESC=cancel)";
+        int tw = MeasureText(h, 13), tx = _canvasW / 2 - tw / 2, ty = _sh / 2 - 10;
+        DrawRectangle(tx - 8, ty - 5, tw + 16, 24, { 0,0,0,200 });
+        DrawText(h, tx, ty, 13, (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,255 } : Color{ 0,200,255,255 });
+    }
     if (_multiSel.size() > 1) {
-        const char* ms = TextFormat("%d selected  [DEL=delete  drag any=move all]", (int)_multiSel.size());
-        int tw = MeasureText(ms, 13), tx = _sw / 2 - tw / 2, ty = TOOLBAR_H + 8;
-        DrawRectangle(tx - 6, ty - 4, tw + 12, 22, { 0,0,0,180 });
-        DrawText(ms, tx, ty, 13, { 255,200,0,255 });
+        const char* ms = TextFormat("%d selected", (int)_multiSel.size());
+        int tw = MeasureText(ms, 12), tx = _canvasW / 2 - tw / 2;
+        DrawRectangle(tx - 6, TOOLBAR_H + 18, tw + 12, 20, { 0,0,0,180 }); DrawText(ms, tx, TOOLBAR_H + 21, 12, { 255,200,0,255 });
+    }
+    if (_directOp != DirectOp::NONE) {
+        const char* opn[] = { "","GRAB (G)","ROTATE (R)","SCALE (S)" };
+        const char* axs = _grabAxisX ? " [X]" : _grabAxisY ? " [Y]" : "";
+        const char* gh = TextFormat("%s%s — Enter/LMB:confirm  ESC/RMB:cancel", opn[(int)_directOp], axs);
+        int tw = MeasureText(gh, 13), tx = _canvasW / 2 - tw / 2;
+        DrawRectangle(tx - 8, TOOLBAR_H + 6, tw + 16, 20, { 0,0,0,200 }); DrawText(gh, tx, TOOLBAR_H + 9, 13, YELLOW);
+    }
+}
+
+// =============================================================================
+//  CINEMATIC SEQUENCER
+// =============================================================================
+
+// ── Geometry helpers ──────────────────────────────────────────────────────────
+
+Rectangle LevelEditor::SeqBrowserRect() const
+{
+    return { 0,(float)(_sh - SEQ_H),(float)SEQ_BW,(float)SEQ_H };
+}
+
+Rectangle LevelEditor::SeqControlsRect() const
+{
+    return { (float)SEQ_BW,(float)(_sh - SEQ_H),(float)(_canvasW - SEQ_BW),(float)SEQ_CTRL_H };
+}
+
+Rectangle LevelEditor::SeqTimelineRect() const
+{
+    return { (float)(SEQ_BW + SEQ_HDR),(float)(_sh - SEQ_H + SEQ_CTRL_H),(float)(_canvasW - SEQ_BW - SEQ_HDR),(float)(SEQ_H - SEQ_CTRL_H) };
+}
+
+Rectangle LevelEditor::SeqTrackRowRect(int row) const
+{
+    Rectangle tl = SeqTimelineRect();
+    return { (float)SEQ_BW,(float)(tl.y + SEQ_RH + row * SEQ_TH),(float)(_canvasW - SEQ_BW),(float)SEQ_TH };
+}
+
+float LevelEditor::SeqTimeToX(float t) const
+{
+    Rectangle tl = SeqTimelineRect();
+    return tl.x + (t - _seqScrollX) * _seqZoom;
+}
+
+float LevelEditor::SeqXToTime(float px) const
+{
+    Rectangle tl = SeqTimelineRect();
+    return _seqScrollX + (px - tl.x) / _seqZoom;
+}
+
+// ── Persistence wrappers ──────────────────────────────────────────────────────
+
+void LevelEditor::SeqLoad()
+{
+    if (!_seqOpen) return;
+    auto names = ListCinematics();
+    _seqList.clear();
+    for (const auto& n : names) {
+        CinematicSequence s;
+        if (LoadCinematic(s, n.c_str())) _seqList.push_back(s);
+    }
+    if (_activeSeq >= (int)_seqList.size()) _activeSeq = (int)_seqList.size() - 1;
+}
+
+void LevelEditor::SeqSave()
+{
+    if (_activeSeq < 0 || _activeSeq >= (int)_seqList.size()) return;
+    SaveCinematic(_seqList[_activeSeq]);
+    SetStatus(TextFormat("Cinematic '%s' saved.", _seqList[_activeSeq].name));
+}
+
+void LevelEditor::SeqNew()
+{
+    CinematicSequence s;
+    snprintf(s.name, sizeof(s.name), "Sequence%d", _seqNameCounter++);
+    s.duration = 5.f; s.endMode = CinematicEndMode::LOOP; s.valid = true;
+    _seqList.push_back(s);
+    _activeSeq = (int)_seqList.size() - 1;
+    SaveCinematic(_seqList[_activeSeq]);
+    SetStatus(TextFormat("New cinematic: %s", s.name));
+}
+
+void LevelEditor::SeqDelete()
+{
+    if (_activeSeq < 0 || _activeSeq >= (int)_seqList.size()) return;
+    DeleteCinematic(_seqList[_activeSeq].name);
+    _seqList.erase(_seqList.begin() + _activeSeq);
+    _activeSeq = _seqList.empty() ? -1 : std::min(_activeSeq, (int)_seqList.size() - 1);
+    SetStatus("Cinematic deleted.");
+}
+
+// ── Keyframe recording (S key) ────────────────────────────────────────────────
+
+void LevelEditor::SeqAddKeyframe()
+{
+    if (_activeSeq < 0 || !_sel.valid()) return;
+    auto& seq = _seqList[_activeSeq];
+
+    // Get current entity state
+    CinematicKeyframe kf;
+    kf.time = _seqTime;
+    Vector2 pos = GetEntPos(_sel);
+    kf.x = pos.x; kf.y = pos.y;
+    int i = _sel.index;
+    if (_sel.type == (int)EditorTool::PLATFORM && i < (int)_level.platforms.size()) {
+        kf.tilt = _level.platforms[i].tilt;
+        kf.width = _level.platforms[i].w;
+        kf.height = _level.platforms[i].h;
+    }
+    else if (_sel.type == (int)EditorTool::LADDER && i < (int)_level.ladders.size()) {
+        kf.height = _level.ladders[i].h;
+        kf.width = _level.ladders[i].w;
+    }
+
+    // Find or create track for this entity
+    int trackIdx = -1;
+    for (int t = 0; t < (int)seq.tracks.size(); t++) {
+        if (seq.tracks[t].entityType == _sel.type && seq.tracks[t].entityIndex == _sel.index) {
+            trackIdx = t; break;
+        }
+    }
+    if (trackIdx < 0) {
+        CinematicTrack tr;
+        tr.entityType = _sel.type; tr.entityIndex = _sel.index;
+        snprintf(tr.name, sizeof(tr.name), "%s %d", ToolName((EditorTool)_sel.type), _sel.index);
+        seq.tracks.push_back(tr);
+        trackIdx = (int)seq.tracks.size() - 1;
+    }
+
+    auto& track = seq.tracks[trackIdx];
+    // Replace existing key at same time, or insert
+    bool replaced = false;
+    for (auto& k : track.keys) {
+        if (fabsf(k.time - _seqTime) < 0.01f) { k = kf; replaced = true; break; }
+    }
+    if (!replaced) track.keys.push_back(kf);
+    // Keep sorted by time
+    std::sort(track.keys.begin(), track.keys.end(), [](const CinematicKeyframe& a, const CinematicKeyframe& b) {return a.time < b.time; });
+
+    _selTrack = trackIdx;
+    SetStatus(TextFormat("Keyframe added at %.2fs on %s", _seqTime, track.name));
+}
+
+void LevelEditor::SeqDeleteKeyframe()
+{
+    if (_activeSeq < 0 || _selTrack < 0 || _selKey < 0) return;
+    auto& seq = _seqList[_activeSeq];
+    if (_selTrack >= (int)seq.tracks.size()) return;
+    auto& tr = seq.tracks[_selTrack];
+    if (_selKey >= (int)tr.keys.size()) return;
+    tr.keys.erase(tr.keys.begin() + _selKey);
+    _selKey = -1;
+    SetStatus("Keyframe deleted.");
+}
+
+// ── Preview playback ──────────────────────────────────────────────────────────
+
+void LevelEditor::SeqPreviewUpdate(float dt)
+{
+    if (_activeSeq < 0 || _activeSeq >= (int)_seqList.size()) return;
+    const auto& seq = _seqList[_activeSeq];
+    _seqTime += dt;
+    switch (seq.endMode) {
+    case CinematicEndMode::LOOP:
+        if (_seqTime > seq.duration) _seqTime = fmodf(_seqTime, seq.duration);
+        break;
+    case CinematicEndMode::STAY:
+        if (_seqTime > seq.duration) _seqTime = seq.duration;
+        break;
+    case CinematicEndMode::RESET:
+        if (_seqTime > seq.duration) { _seqPlaying = false; _seqTime = 0.f; _level = _seqSnapshot; return; }
+        break;
+    }
+    // Apply states to level for preview
+    auto states = EvaluateCinematic(seq, _seqTime);
+    for (const auto& st : states) {
+        int idx = st.entityIndex;
+        switch (st.entityType) {
+        case 4:if (idx >= 0 && idx < (int)_level.platforms.size()) { _level.platforms[idx].x = st.x; _level.platforms[idx].y = st.y; if (st.tilt != 0.f)_level.platforms[idx].tilt = st.tilt; if (st.width > 0.f)_level.platforms[idx].w = st.width; } break;
+        case 5:if (idx >= 0 && idx < (int)_level.ladders.size()) { _level.ladders[idx].x = st.x; _level.ladders[idx].y = st.y; } break;
+        case 6:if (idx >= 0 && idx < (int)_level.beams.size()) { _level.beams[idx] = { st.x,st.y }; } break;
+        case 1:_level.playerSpawn = { st.x,st.y }; break;
+        case 2:_level.regulusPos = { st.x,st.y }; break;
+        case 3:_level.cavePos = { st.x,st.y }; break;
+        }
+    }
+}
+
+void LevelEditor::SeqPreviewStop()
+{
+    if (_seqPlaying) { _level = _seqSnapshot; }
+    _seqPlaying = false; _seqTime = 0.f;
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+
+void LevelEditor::UpdateSequencer()
+{
+    if (!_seqOpen) return;
+    Vector2 mp = GetMousePosition();
+    bool lP = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool lD = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
+    bool lR = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
+
+    // ── Content browser ───────────────────────────────────────────────────
+    Rectangle br = SeqBrowserRect();
+    if (CheckCollisionPointRec(mp, br)) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0) { int vis = (int)((br.height - 50) / 18); int maxS = (int)_seqList.size() - vis; _seqTrackScroll = std::max(0, std::min((int)(_seqTrackScroll - wheel), std::max(0, maxS))); }
+        if (lP) {
+            // Check [+] [-] buttons
+            Rectangle btnNew = { br.x + 4,br.y + 4,36,16 };
+            Rectangle btnDel = { br.x + 44,br.y + 4,36,16 };
+            if (CheckCollisionPointRec(mp, btnNew)) SeqNew();
+            else if (CheckCollisionPointRec(mp, btnDel)) SeqDelete();
+            else {
+                // Sequence rows
+                for (int r = 0; r < 20; r++) {
+                    int idx = r + _seqTrackScroll;
+                    if (idx >= (int)_seqList.size()) break;
+                    Rectangle rr = { br.x + 2,br.y + 24 + (float)r * 18,br.width - 4,17 };
+                    if (CheckCollisionPointRec(mp, rr)) { _activeSeq = idx; _selTrack = -1; _selKey = -1; SeqPreviewStop(); }
+                }
+            }
+        }
+    }
+
+    // ── Controls bar ─────────────────────────────────────────────────────
+    Rectangle cr = SeqControlsRect();
+    if (_activeSeq >= 0 && _activeSeq < (int)_seqList.size() && CheckCollisionPointRec(mp, cr) && lP) {
+        float bw = cr.width / 9.f;
+        // Buttons: [◀][▶][⏸][⏹] [Dur-][Dur+] [LOOP][STAY][RESET]
+        for (int b = 0; b < 9; b++) {
+            Rectangle rb = { cr.x + b * bw + 1,cr.y + 2,bw - 2,cr.height - 4 };
+            if (!CheckCollisionPointRec(mp, rb)) continue;
+            auto& seq = _seqList[_activeSeq];
+            if (b == 0) { _seqTime = 0.f; }
+            else if (b == 1) { if (!_seqPlaying) { _seqSnapshot = _level; _seqPlaying = true; } }
+            else if (b == 2) { _seqPlaying = !_seqPlaying; }
+            else if (b == 3) { SeqPreviewStop(); }
+            else if (b == 4 && seq.duration > 0.5f) seq.duration -= 0.5f;
+            else if (b == 5) seq.duration += 0.5f;
+            else if (b == 6) seq.endMode = CinematicEndMode::LOOP;
+            else if (b == 7) seq.endMode = CinematicEndMode::STAY;
+            else if (b == 8) seq.endMode = CinematicEndMode::RESET;
+        }
+    }
+
+    if (_activeSeq < 0) return;
+    auto& seq = _seqList[_activeSeq];
+
+    // ── Timeline ──────────────────────────────────────────────────────────
+    Rectangle tl = SeqTimelineRect();
+
+    // Horizontal scroll with wheel when over timeline
+    if (CheckCollisionPointRec(mp, tl)) {
+        float wheel = GetMouseWheelMove();
+        if (IsKeyDown(KEY_LEFT_CONTROL)) _seqZoom = std::max(20.f, std::min(300.f, _seqZoom + wheel * 10.f));
+        else _seqScrollX = std::max(0.f, _seqScrollX - wheel * 0.5f);
+    }
+
+    // Playhead click/drag in ruler
+    Rectangle ruler = { tl.x,tl.y,tl.width,SEQ_RH };
+    if (CheckCollisionPointRec(mp, ruler)) {
+        if (lP || (_seqDragPlayhead && lD)) {
+            _seqDragPlayhead = lD;
+            _seqTime = std::max(0.f, std::min(seq.duration, SeqXToTime(mp.x)));
+        }
+    }
+    if (lR) _seqDragPlayhead = false;
+
+    // Keyframe click/drag
+    if (!_seqDragPlayhead) {
+        if (lP) {
+            _selKey = -1;
+            for (int ti = 0; ti < (int)seq.tracks.size(); ti++) {
+                Rectangle row = SeqTrackRowRect(ti);
+                if (!CheckCollisionPointRec(mp, row)) continue;
+                for (int ki = 0; ki < (int)seq.tracks[ti].keys.size(); ki++) {
+                    float kx = SeqTimeToX(seq.tracks[ti].keys[ki].time);
+                    Rectangle kr = { kx - 6,row.y + row.height / 2 - 6,12,12 };
+                    if (CheckCollisionPointRec(mp, kr)) {
+                        _selTrack = ti; _selKey = ki;
+                        _seqKeyDragOrig = seq.tracks[ti].keys[ki].time;
+                        _seqDragKey = true;
+                    }
+                }
+            }
+        }
+        if (_seqDragKey && lD && _selTrack >= 0 && _selKey >= 0 && _selTrack < (int)seq.tracks.size()) {
+            float newT = std::max(0.f, std::min(seq.duration, SeqXToTime(mp.x)));
+            seq.tracks[_selTrack].keys[_selKey].time = newT;
+            std::sort(seq.tracks[_selTrack].keys.begin(), seq.tracks[_selTrack].keys.end(), [](const CinematicKeyframe& a, const CinematicKeyframe& b) {return a.time < b.time; });
+        }
+        if (lR) _seqDragKey = false;
+    }
+
+    // Delete selected keyframe
+    if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE)) SeqDeleteKeyframe();
+
+    // Ctrl+S saves the active sequence
+    if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_S)) SeqSave();
+}
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
+
+void LevelEditor::DrawSeqBrowser()
+{
+    Rectangle br = SeqBrowserRect();
+    DrawRectangleRec(br, { 18,20,30,255 });
+    DrawRectangleLinesEx(br, 1, { 55,60,85,255 });
+    DrawText("CINEMATICS", (int)br.x + 4, (int)br.y - 1, 10, { 150,155,180,255 });
+
+    // Buttons
+    auto Btn = [&](const char* lbl, float x, float w, Color c)->bool {
+        Rectangle r = { x,br.y + 4,w,16 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        DrawRectangleRec(r, hov ? Color{ (unsigned char)std::min(255,(int)c.r + 30),(unsigned char)std::min(255,(int)c.g + 30),(unsigned char)std::min(255,(int)c.b + 30),255 } : c);
+        int tw = MeasureText(lbl, 9); DrawText(lbl, (int)(x + w / 2 - tw / 2), (int)br.y + 7, 9, WHITE);
+        return hov;
+        };
+    Btn("[+]", br.x + 4, 34, { 30,80,50,255 });
+    Btn("[x]", br.x + 42, 34, { 80,30,30,255 });
+
+    // Sequence list
+    Vector2 mp = GetMousePosition();
+    for (int r = 0; r < 30; r++) {
+        int idx = r + _seqTrackScroll;
+        if (idx >= (int)_seqList.size()) break;
+        bool act = (_activeSeq == idx);
+        bool hov = CheckCollisionPointRec(mp, { br.x + 2,br.y + 24 + (float)r * 18,br.width - 4,17 });
+        DrawRectangle((int)br.x + 2, (int)(br.y + 24 + r * 18), (int)br.width - 4, 17, act ? Color{ 35,60,100,255 } : hov ? Color{ 30,35,50,255 } : Color{ 20,22,32,255 });
+        DrawText(_seqList[idx].name, (int)br.x + 6, (int)(br.y + 27 + r * 18), 10, act ? WHITE : Color{ 140,145,170,255 });
+        // End mode dot
+        Color emc = (CinematicEndMode)_seqList[idx].endMode == CinematicEndMode::LOOP ? GREEN :
+            (CinematicEndMode)_seqList[idx].endMode == CinematicEndMode::STAY ? YELLOW : ORANGE;
+        DrawCircleV({ br.x + br.width - 8,br.y + 33 + r * 18 }, 4, emc);
+    }
+}
+
+void LevelEditor::DrawSeqControls()
+{
+    if (_activeSeq < 0 || _activeSeq >= (int)_seqList.size()) return;
+    const auto& seq = _seqList[_activeSeq];
+    Rectangle cr = SeqControlsRect();
+    DrawRectangle((int)cr.x, (int)cr.y, (int)cr.width, (int)cr.height, { 25,28,40,255 });
+    DrawLine((int)cr.x, (int)cr.y, (int)(cr.x + cr.width), (int)cr.y, { 55,60,85,255 });
+
+    float bw = cr.width / 9.f;
+    const char* labels[] = { "◀","▶",_seqPlaying ? "⏸" : "▶","⏹","Dur-","Dur+","LOOP","STAY","RST" };
+    Color bcs[] = { {60,60,80,255},{30,100,60,255},{60,60,80,255},{80,30,30,255},
+                 {50,50,70,255},{50,50,70,255},
+                 seq.endMode == CinematicEndMode::LOOP ? Color{20,100,40,255} : Color{40,44,60,255},
+                 seq.endMode == CinematicEndMode::STAY ? Color{100,90,20,255} : Color{40,44,60,255},
+                 seq.endMode == CinematicEndMode::RESET ? Color{100,40,20,255} : Color{40,44,60,255} };
+    Vector2 mp = GetMousePosition();
+    for (int b = 0; b < 9; b++) {
+        Rectangle rb = { cr.x + b * bw + 1,cr.y + 2,bw - 2,cr.height - 4 };
+        bool hov = CheckCollisionPointRec(mp, rb);
+        Color bc = bcs[b]; if (hov) { bc.r = std::min(255, bc.r + 25); bc.g = std::min(255, bc.g + 25); bc.b = std::min(255, bc.b + 25); }
+        DrawRectangleRec(rb, bc);
+        int tw = MeasureText(labels[b], 9); DrawText(labels[b], (int)(rb.x + rb.width / 2 - tw / 2), (int)(rb.y + rb.height / 2 - 5), 9, WHITE);
+    }
+    // Duration + time display
+    DrawText(TextFormat("  %.2fs / %.2fs", _seqTime, seq.duration), (int)(cr.x + cr.width - 110), (int)(cr.y + cr.height / 2 - 5), 10, { 180,185,210,255 });
+    DrawText(TextFormat("[S]=keyframe  Del=remove  ^S=save  Ctrl+wheel=zoom")
+        , (int)(cr.x + bw * 9 + 2), (int)(cr.y + 3), 9, { 80,85,110,255 });
+    (void)labels; // suppress warning
+}
+
+void LevelEditor::DrawSeqTimeline()
+{
+    if (_activeSeq < 0 || _activeSeq >= (int)_seqList.size()) return;
+    const auto& seq = _seqList[_activeSeq];
+
+    Rectangle tl = SeqTimelineRect();
+    DrawRectangleRec(tl, { 16,18,26,255 });
+    DrawRectangleLinesEx(tl, 1, { 55,60,85,255 });
+
+    // ── Track headers ─────────────────────────────────────────────────────
+    for (int ti = 0; ti < (int)seq.tracks.size(); ti++) {
+        Rectangle row = SeqTrackRowRect(ti);
+        Rectangle hdr = { (float)SEQ_BW,row.y,(float)SEQ_HDR,row.height };
+        bool sel = (_selTrack == ti);
+        DrawRectangleRec(hdr, sel ? Color{ 35,55,85,255 } : Color{ 22,24,34,255 });
+        DrawLine((int)hdr.x, (int)(hdr.y + hdr.height), (int)(hdr.x + SEQ_HDR + tl.width), (int)(hdr.y + hdr.height), { 38,42,58,255 });
+        Color tc = ToolColor((EditorTool)seq.tracks[ti].entityType);
+        DrawRectangle((int)hdr.x, (int)hdr.y, 3, (int)hdr.height, tc);
+        DrawText(seq.tracks[ti].name, (int)(hdr.x + 6), (int)(hdr.y + 4), 9, sel ? WHITE : Color{ 160,165,190,255 });
+        // Track lane background
+        DrawRectangleRec({ tl.x,row.y,tl.width,row.height }, ti % 2 ? Color{ 18,20,30,255 } : Color{ 20,22,32,255 });
+    }
+
+    // ── Clip scissor to timeline area ─────────────────────────────────────
+    BeginScissorMode((int)tl.x, (int)tl.y, (int)tl.width, (int)tl.height);
+
+    // ── Time ruler ────────────────────────────────────────────────────────
+    DrawRectangle((int)tl.x, (int)tl.y, (int)tl.width, (int)SEQ_RH, { 28,32,46,255 });
+    float tickStep = (_seqZoom > 60) ? 0.5f : (_seqZoom > 25) ? 1.f : 2.f;
+    for (float t2 = 0.f; t2 <= seq.duration + 0.01f; t2 += tickStep) {
+        float x = SeqTimeToX(t2);
+        if (x<tl.x || x>tl.x + tl.width) continue;
+        bool major = (fmodf(t2, 1.f) < 0.01f);
+        DrawLine((int)x, (int)tl.y, (int)x, (int)(tl.y + SEQ_RH * (major ? 1.f : 0.5f)), major ? Color{ 100,110,140,255 } : Color{ 55,60,80,255 });
+        if (major) DrawText(TextFormat("%.0f", t2), (int)x + 2, (int)tl.y + 2, 8, { 120,125,155,255 });
+    }
+    // Duration marker
+    {
+        float dx = SeqTimeToX(seq.duration);
+        DrawLine((int)dx, (int)tl.y, (int)dx, (int)(tl.y + tl.height), { 100,40,40,200 });
+        DrawRectangle((int)dx, (int)tl.y, 4, (int)SEQ_RH, { 200,60,60,255 });
+    }
+
+    // ── Keyframes ─────────────────────────────────────────────────────────
+    for (int ti = 0; ti < (int)seq.tracks.size(); ti++) {
+        Rectangle row = SeqTrackRowRect(ti);
+        float cy2 = row.y + row.height * 0.5f;
+        Color tc = ToolColor((EditorTool)seq.tracks[ti].entityType);
+        // Track line
+        float x0 = SeqTimeToX(0.f), x1 = SeqTimeToX(seq.duration);
+        DrawLineEx({ x0,cy2 }, { x1,cy2 }, 1.5f, { (unsigned char)(tc.r / 2),(unsigned char)(tc.g / 2),(unsigned char)(tc.b / 2),180 });
+        for (int ki = 0; ki < (int)seq.tracks[ti].keys.size(); ki++) {
+            float kx = SeqTimeToX(seq.tracks[ti].keys[ki].time);
+            bool ksel = (_selTrack == ti && _selKey == ki);
+            // Diamond shape
+            DrawPoly({ kx,cy2 }, 4, 7.f, 45.f, ksel ? YELLOW : tc);
+            DrawPolyLines({ kx,cy2 }, 4, 7.f, 45.f, ksel ? WHITE : Color{ (unsigned char)std::min(255,tc.r + 80),(unsigned char)std::min(255,tc.g + 80),(unsigned char)std::min(255,tc.b + 80),255 });
+        }
+    }
+
+    // ── Playhead ──────────────────────────────────────────────────────────
+    {
+        float phx = SeqTimeToX(_seqTime);
+        DrawLine((int)phx, (int)tl.y, (int)phx, (int)(tl.y + tl.height), { 255,180,0,220 });
+        DrawTriangle({ phx - 6,tl.y }, { phx + 6,tl.y }, { phx,tl.y + 10 }, { 255,200,50,255 });
+    }
+
+    EndScissorMode();
+}
+
+void LevelEditor::DrawSequencer()
+{
+    // Background for the whole sequencer area
+    DrawRectangle(0, _sh - SEQ_H, _canvasW, SEQ_H, { 16,18,26,255 });
+    DrawLine(0, _sh - SEQ_H, _canvasW, _sh - SEQ_H, { 70,80,110,255 });
+
+    DrawSeqBrowser();
+    if (_activeSeq >= 0 && _activeSeq < (int)_seqList.size()) {
+        DrawSeqControls();
+        DrawSeqTimeline();
+    }
+    else {
+        int tx = SEQ_BW + (_canvasW - SEQ_BW) / 2 - 80, ty = _sh - SEQ_H + SEQ_H / 2 - 8;
+        DrawText("Select or create a sequence →", (int)tx, (int)ty, 11, { 80,85,110,255 });
+    }
+
+    // Status: selected keyframe info
+    if (_selTrack >= 0 && _selKey >= 0 && _activeSeq >= 0 && _activeSeq < (int)_seqList.size()) {
+        const auto& seq = _seqList[_activeSeq];
+        if (_selTrack < (int)seq.tracks.size() && _selKey < (int)seq.tracks[_selTrack].keys.size()) {
+            const auto& k = seq.tracks[_selTrack].keys[_selKey];
+            DrawText(TextFormat("Key: t=%.3f  x=%.1f  y=%.1f  tilt=%.1f  w=%.1f  h=%.1f", k.time, k.x, k.y, k.tilt, k.width, k.height),
+                SEQ_BW + 4, _sh - 14, 10, { 200,205,230,255 });
+        }
     }
 }
