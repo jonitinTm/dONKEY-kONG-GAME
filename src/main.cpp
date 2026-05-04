@@ -406,6 +406,7 @@ int main(void)
 
     int score = 0;
     int currentLevelId = 1;   // which level is currently loaded / playing
+    int pendingLevelId = 1;   // level to load when HOW_HIGH ends (set on win)
 
     Rectangle wincondition = { 400, 150, 40, 40 };
 
@@ -1421,6 +1422,40 @@ int main(void)
             if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
             {
                 splashTimer = 0.0f;
+                // Reset all game state for the new level WITHOUT reloading level 1
+                // (ApplyLevelData was already called on win, so level data is set)
+                ClearDeathState();
+                ClearRoundEntities();
+                ResetPlayerPos();
+                ResetRegulus();
+                lives = 3; death = false;
+                invincible = true; invincibleTimer = invincibleDuration;
+                spawnInterval = 10.0f; minuteTimer = 0.0f;
+                playerHasBeatrice = false; beatriceAbilityTimer = 0.0f;
+                beaBulletShootTimer = 0.0f;
+                for (auto& bb : beaBullets) bb.active = false;
+                beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
+                houseAnimPlaying = false; houseAnimFrame = 0;
+                houseAnimTimer = 0.0f; houseIsSnowed = false;
+                nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
+                nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
+                nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
+                for (auto& nk : nukes) nk.active = false;
+                nukes.clear();
+                if (!nukeSpawnNodes.empty()) {
+                    int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+                    nukes.push_back({ nukeSpawnNodes[idx], true });
+                }
+                beatrices.clear();
+                if (!beatriceSpawnNodes.empty()) {
+                    int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
+                    beatrices.push_back({ beatriceSpawnNodes[idx], true });
+                }
+                regulusThrowing = true; regulusThrowFrame = 0;
+                regulusThrowTimer = 0.0f; regulusSpawnPending = true;
+                regulusForceBlue = true; regulusIdleFrame = 0;
+                regulusIdleTimer = 0.0f;
+                subaruFrame = 0; subaruTimer = 0.0f;
                 currentScreen = GAMEPLAY;
             }
         }
@@ -2111,19 +2146,25 @@ int main(void)
             // ── Win Condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
-                // Try to load the next level from disk
+                // Always advance to the next level — load from disk if available,
+                // otherwise use an empty valid level (so the game never dead-ends).
+                pendingLevelId = currentLevelId + 1;
                 LevelData nextLv;
-                if (LoadLevel(nextLv, currentLevelId + 1)) {
-                    currentLevelId++;
-                    ApplyLevelData(nextLv);
-                    FullReset();
-                    currentScreen = GAMEPLAY;
+                if (!LoadLevel(nextLv, pendingLevelId)) {
+                    // Level file doesn't exist → create a minimal empty level
+                    nextLv = LevelData{};
+                    nextLv.id = pendingLevelId;
+                    nextLv.valid = true;
+                    nextLv.hasPlayerSpawn = true;
+                    nextLv.playerSpawn = { 269.f, 817.f };
                 }
-                else {
-                    // No more levels → show completion, then menu
-                    splashTimer = 0.0f;
-                    currentScreen = GAME_OVER;
-                }
+                currentLevelId = pendingLevelId;
+                ApplyLevelData(nextLv);
+                // Show "HOW HIGH" / Subaru screen between every level
+                splashTimer = 0.0f;
+                subaruFrame = 0;
+                subaruTimer = 0.0f;
+                currentScreen = HOW_HIGH;
             }
 
         } // end GAMEPLAY update
@@ -2222,11 +2263,16 @@ int main(void)
             // 3. Text on top
             const char* howHighTxt = "HOW HIGH CAN YOU GET?";
             int hwW = MeasureText(howHighTxt, 50);
-            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
+            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 80, 50, YELLOW);
+
+            // Level number
+            const char* lvlTxt = TextFormat("LEVEL %d", currentLevelId);
+            int lvlW = MeasureText(lvlTxt, 36);
+            DrawText(lvlTxt, (screenWidth - lvlW) / 2, screenHeight / 2 - 20, 36, { 255, 200, 50, 255 });
 
             const char* pressEnter = "PRESS ENTER TO PLAY";
             int peW = MeasureText(pressEnter, 28);
-            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
+            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 30, 28, WHITE);
         }
         else if (currentScreen == CONTROLS)
         {
