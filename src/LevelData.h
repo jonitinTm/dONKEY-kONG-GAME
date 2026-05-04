@@ -33,6 +33,31 @@ struct PathNodeData {
     bool  isSplitNode = false;
 };
 
+// ── Win zone ──────────────────────────────────────────────────────────────────
+
+struct WinZoneData {
+    float x = 0.f;
+    float y = 0.f;
+    float w = 128.f;
+    float h = 128.f;
+};
+
+// ── Kill zone ─────────────────────────────────────────────────────────────────
+
+enum class KillZoneTexture : int {
+    NONE = 0,
+    DK_GOLDEN_PISTON = 1,
+};
+
+struct KillZoneData {
+    float          x = 0.f;
+    float          y = 0.f;
+    float          w = 64.f;
+    float          h = 64.f;
+    float          tilt = 0.f;           // rotation in degrees (shear model, like platforms)
+    KillZoneTexture texId = KillZoneTexture::NONE;
+};
+
 // ── Elevator ─────────────────────────────────────────────────────────────────
 
 struct ElevatorData {
@@ -89,8 +114,13 @@ struct LevelData {
     std::vector<Vector2>            nukeSpawns;
     std::vector<Vector2>            beatriceSpawns;
     std::vector<Vector2>            enemySpawns;
-    std::vector<ElevatorData>       elevators;
+    std::vector<ElevatorData>        elevators;
     std::vector<ParentChildRelation> relations;
+
+    // ── Zone entities ───────────────────────────────────────────────────────
+    bool         hasWinZone = false;
+    WinZoneData  winZone;
+    std::vector<KillZoneData> killZones;
 };
 
 // ── Persistence ───────────────────────────────────────────────────────────────

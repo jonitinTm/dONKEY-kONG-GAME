@@ -14,7 +14,9 @@ enum class EditorTool : int {
     SELECT = 0, PLAYER_SPAWN, REGULUS, CAVE,
     PLATFORM, LADDER, BEAM, PATH_NODE,
     NUKE_SPAWN, BEATRICE_SPAWN, ENEMY_SPAWN,
-    ELEVATOR,        // NEW
+    ELEVATOR,
+    WIN_ZONE,
+    KILL_ZONE,
     TOOL_COUNT
 };
 enum class GizmoMode { SELECT = 0, MOVE, ROTATE, SCALE };
@@ -27,11 +29,11 @@ enum class ConnectMode { NONE, NEXT0, NEXT1 };
 using SelectedEnt = EntityRef;
 
 struct OutlineRow {
-    SelectedEnt ent;
-    const char* icon;
-    char        name[48];
-    Color       color;
-    int         depth = 0;    // indentation level
+    SelectedEnt ent = {};
+    const char* icon = "[?]";
+    char        name[48] = {};
+    Color       color = { 180, 185, 210, 255 };
+    int         depth = 0;
     bool        hasChildren = false;
 };
 
@@ -53,11 +55,11 @@ public:
 
     void SetGameTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder,
         Texture2D* player, Texture2D* regulus, Texture2D* cave,
-        Texture2D* rope = nullptr)
+        Texture2D* rope = nullptr, Texture2D* goldenPiston = nullptr)
     {
         _bgTex = bg; _beamTex = beam; _ladderTex = ladder;
         _playerTex = player; _regulusTex = regulus; _caveTex = cave;
-        _ropeTex = rope;
+        _ropeTex = rope; _goldenPistonTex = goldenPiston;
     }
     void SetTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder)
     {
@@ -116,6 +118,7 @@ private:
     Texture2D* _regulusTex = nullptr;
     Texture2D* _caveTex = nullptr;
     Texture2D* _ropeTex = nullptr;
+    Texture2D* _goldenPistonTex = nullptr;  // Kill zone: DK_GOLDEN_PISTON
 
     // ── Tool / gizmo state ────────────────────────────────────────────────────
     EditorTool  _tool = EditorTool::SELECT;
@@ -176,6 +179,12 @@ private:
     float   _fieldDragStartVal = 0.f;
     float   _fieldDragSens = 1.f;
     float   _fieldMin = 0.f, _fieldMax = 0.f;
+
+    // Direct text-input for NumField (double-click to activate)
+    bool    _fieldTyping = false;
+    float* _fieldTypingPtr = nullptr;
+    char    _fieldTypeBuf[32] = {};
+    double  _fieldLastClick = -999.0;   // for double-click detection
 
     char  _status[256] = {};
     float _statusTimer = 0.f;
@@ -335,6 +344,12 @@ private:
     // Elevator draw helper
     void DrawElevatorEnt(const ElevatorData& el, bool sel, bool msel) const;
     Rectangle ElevRect(const ElevatorData& el) const;
+
+    // Win zone / Kill zone draw helpers
+    void DrawWinZoneEnt(const WinZoneData& wz, bool sel, bool msel) const;
+    Rectangle WinZoneRect(const WinZoneData& wz) const;
+    void DrawKillZoneEnt(const KillZoneData& kz, bool sel, bool msel) const;
+    Rectangle KillZoneRect(const KillZoneData& kz) const;
 
     Rectangle  BrowserBtn(int row, int col, int cols) const;
     static const char* ToolName(EditorTool t);

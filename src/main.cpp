@@ -543,9 +543,10 @@ int main(void)
 
     // ── Platforms & ladders ───────────────────────────────────────────────────
     // ── Elevators & parent-child relations ─────────────────────────────────
-    vector<ElevatorData>        liveElevators;     // copied from LevelData on load
-    vector<ParentChildRelation> liveRelations;     // parallel to LevelData::relations
-    vector<float>               elevChildPhases;   // one per relation, 0..elev.h
+    vector<ElevatorData>        liveElevators;
+    vector<ParentChildRelation> liveRelations;
+    vector<float>               elevChildPhases;
+    vector<KillZoneData>        liveKillZones;
 
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
@@ -776,6 +777,7 @@ int main(void)
     Texture2D imgMarioClimbDown = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_IdleBack.png");
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
     Texture2D RopeTex = LoadTexture("Assets/Textures/Architecture/Rope.png");
+    Texture2D GoldenPistonTex = LoadTexture("Assets/Textures/Items/GoldenPiston.png");
     Texture2D SnowFloor = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Floor.png");
 
     Texture2D BarrelMov1 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Mov1.png");
@@ -941,7 +943,7 @@ int main(void)
 
     // ── Wire textures into the editor ─────────────────────────────────────────
     editor.SetGameTextures(&background, &beam, &LadderPart,
-        &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex);
+        &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex, &GoldenPistonTex);
 
     // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
     auto RebuildLayers = [&]()
@@ -1061,6 +1063,15 @@ int main(void)
 
             // Rebuild render textures with new data
             RebuildLayers();
+
+            // Win zone
+            if (lv.hasWinZone)
+                wincondition = { lv.winZone.x, lv.winZone.y, lv.winZone.w, lv.winZone.h };
+
+            // Kill zones
+            liveKillZones.clear();
+            for (const auto& kz : lv.killZones)
+                liveKillZones.push_back(kz);
         };
 
     Texture2D* image = &imgMarioIdle;
@@ -1475,6 +1486,15 @@ int main(void)
 
             // ── Elevator children movement ─────────────────────────────────────
             // Each child of an elevator loops along the shaft: phase 0=top, h=bottom
+            //
+            // Snapshot platform Y values BEFORE moving them so we can detect
+            // upward motion and push the player up when a platform rises into them.
+            // Without this, the one-way collision guard in CollisionManager::Resolve
+            // fires incorrectly: the platform teleports up, prevY still has the
+            // player "below" the old top, and the guard passes the player through.
+            struct ElevPlatSnapshot { int platIndex; float prevY; float newY; float platW; };
+            vector<ElevPlatSnapshot> elevSnapshots;
+
             for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
                 const auto& rel = liveRelations[ri];
                 if (rel.parent.type != 11) continue; // 11 = ELEVATOR tool enum
@@ -1483,11 +1503,21 @@ int main(void)
                 const ElevatorData& el = liveElevators[ei];
                 if ((int)elevChildPhases.size() <= ri) elevChildPhases.resize(ri + 1, 0.f);
                 float& phase = elevChildPhases[ri];
+
+                // Snapshot platform Y before update (platform children only)
+                int ci = rel.child.index;
+                if (rel.child.type == 4 && ci >= 0 && ci < (int)platforms.size())
+                    elevSnapshots.push_back({ ci, platforms[ci].y, 0.f, platforms[ci].width });
+
                 if (el.direction == 1) { phase -= el.speed * dt; if (phase < 0.f)  phase = el.h; }
                 else { phase += el.speed * dt; if (phase > el.h) phase = 0.f; }
                 float cx = el.x + rel.offsetX;
                 float cy = el.y + phase;
-                int ci = rel.child.index;
+
+                // Record the new Y into the snapshot entry we just pushed
+                if (rel.child.type == 4 && !elevSnapshots.empty())
+                    elevSnapshots.back().newY = cy;
+
                 switch (rel.child.type) {
                 case 4: if (ci >= 0 && ci < (int)platforms.size()) platforms[ci] = Platform::Make(cx, cy, platforms[ci].width, 0, 0.f); break;
                 case 5: if (ci >= 0 && ci < (int)ladders.size())   ladders[ci] = Ladder::Make(cx, cy, ladders[ci].width, ladders[ci].height); break;
@@ -2137,6 +2167,53 @@ int main(void)
                     isGrounded = col.grounded;
                     if (col.grounded) isJumping = false;
 
+                    // ── Upward-moving platform push ───────────────────────────
+                    // CollisionManager uses a one-way top-surface guard based on
+                    // the player's previous position. When a platform moves UP
+                    // into the player this frame, prevY still shows the player
+                    // "below" the old top, so the guard wrongly skips resolution
+                    // and the player phases through. We fix it here: for every
+                    // elevator-child platform that moved upward, if the platform
+                    // top has risen into the player's bottom half, push the player
+                    // up flush with the new top and kill downward velocity.
+                    if (!onLadder)
+                    {
+                        for (const auto& snap : elevSnapshots)
+                        {
+                            // Only care about upward movement
+                            if (snap.newY >= snap.prevY) continue;
+                            int pi = snap.platIndex;
+                            if (pi < 0 || pi >= (int)platforms.size()) continue;
+                            const Platform& movPlat = platforms[pi];
+
+                            // Build an AABB for the platform top surface (thin strip)
+                            // using its current (new) position.
+                            float platTop = movPlat.y;  // y is the top edge for Make(x,y,w,0)
+                            float platLeft = movPlat.x;
+                            float platRight = movPlat.x + movPlat.width;
+
+                            float playerBottom = player.y + player.height;
+                            float playerLeft = player.x;
+                            float playerRight = player.x + player.width;
+
+                            // Horizontal overlap check
+                            bool hOverlap = playerRight > platLeft && playerLeft < platRight;
+                            if (!hOverlap) continue;
+
+                            // The platform top has risen into (or past) the player's
+                            // lower half. Tolerance of 4 px avoids accidental triggers
+                            // when the player is well above the platform.
+                            float penetration = playerBottom - platTop;
+                            if (penetration > 0.f && penetration < player.height * 0.75f)
+                            {
+                                player.y -= penetration;   // push up flush with platform top
+                                if (velocityY > 0.f) velocityY = 0.f;  // kill downward velocity
+                                isGrounded = true;
+                                isJumping = false;
+                            }
+                        }
+                    }
+
                     // ── Player animation selection ────────────────────────────
                     if (isJumping)
                     {
@@ -2169,19 +2246,44 @@ int main(void)
 
             if (isDying) image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
 
+            // ── Kill Zone collision ───────────────────────────────────────────
+            if (!isDying && !invincible) {
+                for (const auto& kz : liveKillZones) {
+                    if (CheckCollisionRecs({ kz.x, kz.y, kz.w, kz.h }, player)) {
+                        TriggerDeath();
+                        break;
+                    }
+                }
+            }
+
             // ── Win Condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
-                // Try to load the next level from disk
                 LevelData nextLv;
                 if (LoadLevel(nextLv, currentLevelId + 1)) {
                     currentLevelId++;
                     ApplyLevelData(nextLv);
-                    FullReset();
+                    // Do NOT call FullReset() — it reverts currentLevelId to 1
+                    // and reloads level 1 data, corrupting the new level.
+                    ClearDeathState();
+                    ClearRoundEntities();
+                    ResetPlayerPos();
+                    ResetRegulus();
+                    invincible = true;
+                    invincibleTimer = invincibleDuration;
+                    nukes.clear();
+                    if (!nukeSpawnNodes.empty()) {
+                        int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+                        nukes.push_back({ nukeSpawnNodes[idx], true });
+                    }
+                    beatrices.clear();
+                    if (!beatriceSpawnNodes.empty()) {
+                        int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
+                        beatrices.push_back({ beatriceSpawnNodes[idx], true });
+                    }
                     currentScreen = GAMEPLAY;
                 }
                 else {
-                    // No more levels → show completion, then menu
                     splashTimer = 0.0f;
                     currentScreen = GAME_OVER;
                 }
@@ -2228,7 +2330,7 @@ int main(void)
             const char* exitText = "EXIT";
             const char* controlText = "CONTROLS";
             const char* editorText = "LEVEL EDITOR";
-            const char* subtitle = "1967 Skibidi Toiltet Defense & Co";
+            const char* subtitle = "1967 Bomboclat Industries LLC";
 
             int titleW = MeasureText(title, titleFont);
             int playW = MeasureText(playText, menuFont);
@@ -2403,6 +2505,26 @@ int main(void)
 
             // 3. Beams (static — pre-baked, excludes elevator children)
             DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
+
+            // 3.0 Kill zones
+            for (const auto& kz : liveKillZones) {
+                if (kz.texId == KillZoneTexture::DK_GOLDEN_PISTON && GoldenPistonTex.id > 0) {
+                    float tw = (float)GoldenPistonTex.width, th = (float)GoldenPistonTex.height;
+                    float scale = fmaxf(1.f, fminf(kz.w / tw, kz.h / th));
+                    float dw = tw * scale, dh = th * scale;
+                    for (float ty = kz.y; ty < kz.y + kz.h; ty += dh)
+                        for (float tx = kz.x; tx < kz.x + kz.w; tx += dw) {
+                            float cw = fminf(dw, kz.x + kz.w - tx);
+                            float ch = fminf(dh, kz.y + kz.h - ty);
+                            DrawTexturePro(GoldenPistonTex, { 0, 0, cw / scale, ch / scale },
+                                { tx, ty, cw, ch }, {}, 0.f, WHITE);
+                        }
+                }
+                else {
+                    DrawRectangle((int)kz.x, (int)kz.y, (int)kz.w, (int)kz.h, { 255, 30, 30, 60 });
+                    DrawRectangleLinesEx({ kz.x, kz.y, kz.w, kz.h }, 2.f, { 255, 60, 60, 200 });
+                }
+            }
 
             // 3.1 Elevator-child beams — drawn live every frame
             {

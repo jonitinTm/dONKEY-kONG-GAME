@@ -78,6 +78,14 @@ bool SaveLevel(const LevelData& lv, const char* folder)
             r.parent.type, r.parent.index, r.child.type, r.child.index,
             r.offsetX, r.offsetY);
 
+    if (lv.hasWinZone)
+        fprintf(f, "WIN_ZONE %.2f %.2f %.2f %.2f\n",
+            lv.winZone.x, lv.winZone.y, lv.winZone.w, lv.winZone.h);
+
+    for (const auto& kz : lv.killZones)
+        fprintf(f, "KILL_ZONE %.2f %.2f %.2f %.2f %d %.2f\n",
+            kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.tilt);
+
     fclose(f);
     return true;
 }
@@ -93,68 +101,81 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
     out = LevelData{};
     out.id = id;
 
-    char tag[64];
+    char tag[64] = {};
     while (fscanf(f, "%63s", tag) == 1)
     {
         if (strcmp(tag, "LEVEL_ID") == 0)
-            fscanf(f, "%d", &out.id);
+            (void)fscanf(f, "%d", &out.id);
         else if (strcmp(tag, "PLAYER_SPAWN") == 0) {
-            fscanf(f, "%f %f", &out.playerSpawn.x, &out.playerSpawn.y);
+            (void)fscanf(f, "%f %f", &out.playerSpawn.x, &out.playerSpawn.y);
             out.hasPlayerSpawn = true;
         }
         else if (strcmp(tag, "REGULUS") == 0) {
-            fscanf(f, "%f %f", &out.regulusPos.x, &out.regulusPos.y);
+            (void)fscanf(f, "%f %f", &out.regulusPos.x, &out.regulusPos.y);
             out.hasRegulus = true;
         }
         else if (strcmp(tag, "CAVE") == 0) {
-            fscanf(f, "%f %f", &out.cavePos.x, &out.cavePos.y);
+            (void)fscanf(f, "%f %f", &out.cavePos.x, &out.cavePos.y);
             out.hasCave = true;
         }
         else if (strcmp(tag, "PLATFORM") == 0) {
             PlatformData p;
-            fscanf(f, "%f %f %f %f %f", &p.x, &p.y, &p.w, &p.h, &p.tilt);
+            (void)fscanf(f, "%f %f %f %f %f", &p.x, &p.y, &p.w, &p.h, &p.tilt);
             out.platforms.push_back(p);
         }
         else if (strcmp(tag, "LADDER") == 0) {
             LadderData l;
-            fscanf(f, "%f %f %f %f", &l.x, &l.y, &l.w, &l.h);
+            (void)fscanf(f, "%f %f %f %f", &l.x, &l.y, &l.w, &l.h);
             out.ladders.push_back(l);
         }
         else if (strcmp(tag, "BEAM") == 0) {
-            Vector2 b; fscanf(f, "%f %f", &b.x, &b.y);
+            Vector2 b; (void)fscanf(f, "%f %f", &b.x, &b.y);
             out.beams.push_back(b);
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
             PathNodeData n; int split;
-            fscanf(f, "%f %f %d %d %d %d",
+            (void)fscanf(f, "%f %f %d %d %d %d",
                 &n.x, &n.y, &n.next[0], &n.next[1], &n.rollThreshold, &split);
             n.isSplitNode = (split != 0);
             out.pathNodes.push_back(n);
         }
         else if (strcmp(tag, "NUKE_SPAWN") == 0) {
-            Vector2 v; fscanf(f, "%f %f", &v.x, &v.y);
+            Vector2 v; (void)fscanf(f, "%f %f", &v.x, &v.y);
             out.nukeSpawns.push_back(v);
         }
         else if (strcmp(tag, "BEATRICE_SPAWN") == 0) {
-            Vector2 v; fscanf(f, "%f %f", &v.x, &v.y);
+            Vector2 v; (void)fscanf(f, "%f %f", &v.x, &v.y);
             out.beatriceSpawns.push_back(v);
         }
         else if (strcmp(tag, "ENEMY_SPAWN") == 0) {
-            Vector2 v; fscanf(f, "%f %f", &v.x, &v.y);
+            Vector2 v; (void)fscanf(f, "%f %f", &v.x, &v.y);
             out.enemySpawns.push_back(v);
         }
         else if (strcmp(tag, "ELEVATOR") == 0) {
             ElevatorData e;
-            fscanf(f, "%f %f %f %f %f %d", &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
+            (void)fscanf(f, "%f %f %f %f %f %d", &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
             out.elevators.push_back(e);
         }
         else if (strcmp(tag, "RELATION") == 0) {
             ParentChildRelation r;
-            fscanf(f, "%d %d %d %d %f %f",
+            (void)fscanf(f, "%d %d %d %d %f %f",
                 &r.parent.type, &r.parent.index,
                 &r.child.type, &r.child.index,
                 &r.offsetX, &r.offsetY);
             out.relations.push_back(r);
+        }
+        else if (strcmp(tag, "WIN_ZONE") == 0) {
+            (void)fscanf(f, "%f %f %f %f",
+                &out.winZone.x, &out.winZone.y,
+                &out.winZone.w, &out.winZone.h);
+            out.hasWinZone = true;
+        }
+        else if (strcmp(tag, "KILL_ZONE") == 0) {
+            KillZoneData kz; int texId = 0;
+            int parsed = fscanf(f, "%f %f %f %f %d %f", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.tilt);
+            if (parsed < 6) kz.tilt = 0.f;   // backward-compat: old files have no tilt
+            kz.texId = (KillZoneTexture)texId;
+            out.killZones.push_back(kz);
         }
         // unknown tag: skip rest of line
         else { char buf[512]; fgets(buf, sizeof(buf), f); }
@@ -278,6 +299,10 @@ LevelData GetDefaultLevel1()
         {180,706},{620,706},{200,576},{550,576},
         {160,446},{520,446},{200,316},{500,316},
     };
+
+    // ── Win zone (top of the level, near Regulus) ─────────────────────────────
+    lv.hasWinZone = true;
+    lv.winZone = { 22.f, 180.f, 160.f, 60.f };
 
     return lv;
 }
