@@ -406,7 +406,6 @@ int main(void)
 
     int score = 0;
     int currentLevelId = 1;   // which level is currently loaded / playing
-    int pendingLevelId = 1;   // level to load when HOW_HIGH ends (set on win)
 
     Rectangle wincondition = { 400, 150, 40, 40 };
 
@@ -543,6 +542,11 @@ int main(void)
     float regulusActiveSpawnTimer = 0.0f;
 
     // ── Platforms & ladders ───────────────────────────────────────────────────
+    // ── Elevators & parent-child relations ─────────────────────────────────
+    vector<ElevatorData>        liveElevators;     // copied from LevelData on load
+    vector<ParentChildRelation> liveRelations;     // parallel to LevelData::relations
+    vector<float>               elevChildPhases;   // one per relation, 0..elev.h
+
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
         Platform::Make(430, 870, 420, 0, -3.0f),
@@ -771,6 +775,7 @@ int main(void)
     Texture2D imgMarioClimbEnd2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd2.png");
     Texture2D imgMarioClimbDown = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_IdleBack.png");
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
+    Texture2D RopeTex = LoadTexture("Assets/Textures/Architecture/Rope.png");
     Texture2D SnowFloor = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Floor.png");
 
     Texture2D BarrelMov1 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Mov1.png");
@@ -936,30 +941,52 @@ int main(void)
 
     // ── Wire textures into the editor ─────────────────────────────────────────
     editor.SetGameTextures(&background, &beam, &LadderPart,
-        &imgMarioIdle, &RegulusIdle1, &House1);
+        &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex);
 
     // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
     auto RebuildLayers = [&]()
         {
-            // Beam layer
+            // Beam layer — elevator-child beams are excluded and drawn live instead
             float bScale = 4.0f;
             BeginTextureMode(staticLayer);
             ClearBackground(BLANK);
-            for (const auto& pos : beamPositions)
+            for (int bi = 0; bi < (int)beamPositions.size(); bi++)
+            {
+                bool isElevChild = false;
+                for (const auto& rel : liveRelations)
+                    if (rel.parent.type == 11 && rel.child.type == 6 && rel.child.index == bi)
+                    {
+                        isElevChild = true; break;
+                    }
+                if (isElevChild) continue;
+                const auto& pos = beamPositions[bi];
                 DrawTexturePro(beam,
                     { 0, 0, (float)beam.width, (float)beam.height },
                     { pos.x, pos.y, beam.width * bScale, beam.height * bScale },
                     { 0, 0 }, 0.f, WHITE);
+            }
             EndTextureMode();
 
-            // Ladder layer (uniform tiling, no hard-coded per-index offsets)
+            // Ladder layer (uniform tiling) — elevator-child ladders are excluded
+            // and drawn live in the gameplay loop instead, since their position
+            // changes every frame.
             float lScale = 4.0f;
             float tileW = 16.f * lScale;
             float tileH = 16.f * lScale;
             BeginTextureMode(ladderLayer);
             ClearBackground(BLANK);
-            for (const Ladder& lad : ladders)
+            for (int li = 0; li < (int)ladders.size(); li++)
             {
+                // Skip ladders parented to an elevator — drawn live, not baked
+                bool isElevChild = false;
+                for (const auto& rel : liveRelations)
+                    if (rel.parent.type == 11 && rel.child.type == 5 && rel.child.index == li)
+                    {
+                        isElevChild = true; break;
+                    }
+                if (isElevChild) continue;
+
+                const Ladder& lad = ladders[li];
                 float drawX = lad.x + lad.width * 0.5f - tileW * 0.5f;
                 for (float y = lad.y; y < lad.y + lad.height; y += tileH)
                 {
@@ -1023,6 +1050,14 @@ int main(void)
                 playerSpawnX = lv.playerSpawn.x;
                 playerSpawnY = lv.playerSpawn.y;
             }
+
+            // Elevators + relations
+            liveElevators = lv.elevators;
+            liveRelations = lv.relations;
+            // Build phase vector: each relation gets an initial phase from offsetY
+            elevChildPhases.resize(liveRelations.size());
+            for (int ri = 0; ri < (int)liveRelations.size(); ri++)
+                elevChildPhases[ri] = liveRelations[ri].offsetY;
 
             // Rebuild render textures with new data
             RebuildLayers();
@@ -1422,40 +1457,6 @@ int main(void)
             if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
             {
                 splashTimer = 0.0f;
-                // Reset all game state for the new level WITHOUT reloading level 1
-                // (ApplyLevelData was already called on win, so level data is set)
-                ClearDeathState();
-                ClearRoundEntities();
-                ResetPlayerPos();
-                ResetRegulus();
-                lives = 3; death = false;
-                invincible = true; invincibleTimer = invincibleDuration;
-                spawnInterval = 10.0f; minuteTimer = 0.0f;
-                playerHasBeatrice = false; beatriceAbilityTimer = 0.0f;
-                beaBulletShootTimer = 0.0f;
-                for (auto& bb : beaBullets) bb.active = false;
-                beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
-                houseAnimPlaying = false; houseAnimFrame = 0;
-                houseAnimTimer = 0.0f; houseIsSnowed = false;
-                nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
-                nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
-                nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
-                for (auto& nk : nukes) nk.active = false;
-                nukes.clear();
-                if (!nukeSpawnNodes.empty()) {
-                    int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
-                    nukes.push_back({ nukeSpawnNodes[idx], true });
-                }
-                beatrices.clear();
-                if (!beatriceSpawnNodes.empty()) {
-                    int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
-                    beatrices.push_back({ beatriceSpawnNodes[idx], true });
-                }
-                regulusThrowing = true; regulusThrowFrame = 0;
-                regulusThrowTimer = 0.0f; regulusSpawnPending = true;
-                regulusForceBlue = true; regulusIdleFrame = 0;
-                regulusIdleTimer = 0.0f;
-                subaruFrame = 0; subaruTimer = 0.0f;
                 currentScreen = GAMEPLAY;
             }
         }
@@ -1470,6 +1471,31 @@ int main(void)
             {
                 static LevelData _cinematicDummy;
                 Cinematic::Global.Update(dt, _cinematicDummy);
+            }
+
+            // ── Elevator children movement ─────────────────────────────────────
+            // Each child of an elevator loops along the shaft: phase 0=top, h=bottom
+            for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
+                const auto& rel = liveRelations[ri];
+                if (rel.parent.type != 11) continue; // 11 = ELEVATOR tool enum
+                int ei = rel.parent.index;
+                if (ei < 0 || ei >= (int)liveElevators.size()) continue;
+                const ElevatorData& el = liveElevators[ei];
+                if ((int)elevChildPhases.size() <= ri) elevChildPhases.resize(ri + 1, 0.f);
+                float& phase = elevChildPhases[ri];
+                if (el.direction == 1) { phase -= el.speed * dt; if (phase < 0.f)  phase = el.h; }
+                else { phase += el.speed * dt; if (phase > el.h) phase = 0.f; }
+                float cx = el.x + rel.offsetX;
+                float cy = el.y + phase;
+                int ci = rel.child.index;
+                switch (rel.child.type) {
+                case 4: if (ci >= 0 && ci < (int)platforms.size()) platforms[ci] = Platform::Make(cx, cy, platforms[ci].width, 0, 0.f); break;
+                case 5: if (ci >= 0 && ci < (int)ladders.size())   ladders[ci] = Ladder::Make(cx, cy, ladders[ci].width, ladders[ci].height); break;
+                case 6: if (ci >= 0 && ci < (int)beamPositions.size()) beamPositions[ci] = { cx, cy }; break;
+                case 8: if (ci >= 0 && ci < (int)nukeSpawnNodes.size())      nukeSpawnNodes[ci] = { cx,cy }; break;
+                case 9: if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[ci] = { cx,cy }; break;
+                case 10:if (ci >= 0 && ci < (int)enemySpawnPositions.size())  enemySpawnPositions[ci] = { cx,cy }; break;
+                }
             }
 
             animationTimer += dt;
@@ -2146,25 +2172,19 @@ int main(void)
             // ── Win Condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
-                // Always advance to the next level — load from disk if available,
-                // otherwise use an empty valid level (so the game never dead-ends).
-                pendingLevelId = currentLevelId + 1;
+                // Try to load the next level from disk
                 LevelData nextLv;
-                if (!LoadLevel(nextLv, pendingLevelId)) {
-                    // Level file doesn't exist → create a minimal empty level
-                    nextLv = LevelData{};
-                    nextLv.id = pendingLevelId;
-                    nextLv.valid = true;
-                    nextLv.hasPlayerSpawn = true;
-                    nextLv.playerSpawn = { 269.f, 817.f };
+                if (LoadLevel(nextLv, currentLevelId + 1)) {
+                    currentLevelId++;
+                    ApplyLevelData(nextLv);
+                    FullReset();
+                    currentScreen = GAMEPLAY;
                 }
-                currentLevelId = pendingLevelId;
-                ApplyLevelData(nextLv);
-                // Show "HOW HIGH" / Subaru screen between every level
-                splashTimer = 0.0f;
-                subaruFrame = 0;
-                subaruTimer = 0.0f;
-                currentScreen = HOW_HIGH;
+                else {
+                    // No more levels → show completion, then menu
+                    splashTimer = 0.0f;
+                    currentScreen = GAME_OVER;
+                }
             }
 
         } // end GAMEPLAY update
@@ -2263,16 +2283,11 @@ int main(void)
             // 3. Text on top
             const char* howHighTxt = "HOW HIGH CAN YOU GET?";
             int hwW = MeasureText(howHighTxt, 50);
-            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 80, 50, YELLOW);
-
-            // Level number
-            const char* lvlTxt = TextFormat("LEVEL %d", currentLevelId);
-            int lvlW = MeasureText(lvlTxt, 36);
-            DrawText(lvlTxt, (screenWidth - lvlW) / 2, screenHeight / 2 - 20, 36, { 255, 200, 50, 255 });
+            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
 
             const char* pressEnter = "PRESS ENTER TO PLAY";
             int peW = MeasureText(pressEnter, 28);
-            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 30, 28, WHITE);
+            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
         }
         else if (currentScreen == CONTROLS)
         {
@@ -2315,12 +2330,96 @@ int main(void)
                 DrawTexturePro(Rain2, { 0, 0, (float)Rain2.width, (float)Rain2.height }, { 0, -sH + rain2ScrollY, sW, sH }, {}, 0.f, rain2Tint);
             }
 
-            // 2. Ladders
+            // 2. Ladders (static — pre-baked, excludes elevator children)
             DrawTextureRec(ladderLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
 
-            // 3. Beams
+            // 2.1 Elevator-child ladders — drawn live every frame because their
+            //     position is updated by the elevator each tick (not static).
+            {
+                const float lScale = 4.f;
+                const float tileW = 16.f * lScale;
+                const float tileH = 16.f * lScale;
+                for (int ri = 0; ri < (int)liveRelations.size(); ri++)
+                {
+                    const auto& rel = liveRelations[ri];
+                    if (rel.parent.type != 11 || rel.child.type != 5) continue; // only ladder children of elevators
+                    int li = rel.child.index;
+                    if (li < 0 || li >= (int)ladders.size()) continue;
+                    const Ladder& lad = ladders[li];
+                    float drawX = lad.x + lad.width * 0.5f - tileW * 0.5f;
+                    for (float y = lad.y; y < lad.y + lad.height; y += tileH)
+                    {
+                        float dh = fminf(tileH, lad.y + lad.height - y);
+                        float srh = dh / lScale;
+                        DrawTexturePro(LadderPart,
+                            { 0, 0, 16.f, srh },
+                            { drawX, y, tileW, dh },
+                            { 0, 0 }, 0.f, WHITE);
+                    }
+                }
+            }
+
+            // 2.5 Elevators — rope shaft tiled + panned toward direction
+            {
+                const float sc = 4.f;
+                for (const auto& el : liveElevators)
+                {
+                    if (RopeTex.id == 0)
+                    {
+                        // Fallback: plain tinted rect so the shaft is still visible
+                        DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h,
+                            { 80, 60, 40, 80 });
+                        continue;
+                    }
+
+                    float tw = RopeTex.width * sc;
+                    float th = RopeTex.height * sc;
+                    float drawX = el.x + el.w * 0.5f - tw * 0.5f;
+
+                    // Pan: direction=1 (UP) scrolls rope upward, -1 (DOWN) downward.
+                    // Speed is in world-px/s; th is one tile in world-px at scale sc.
+                    float rawPan = (float)GetTime() * el.speed
+                        * (el.direction == 1 ? 1.f : -1.f);
+                    float panOff = fmodf(rawPan, th);
+                    if (panOff < 0.f) panOff += th;
+
+                    // One extra tile above the top hides the seam as it scrolls in.
+                    float startY = el.y - th + panOff;
+
+                    for (float y = startY; y < el.y + el.h; y += th)
+                    {
+                        float dy = fmaxf(y, el.y);
+                        float dyEnd = fminf(y + th, el.y + el.h);
+                        if (dy >= dyEnd) continue;
+                        float srcYOff = (dy - y) / sc;
+                        float srcH = (dyEnd - dy) / sc;
+                        DrawTexturePro(RopeTex,
+                            { 0, srcYOff, (float)RopeTex.width, srcH },
+                            { drawX, dy, tw, dyEnd - dy },
+                            {}, 0.f, WHITE);
+                    }
+                }
+            }
+
+            // 3. Beams (static — pre-baked, excludes elevator children)
             DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
-            // CollisionManager::DrawAll removed — collision boxes are editor-only
+
+            // 3.1 Elevator-child beams — drawn live every frame
+            {
+                const float bScale = 4.f;
+                for (int ri = 0; ri < (int)liveRelations.size(); ri++)
+                {
+                    const auto& rel = liveRelations[ri];
+                    if (rel.parent.type != 11 || rel.child.type != 6) continue;
+                    int bi = rel.child.index;
+                    if (bi < 0 || bi >= (int)beamPositions.size()) continue;
+                    const Vector2& pos = beamPositions[bi];
+                    DrawTexturePro(beam,
+                        { 0, 0, (float)beam.width, (float)beam.height },
+                        { pos.x, pos.y, beam.width * bScale, beam.height * bScale },
+                        { 0, 0 }, 0.f, WHITE);
+                }
+            }
 
             // 4. House
             {
@@ -2722,6 +2821,7 @@ int main(void)
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
     UnloadTexture(imgMarioFalling);
+    UnloadTexture(RopeTex);
     UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);

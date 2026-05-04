@@ -69,6 +69,15 @@ bool SaveLevel(const LevelData& lv, const char* folder)
     for (const auto& v : lv.enemySpawns)
         fprintf(f, "ENEMY_SPAWN %.2f %.2f\n", v.x, v.y);
 
+    for (const auto& e : lv.elevators)
+        fprintf(f, "ELEVATOR %.2f %.2f %.2f %.2f %.2f %d\n",
+            e.x, e.y, e.w, e.h, e.speed, e.direction);
+
+    for (const auto& r : lv.relations)
+        fprintf(f, "RELATION %d %d %d %d %.2f %.2f\n",
+            r.parent.type, r.parent.index, r.child.type, r.child.index,
+            r.offsetX, r.offsetY);
+
     fclose(f);
     return true;
 }
@@ -87,7 +96,7 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
     char tag[64];
     while (fscanf(f, "%63s", tag) == 1)
     {
-        if      (strcmp(tag, "LEVEL_ID") == 0)
+        if (strcmp(tag, "LEVEL_ID") == 0)
             fscanf(f, "%d", &out.id);
         else if (strcmp(tag, "PLAYER_SPAWN") == 0) {
             fscanf(f, "%f %f", &out.playerSpawn.x, &out.playerSpawn.y);
@@ -134,6 +143,19 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             Vector2 v; fscanf(f, "%f %f", &v.x, &v.y);
             out.enemySpawns.push_back(v);
         }
+        else if (strcmp(tag, "ELEVATOR") == 0) {
+            ElevatorData e;
+            fscanf(f, "%f %f %f %f %f %d", &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
+            out.elevators.push_back(e);
+        }
+        else if (strcmp(tag, "RELATION") == 0) {
+            ParentChildRelation r;
+            fscanf(f, "%d %d %d %d %f %f",
+                &r.parent.type, &r.parent.index,
+                &r.child.type, &r.child.index,
+                &r.offsetX, &r.offsetY);
+            out.relations.push_back(r);
+        }
         // unknown tag: skip rest of line
         else { char buf[512]; fgets(buf, sizeof(buf), f); }
     }
@@ -148,17 +170,17 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
 LevelData GetDefaultLevel1()
 {
     LevelData lv;
-    lv.id    = 1;
+    lv.id = 1;
     lv.valid = true;
 
     lv.hasPlayerSpawn = true;
-    lv.playerSpawn    = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f };   // = 269
+    lv.playerSpawn = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f };   // = 269
 
-    lv.hasRegulus  = true;
-    lv.regulusPos  = { 22.0f, 225.0f };
+    lv.hasRegulus = true;
+    lv.regulusPos = { 22.0f, 225.0f };
 
-    lv.hasCave  = true;
-    lv.cavePos  = { 35.0f, 768.0f };   // houseX, houseY (880 - 32*3.5)
+    lv.hasCave = true;
+    lv.cavePos = { 35.0f, 768.0f };   // houseX, houseY (880 - 32*3.5)
 
     // ── Platforms ────────────────────────────────────────────────────────────
     lv.platforms = {
@@ -297,7 +319,7 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
     fprintf(f, "// Beam positions\nvector<Vector2> beamPositions = {\n");
     for (int i = 0; i < (int)lv.beams.size(); i++) {
         fprintf(f, "    { %.0f, %.0f },", lv.beams[i].x, lv.beams[i].y);
-        if ((i+1) % 6 == 0) fprintf(f, "\n");
+        if ((i + 1) % 6 == 0) fprintf(f, "\n");
     }
     fprintf(f, "\n};\n\n");
 

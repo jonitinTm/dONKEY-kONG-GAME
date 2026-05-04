@@ -19,7 +19,8 @@ const char* LevelEditor::ToolName(EditorTool t) {
     case EditorTool::PLATFORM:return"PLATFORM"; case EditorTool::LADDER:return"LADDER";
     case EditorTool::BEAM:return"BEAM"; case EditorTool::PATH_NODE:return"PATH NODE";
     case EditorTool::NUKE_SPAWN:return"NUKE"; case EditorTool::BEATRICE_SPAWN:return"BEATRICE";
-    case EditorTool::ENEMY_SPAWN:return"ENEMY"; default:return"???";
+    case EditorTool::ENEMY_SPAWN:return"ENEMY";
+    case EditorTool::ELEVATOR:return"ELEVATOR"; default:return"???";
     }
 }
 Color LevelEditor::ToolColor(EditorTool t) {
@@ -29,7 +30,8 @@ Color LevelEditor::ToolColor(EditorTool t) {
     case EditorTool::PLATFORM:return{ 80,120,255,255 }; case EditorTool::LADDER:return YELLOW;
     case EditorTool::BEAM:return{ 140,140,140,255 }; case EditorTool::PATH_NODE:return WHITE;
     case EditorTool::NUKE_SPAWN:return SKYBLUE; case EditorTool::BEATRICE_SPAWN:return MAGENTA;
-    case EditorTool::ENEMY_SPAWN:return RED; default:return GRAY;
+    case EditorTool::ENEMY_SPAWN:return RED;
+    case EditorTool::ELEVATOR:return{ 255,140,50,255 }; default:return GRAY;
     }
 }
 
@@ -130,6 +132,7 @@ Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const {
     case EditorTool::NUKE_SPAWN:     return _level.nukeSpawns[i];
     case EditorTool::BEATRICE_SPAWN: return _level.beatriceSpawns[i];
     case EditorTool::ENEMY_SPAWN:    return _level.enemySpawns[i];
+    case EditorTool::ELEVATOR:       return { _level.elevators[i].x, _level.elevators[i].y };
     default: return {};
     }
 }
@@ -147,6 +150,7 @@ void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p) {
     case EditorTool::NUKE_SPAWN:     _level.nukeSpawns[i] = p; break;
     case EditorTool::BEATRICE_SPAWN: _level.beatriceSpawns[i] = p; break;
     case EditorTool::ENEMY_SPAWN:    _level.enemySpawns[i] = p; break;
+    case EditorTool::ELEVATOR:       _level.elevators[i].x = p.x; _level.elevators[i].y = p.y; break;
     default: break;
     }
 }
@@ -169,6 +173,9 @@ bool LevelEditor::PickEntity(Vector2 p) {
         if (CheckCollisionPointCircle(p, _level.beatriceSpawns[i], R)) { _sel = { (int)EditorTool::BEATRICE_SPAWN,i }; return true; }
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)
         if (CheckCollisionPointCircle(p, _level.enemySpawns[i], R)) { _sel = { (int)EditorTool::ENEMY_SPAWN,i }; return true; }
+    // Elevators — checked after point-entities so small spawns inside the shaft take priority
+    for (int i = 0; i < (int)_level.elevators.size(); i++)
+        if (CheckCollisionPointRec(p, ElevRect(_level.elevators[i]))) { _sel = { (int)EditorTool::ELEVATOR,i }; return true; }
     if (_level.hasCave) {
         float cw = (_caveTex && _caveTex->id > 0) ? 64.f * 3.5f : 50.f;
         float ch = (_caveTex && _caveTex->id > 0) ? 32.f * 3.5f : 50.f;
@@ -195,6 +202,7 @@ void LevelEditor::BoxSelectEntities(Rectangle box) {
     auto AC = [&](EditorTool t, Vector2 v, int i) { if (CheckCollisionPointRec(v, box)) _multiSel.push_back({ (int)t,i }); };
     for (int i = 0; i < (int)_level.platforms.size(); i++) if (CheckCollisionRecs(PlatRect(_level.platforms[i]), box)) _multiSel.push_back({ (int)EditorTool::PLATFORM,i });
     for (int i = 0; i < (int)_level.ladders.size(); i++)   if (CheckCollisionRecs(LadRect(_level.ladders[i]), box))   _multiSel.push_back({ (int)EditorTool::LADDER,i });
+    for (int i = 0; i < (int)_level.elevators.size(); i++) if (CheckCollisionRecs(ElevRect(_level.elevators[i]), box)) _multiSel.push_back({ (int)EditorTool::ELEVATOR,i });
     for (int i = 0; i < (int)_level.beams.size(); i++)     if (CheckCollisionRecs(BeamRect(_level.beams[i]), box))    _multiSel.push_back({ (int)EditorTool::BEAM,i });
     for (int i = 0; i < (int)_level.pathNodes.size(); i++)     AC(EditorTool::PATH_NODE, { _level.pathNodes[i].x,_level.pathNodes[i].y }, i);
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)    AC(EditorTool::NUKE_SPAWN, _level.nukeSpawns[i], i);
@@ -243,6 +251,7 @@ void LevelEditor::DeleteSelected() {
     case EditorTool::NUKE_SPAWN:     Er(_level.nukeSpawns, i); break;
     case EditorTool::BEATRICE_SPAWN: Er(_level.beatriceSpawns, i); break;
     case EditorTool::ENEMY_SPAWN:    Er(_level.enemySpawns, i); break;
+    case EditorTool::ELEVATOR:       DeleteRelationsFor(_sel); Er(_level.elevators, i); break;
     default: break;
     }
     _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
@@ -261,6 +270,7 @@ void LevelEditor::DeleteMultiSelected() {
     DT(EditorTool::PLATFORM, _level.platforms); DT(EditorTool::LADDER, _level.ladders);
     DT(EditorTool::BEAM, _level.beams); DT(EditorTool::NUKE_SPAWN, _level.nukeSpawns);
     DT(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns); DT(EditorTool::ENEMY_SPAWN, _level.enemySpawns);
+    DT(EditorTool::ELEVATOR, _level.elevators);
     std::vector<int> pi;
     for (const auto& e : _multiSel) if (e.type == (int)EditorTool::PATH_NODE) pi.push_back(e.index);
     if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && std::find(pi.begin(), pi.end(), _sel.index) == pi.end()) pi.push_back(_sel.index);
@@ -589,22 +599,30 @@ void LevelEditor::UpdateGizmo() {
 // ─────────────────────────────────────────────────────────────────────────────
 void LevelEditor::BuildOutline() {
     _outline.clear();
-    auto Add = [&](EditorTool t, int i, const char* icon, Color c) {
-        OutlineRow row; row.ent = { (int)t,i }; row.icon = icon; row.color = c;
-        if (i >= 0) snprintf(row.name, sizeof(row.name), "%s %d", ToolName(t), i);
-        else     snprintf(row.name, sizeof(row.name), "%s", ToolName(t));
-        _outline.push_back(row);
+
+    // Build set of entities that have a parent (so we skip them as roots)
+    auto hasParent = [&](SelectedEnt e)->bool {
+        for (const auto& r : _level.relations) if (r.child == e) return true;
+        return false;
         };
-    if (_level.hasPlayerSpawn) Add(EditorTool::PLAYER_SPAWN, -1, "[P]", GREEN);
-    if (_level.hasRegulus)     Add(EditorTool::REGULUS, -1, "[R]", { 160,32,240,255 });
-    if (_level.hasCave)        Add(EditorTool::CAVE, -1, "[C]", ORANGE);
-    for (int i = 0; i < (int)_level.platforms.size(); i++)    Add(EditorTool::PLATFORM, i, "[=]", { 80,120,255,255 });
-    for (int i = 0; i < (int)_level.ladders.size(); i++)      Add(EditorTool::LADDER, i, "[|]", YELLOW);
-    for (int i = 0; i < (int)_level.beams.size(); i++)        Add(EditorTool::BEAM, i, "[-]", { 140,140,140,255 });
-    for (int i = 0; i < (int)_level.pathNodes.size(); i++)    Add(EditorTool::PATH_NODE, i, "[o]", WHITE);
-    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)   Add(EditorTool::NUKE_SPAWN, i, "[N]", SKYBLUE);
-    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) Add(EditorTool::BEATRICE_SPAWN, i, "[B]", MAGENTA);
-    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)  Add(EditorTool::ENEMY_SPAWN, i, "[E]", RED);
+
+    // Helper to emit root entities and their subtrees
+    auto EmitRoot = [&](SelectedEnt e) { if (!hasParent(e)) BuildOutlineTree(e, 0); };
+
+    // Singletons
+    if (_level.hasPlayerSpawn) EmitRoot({ (int)EditorTool::PLAYER_SPAWN,-1 });
+    if (_level.hasRegulus)     EmitRoot({ (int)EditorTool::REGULUS,-1 });
+    if (_level.hasCave)        EmitRoot({ (int)EditorTool::CAVE,-1 });
+    // Multi-instance
+    for (int i = 0; i < (int)_level.elevators.size(); i++)    EmitRoot({ (int)EditorTool::ELEVATOR,i });
+    for (int i = 0; i < (int)_level.platforms.size(); i++)    EmitRoot({ (int)EditorTool::PLATFORM,i });
+    for (int i = 0; i < (int)_level.ladders.size(); i++)      EmitRoot({ (int)EditorTool::LADDER,i });
+    for (int i = 0; i < (int)_level.beams.size(); i++)        EmitRoot({ (int)EditorTool::BEAM,i });
+    for (int i = 0; i < (int)_level.pathNodes.size(); i++)    EmitRoot({ (int)EditorTool::PATH_NODE,i });
+    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)   EmitRoot({ (int)EditorTool::NUKE_SPAWN,i });
+    for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) EmitRoot({ (int)EditorTool::BEATRICE_SPAWN,i });
+    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)  EmitRoot({ (int)EditorTool::ENEMY_SPAWN,i });
+
     int vis = (int)(OutlinerRect().height - 20) / OUTLINE_ROW;
     int maxScroll = (int)_outline.size() - vis;
     if (_outlineScroll > maxScroll) _outlineScroll = std::max(0, maxScroll);
@@ -718,12 +736,12 @@ void LevelEditor::UpdateBrowser() {
     Vector2 mouse = GetMousePosition();
     if (mouse.x >= _canvasW) return;
     const int r0[] = { 0,1,2,3,4,5 };
-    const int r1[] = { 6,7,8,9,10 };
+    const int r1[] = { 6,7,8,9,10,11 };   // 11 = ELEVATOR
     for (int c = 0; c < 6; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6)))
     {
         _tool = (EditorTool)r0[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
-    for (int c = 0; c < 5; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(1, c, 5)))
+    for (int c = 0; c < 6; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(1, c, 6)))
     {
         _tool = (EditorTool)r1[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
@@ -883,6 +901,23 @@ void LevelEditor::UpdateCanvas() {
             PushUndo();
             LadderData l; l.x = _ladStart.x; l.y = (h >= 0) ? _ladStart.y : swm.y; l.w = 40.f; l.h = fabsf(h);
             _level.ladders.push_back(l); _placingLadder = false; SetStatus("Ladder placed.");
+        }
+        return;
+    }
+    if (_tool == EditorTool::ELEVATOR) {
+        // Drag vertically to set shaft height, like a ladder
+        if (lP) { _placingLadder = true; _ladStart = swm; }  // reuse _ladStart/_placingLadder
+        if (_placingLadder && lR) {
+            float h = swm.y - _ladStart.y;
+            if (fabsf(h) < GRID_SZ * 2) h = (float)(GRID_SZ * 8);
+            PushUndo();
+            ElevatorData el;
+            el.x = _ladStart.x; el.y = (h >= 0) ? _ladStart.y : swm.y;
+            el.w = 48.f; el.h = fabsf(h); el.speed = 60.f; el.direction = 1;
+            _level.elevators.push_back(el);
+            _sel = { (int)EditorTool::ELEVATOR, (int)_level.elevators.size() - 1 };
+            _placingLadder = false;
+            SetStatus(TextFormat("Elevator placed (h=%.0f). Switch to SELECT to adjust.", el.h));
         }
         return;
     }
@@ -1107,6 +1142,8 @@ void LevelEditor::DrawGrid() const {
 void LevelEditor::DrawLevelEntities() {
     auto IS = [&](EditorTool t, int i) {return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
     auto IMS = [&](EditorTool t, int i) {return IsInMultiSel({ (int)t,i }); };
+    // Elevators drawn first (background layer) so spawn circles render on top
+    for (int i = 0; i < (int)_level.elevators.size(); i++)  DrawElevatorEnt(_level.elevators[i], IS(EditorTool::ELEVATOR, i), IMS(EditorTool::ELEVATOR, i));
     for (int i = 0; i < (int)_level.platforms.size(); i++) DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
     for (int i = 0; i < (int)_level.ladders.size(); i++)   DrawLadEnt(_level.ladders[i], IS(EditorTool::LADDER, i), IMS(EditorTool::LADDER, i));
     for (int i = 0; i < (int)_level.beams.size(); i++)     DrawBeamEnt(_level.beams[i], IS(EditorTool::BEAM, i), IMS(EditorTool::BEAM, i));
@@ -1178,7 +1215,7 @@ void LevelEditor::DrawBrowserUI() {
     DrawRectangle(0, by0, _canvasW, BROWSER_H, { 24,26,36,255 });
     DrawLine(0, by0, _canvasW, by0, { 70,80,110,255 });
     const EditorTool r0[] = { EditorTool::SELECT,EditorTool::PLAYER_SPAWN,EditorTool::REGULUS,EditorTool::CAVE,EditorTool::PLATFORM,EditorTool::LADDER };
-    const EditorTool r1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN };
+    const EditorTool r1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN,EditorTool::ELEVATOR };
     auto DT = [&](int row, int col, int cols, EditorTool t) {
         Rectangle r = BrowserBtn(row, col, cols); bool act = (_tool == t); Color tc = ToolColor(t);
         DrawRectangleRec(r, act ? Color{ (unsigned char)(tc.r / 3),(unsigned char)(tc.g / 3),(unsigned char)(tc.b / 3),255 } : Color{ 30,32,44,255 });
@@ -1187,7 +1224,7 @@ void LevelEditor::DrawBrowserUI() {
         DrawText(nm, (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + r.height / 2 - 5), 10, act ? tc : Color{ 170,175,190,255 });
         };
     for (int c = 0; c < 6; c++) DT(0, c, 6, r0[c]);
-    for (int c = 0; c < 5; c++) DT(1, c, 5, r1[c]);
+    for (int c = 0; c < 6; c++) DT(1, c, 6, r1[c]);
     float sy = (float)(_sh - 18);
     DrawRectangle(0, (int)sy - 2, _canvasW, 20, { 18,20,28,255 });
     const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Menu Tab=Seq";
@@ -1200,23 +1237,131 @@ void LevelEditor::DrawOutliner() {
     DrawRectangleLinesEx(or_, 1, { 55,60,85,255 });
     DrawRectangle((int)or_.x, (int)or_.y, (int)or_.width, 18, { 30,34,50,255 });
     DrawText("OUTLINER", (int)or_.x + 6, (int)or_.y + 3, 11, { 180,185,210,255 });
-    DrawText(TextFormat("%d objects", (int)_outline.size()), (int)or_.x + 80, (int)or_.y + 4, 9, { 100,105,130,255 });
+    DrawText(TextFormat("%d", (int)_outline.size()), (int)or_.x + 80, (int)or_.y + 4, 9, { 100,105,130,255 });
+
+    // Parent-pick mode banner
+    if (_outlParentPick) {
+        DrawRectangle((int)or_.x, (int)or_.y, (int)or_.width, 18, { 60,20,10,255 });
+        DrawText("Click row = set as parent  (ESC=cancel)", (int)or_.x + 4, (int)or_.y + 3, 9, ORANGE);
+    }
+
     int vis = (int)(or_.height - 20) / OUTLINE_ROW;
     Vector2 mp = GetMousePosition();
+
+    // Handle scroll
+    if (CheckCollisionPointRec(mp, or_)) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0) {
+            _outlineScroll = std::max(0, _outlineScroll - (int)wheel);
+            int maxS = std::max(0, (int)_outline.size() - vis);
+            if (_outlineScroll > maxS) _outlineScroll = maxS;
+        }
+    }
+
     for (int r = 0; r < vis; r++) {
         int idx = r + _outlineScroll;
         if (idx >= (int)_outline.size()) break;
         const OutlineRow& row = _outline[idx];
         bool isSel = (row.ent == _sel || IsInMultiSel(row.ent));
-        bool hov = CheckCollisionPointRec(mp, { or_.x + 2,or_.y + 18 + (float)r * OUTLINE_ROW,or_.width - 4,(float)OUTLINE_ROW });
+        bool isCtx = (_outlCtxMenu && _outlCtxRow == idx);
+        bool isDrop = (_outlDragging && _outlDropRow == idx);
+        float indent = row.depth * 12.f;
+        Rectangle rowR = { or_.x + 2, or_.y + 18 + (float)r * OUTLINE_ROW, or_.width - 4, (float)OUTLINE_ROW };
+        bool hov = CheckCollisionPointRec(mp, rowR);
+
+        Color rowBg = isSel ? Color{ 45,55,90,255 }
+            : isCtx ? Color{ 60,40,20,255 }
+            : isDrop ? Color{ 20,60,20,255 }
+            : hov ? Color{ 35,38,55,255 }
+        : Color{ 22,24,34,255 };
         float ry = or_.y + 18 + r * OUTLINE_ROW;
-        Color rowBg = isSel ? Color{ 45,55,90,255 } : hov ? Color{ 35,38,55,255 } : Color{ 22,24,34,255 };
         DrawRectangle((int)or_.x + 2, (int)ry, (int)or_.width - 4, OUTLINE_ROW - 1, rowBg);
-        DrawRectangle((int)or_.x + 2, (int)ry, 3, OUTLINE_ROW - 1, row.color);
-        DrawText(row.icon, (int)or_.x + 8, (int)ry + 3, 9, row.color);
-        DrawText(row.name, (int)or_.x + 38, (int)ry + 3, 10, isSel ? WHITE : Color{ 180,185,210,255 });
-        if (isSel) DrawText("●", (int)(or_.x + or_.width - 14), (int)ry + 3, 9, YELLOW);
+
+        // Depth tree lines
+        if (row.depth > 0) {
+            float lx = or_.x + 4 + indent - 8;
+            DrawLine((int)lx, (int)(ry + 1), (int)lx, (int)(ry + OUTLINE_ROW * 0.6f), { 60,65,90,255 });
+            DrawLine((int)lx, (int)(ry + OUTLINE_ROW * 0.6f), (int)(lx + 7), (int)(ry + OUTLINE_ROW * 0.6f), { 60,65,90,255 });
+        }
+
+        DrawRectangle((int)(or_.x + 2 + indent), (int)ry, 3, OUTLINE_ROW - 1, row.color);
+        DrawText(row.icon, (int)(or_.x + 6 + indent), (int)ry + 3, 9, row.color);
+        DrawText(row.name, (int)(or_.x + 22 + indent), (int)ry + 3, 9, isSel ? WHITE : Color{ 170,175,200,255 });
+
+        // Children indicator
+        if (row.hasChildren)
+            DrawText(">", (int)(or_.x + or_.width - 22), (int)ry + 3, 9, { 120,130,160,255 });
+        // Parent indicator
+        if (GetParent(row.ent).valid())
+            DrawText("c", (int)(or_.x + or_.width - 14), (int)ry + 3, 9, { 255,180,80,200 });
+        if (isSel)
+            DrawText("●", (int)(or_.x + or_.width - 8), (int)ry + 3, 9, YELLOW);
+
+        // Right-click handling: show context menu
+        if (hov && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+            _outlCtxMenu = true; _outlCtxRow = idx;
+        }
+
+        // Left-click: select / parent-pick / drag-start
+        if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (_outlParentPick && !(row.ent == _outlPickTarget)) {
+                SetRelationParent(_outlPickTarget, row.ent);
+                _outlParentPick = false;
+            }
+            else {
+                SelectEnt(row.ent);
+            }
+        }
+
+        // Drag detection for parenting via drag-and-drop
+        if (hov && IsMouseButtonDown(MOUSE_LEFT_BUTTON) && !_outlParentPick) {
+            static int dragStartRow = -1;
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dragStartRow = idx;
+            if (dragStartRow >= 0 && dragStartRow != idx &&
+                fabsf(mp.x - or_.x) < or_.width) {
+                _outlDragging = true; _outlDragRow = dragStartRow; _outlDropRow = idx;
+            }
+        }
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && _outlDragging) {
+            if (_outlDragRow >= 0 && _outlDragRow < (int)_outline.size() &&
+                _outlDropRow >= 0 && _outlDropRow < (int)_outline.size() &&
+                _outlDragRow != _outlDropRow) {
+                SetRelationParent(_outline[_outlDragRow].ent, _outline[_outlDropRow].ent);
+            }
+            _outlDragging = false; _outlDragRow = -1; _outlDropRow = -1;
+        }
     }
+
+    // Context menu popup
+    if (_outlCtxMenu && _outlCtxRow >= 0 && _outlCtxRow < (int)_outline.size()) {
+        SelectedEnt ctxEnt = _outline[_outlCtxRow].ent;
+        float mx = or_.x + 2, my = or_.y + 18 + (_outlCtxRow - _outlineScroll) * OUTLINE_ROW;
+        Rectangle cm = { mx + (float)or_.width * 0.4f, my, 130, 46 };
+        DrawRectangleRec(cm, { 25,28,42,255 });
+        DrawRectangleLinesEx(cm, 1, { 80,85,120,255 });
+
+        // "Attach as child of..." button
+        Rectangle b1 = { cm.x + 2, cm.y + 2, cm.width - 4, 20 };
+        bool h1 = CheckCollisionPointRec(mp, b1);
+        DrawRectangleRec(b1, h1 ? Color{ 45,50,80,255 } : Color{ 32,35,55,255 });
+        DrawText("Attach as child of...", (int)b1.x + 4, (int)b1.y + 4, 9, WHITE);
+
+        // "Detach from parent" button
+        Rectangle b2 = { cm.x + 2, cm.y + 24, cm.width - 4, 20 };
+        bool h2 = CheckCollisionPointRec(mp, b2);
+        DrawRectangleRec(b2, h2 ? Color{ 45,50,80,255 } : Color{ 32,35,55,255 });
+        DrawText("Detach from parent", (int)b2.x + 4, (int)b2.y + 4, 9,
+            GetParent(ctxEnt).valid() ? WHITE : Color{ 80,85,110,255 });
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            if (h1) { _outlParentPick = true; _outlPickTarget = ctxEnt; _outlCtxMenu = false; SetStatus("Click the parent entity in the outliner."); }
+            else if (h2 && GetParent(ctxEnt).valid()) { RemoveRelation(ctxEnt); _outlCtxMenu = false; }
+            else _outlCtxMenu = false;
+        }
+        if (IsKeyPressed(KEY_ESCAPE)) _outlCtxMenu = false;
+    }
+
+    // Scroll bar
     if ((int)_outline.size() > vis) {
         float frac = (float)vis / _outline.size();
         float pos2 = (float)_outlineScroll / _outline.size();
@@ -1252,6 +1397,7 @@ void LevelEditor::DrawDataPanel() {
         : (_sel.type == (int)EditorTool::NUKE_SPAWN) ? _level.nukeSpawns[_sel.index].x
         : (_sel.type == (int)EditorTool::BEATRICE_SPAWN) ? _level.beatriceSpawns[_sel.index].x
         : (_sel.type == (int)EditorTool::ENEMY_SPAWN) ? _level.enemySpawns[_sel.index].x
+        : (_sel.type == (int)EditorTool::ELEVATOR) ? _level.elevators[_sel.index].x
         : (_sel.type == (int)EditorTool::PLAYER_SPAWN) ? _level.playerSpawn.x
         : (_sel.type == (int)EditorTool::REGULUS) ? _level.regulusPos.x
         : _level.cavePos.x;
@@ -1262,11 +1408,43 @@ void LevelEditor::DrawDataPanel() {
         : (_sel.type == (int)EditorTool::NUKE_SPAWN) ? _level.nukeSpawns[_sel.index].y
         : (_sel.type == (int)EditorTool::BEATRICE_SPAWN) ? _level.beatriceSpawns[_sel.index].y
         : (_sel.type == (int)EditorTool::ENEMY_SPAWN) ? _level.enemySpawns[_sel.index].y
+        : (_sel.type == (int)EditorTool::ELEVATOR) ? _level.elevators[_sel.index].y
         : (_sel.type == (int)EditorTool::PLAYER_SPAWN) ? _level.playerSpawn.y
         : (_sel.type == (int)EditorTool::REGULUS) ? _level.regulusPos.y
         : _level.cavePos.y;
     if (NumField("X ", refX, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
     if (NumField("Y ", refY, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
+    // ── Elevator-specific properties ─────────────────────────────────────────
+    if (_sel.type == (int)EditorTool::ELEVATOR && _sel.index < (int)_level.elevators.size()) {
+        auto& el = _level.elevators[_sel.index];
+        SectionHeader("── Elevator ────────────────");
+        if (NumField("H  ", el.h, 2.f, 32, 2000, px, cy, fw)) {} cy += rowH;
+        if (NumField("W  ", el.w, 1.f, 16, 200, px, cy, fw)) {} cy += rowH;
+        if (NumField("Spd", el.speed, 2.f, 10, 600, px, cy, fw)) {} cy += rowH;
+        float bw2 = (fw - 4) / 2.f;
+        Rectangle rUp = { px,           cy, bw2, 18 };
+        Rectangle rDwn = { px + bw2 + 4, cy, bw2, 18 };
+        bool hUp = CheckCollisionPointRec(GetMousePosition(), rUp);
+        bool hDwn = CheckCollisionPointRec(GetMousePosition(), rDwn);
+        DrawRectangleRec(rUp, el.direction == 1 ? Color{ 20,100,40,255 } : (hUp ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+        DrawRectangleRec(rDwn, el.direction == -1 ? Color{ 100,40,20,255 } : (hDwn ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+        DrawText("▲ UP", (int)(rUp.x + 4), (int)cy + 4, 9, el.direction == 1 ? WHITE : Color{ 140,145,170,255 });
+        DrawText("▼ DOWN", (int)(rDwn.x + 4), (int)cy + 4, 9, el.direction == -1 ? WHITE : Color{ 140,145,170,255 });
+        if (hUp && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction = 1; }
+        if (hDwn && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction = -1; }
+        cy += 22;
+        SectionHeader("── Children ────────────────");
+        SelectedEnt elEnt = { (int)EditorTool::ELEVATOR, _sel.index };
+        auto ch = GetChildren(elEnt);
+        if (ch.empty()) {
+            DrawText("No children. Right-click items in", (int)px, (int)cy, 9, { 80,85,110,255 }); cy += 11;
+            DrawText("outliner to attach.", (int)px, (int)cy, 9, { 80,85,110,255 }); cy += 14;
+        }
+        for (const auto& ce : ch) {
+            DrawText(TextFormat("  • %s %d", ToolName((EditorTool)ce.type), ce.index),
+                (int)px, (int)cy, 9, ToolColor((EditorTool)ce.type)); cy += 12;
+        }
+    }
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Rotation ───────────────");
         auto& p = _level.platforms[_sel.index];
@@ -1945,5 +2123,275 @@ void LevelEditor::DrawSequencer()
     else {
         DrawText("SPACE=play/pause  S=keyframe  Del=remove  RMB+drag=pan  MWheel=scroll  Ctrl+Wheel or MMB=zoom  I/O=in-out points",
             SEQ_BW + 4, _sh - 13, 9, { 80,85,110,255 });
+    }
+}
+// =============================================================================
+//  ELEVATOR ENTITY
+// =============================================================================
+
+Rectangle LevelEditor::ElevRect(const ElevatorData& el) const
+{
+    return { el.x, el.y, el.w, el.h };
+}
+
+void LevelEditor::DrawElevatorEnt(const ElevatorData& el, bool sel, bool msel) const
+{
+    const float sc = 4.f;
+    Color bc = sel ? YELLOW : (msel ? Color{ 255,200,0,240 } : Color{ 255,140,50,220 });
+
+    // Draw rope texture tiled + panned in the elevator's direction
+    if (_ropeTex && _ropeTex->id > 0) {
+        float tw = _ropeTex->width * sc;
+        float th = _ropeTex->height * sc;
+        float drawX = el.x + el.w * 0.5f - tw * 0.5f;
+
+        // Pan offset: direction=1 (UP) scrolls texture upward, -1 (DOWN) downward.
+        // Using GetTime() gives a continuous preview animation in the editor.
+        float rawPan = (float)GetTime() * el.speed * (el.direction == 1 ? 1.f : -1.f);
+        float panOff = fmodf(rawPan, th);
+        if (panOff < 0.f) panOff += th;
+
+        // Start one full tile above the shaft top so the moving seam stays hidden.
+        float startY = el.y - th + panOff;
+
+        for (float y = startY; y < el.y + el.h; y += th) {
+            // Clip each tile to [el.y, el.y+el.h] by trimming the source rect.
+            float dy = fmaxf(y, el.y);
+            float dyEnd = fminf(y + th, el.y + el.h);
+            if (dy >= dyEnd) continue;
+            float srcYOff = (dy - y) / sc;          // pixels into the source tile
+            float srcH = (dyEnd - dy) / sc;
+            DrawTexturePro(*_ropeTex,
+                { 0, srcYOff, (float)_ropeTex->width, srcH },
+                { drawX, dy, tw, dyEnd - dy },
+                {}, 0.f, WHITE);
+        }
+    }
+
+    // Shaft background
+    DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h,
+        sel ? Color{ 255,160,50,35 } : Color{ 255,120,30,20 });
+    DrawRectangleLinesEx({ el.x, el.y, el.w, el.h }, sel ? 2.f : 1.5f, bc);
+
+    // Direction arrow in centre
+    float cx = el.x + el.w * 0.5f;
+    float cy = el.y + el.h * 0.5f;
+    float ay = (el.direction == 1) ? -14.f : 14.f;
+    DrawTriangle({ cx - 7, cy - ay * 0.4f },
+        { cx + 7, cy - ay * 0.4f },
+        { cx,     cy + ay },
+        bc);
+
+    // Speed + direction label
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%.0fpx/s %s", el.speed, el.direction == 1 ? "UP" : "DN");
+    DrawText(buf, (int)el.x + 2, (int)(el.y + el.h + 2), 9, bc);
+
+    // Highlight children attached to this elevator
+    SelectedEnt e = { (int)EditorTool::ELEVATOR, (int)(&el - _level.elevators.data()) };
+    for (const auto& rel : _level.relations) {
+        if (!(rel.parent == e)) continue;
+        Vector2 childPos = GetEntPos(rel.child);
+        DrawLineEx({ cx, el.y + el.h * 0.5f }, childPos, 1.f, { 255,180,80,120 });
+    }
+}
+
+// =============================================================================
+//  PARENT-CHILD SYSTEM
+// =============================================================================
+
+SelectedEnt LevelEditor::GetParent(SelectedEnt e) const
+{
+    for (const auto& rel : _level.relations)
+        if (rel.child == e) return rel.parent;
+    return {};
+}
+
+std::vector<SelectedEnt> LevelEditor::GetChildren(SelectedEnt e) const
+{
+    std::vector<SelectedEnt> out;
+    for (const auto& rel : _level.relations)
+        if (rel.parent == e) out.push_back(rel.child);
+    return out;
+}
+
+bool LevelEditor::IsAncestor(SelectedEnt anc, SelectedEnt e) const
+{
+    // Walk up e's parent chain to see if anc appears (cycle guard)
+    SelectedEnt cur = GetParent(e);
+    int limit = 32;
+    while (cur.valid() && limit-- > 0) {
+        if (cur == anc) return true;
+        cur = GetParent(cur);
+    }
+    return false;
+}
+
+void LevelEditor::SetRelationParent(SelectedEnt child, SelectedEnt parent)
+{
+    if (!child.valid() || !parent.valid()) return;
+    if (child == parent) return;
+    if (IsAncestor(child, parent)) { SetStatus("Cannot parent: would create a cycle."); return; }
+
+    PushUndo();
+    // Remove any existing parent for this child
+    _level.relations.erase(std::remove_if(_level.relations.begin(), _level.relations.end(),
+        [&child](const ParentChildRelation& r) { return r.child == child; }),
+        _level.relations.end());
+
+    ParentChildRelation rel;
+    rel.parent = parent;
+    rel.child = child;
+    // Offset = current child pos relative to parent pos
+    Vector2 cp = GetEntPos(child), pp = GetEntPos(parent);
+    rel.offsetX = cp.x - pp.x;
+    // For elevator children, offsetY = progress along shaft (0=top,h=bottom)
+    if (parent.type == (int)EditorTool::ELEVATOR && parent.index < (int)_level.elevators.size())
+        rel.offsetY = cp.y - _level.elevators[parent.index].y;
+    else
+        rel.offsetY = cp.y - pp.y;
+    _level.relations.push_back(rel);
+    SetStatus(TextFormat("Parented %s %d → %s %d",
+        ToolName((EditorTool)child.type), child.index,
+        ToolName((EditorTool)parent.type), parent.index));
+}
+
+void LevelEditor::RemoveRelation(SelectedEnt child)
+{
+    PushUndo();
+    _level.relations.erase(std::remove_if(_level.relations.begin(), _level.relations.end(),
+        [&child](const ParentChildRelation& r) { return r.child == child; }),
+        _level.relations.end());
+    SetStatus("Detached from parent.");
+}
+
+void LevelEditor::DeleteRelationsFor(SelectedEnt e)
+{
+    // Remove any relation where e is parent or child
+    _level.relations.erase(std::remove_if(_level.relations.begin(), _level.relations.end(),
+        [&e](const ParentChildRelation& r) { return r.parent == e || r.child == e; }),
+        _level.relations.end());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  BuildOutline — tree version with depth indentation
+// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::BuildOutlineTree(SelectedEnt e, int depth)
+{
+    // Find the icon/color for this entity
+    EditorTool t = (EditorTool)e.type;
+    const char* icons[] = { "[S]","[P]","[R]","[C]","[=]","[|]","[-]","[o]","[N]","[B]","[E]","[^]" };
+    const char* icon = (e.type >= 0 && e.type < 12) ? icons[e.type] : "[?]";
+    Color col = ToolColor(t);
+
+    OutlineRow row;
+    row.ent = e;
+    row.icon = icon;
+    row.color = col;
+    row.depth = depth;
+    if (e.index >= 0) snprintf(row.name, sizeof(row.name), "%s %d", ToolName(t), e.index);
+    else              snprintf(row.name, sizeof(row.name), "%s", ToolName(t));
+
+    auto children = GetChildren(e);
+    row.hasChildren = !children.empty();
+    _outline.push_back(row);
+
+    for (const auto& ch : children)
+        BuildOutlineTree(ch, depth + 1);
+}
+
+// Override the old flat BuildOutline to use tree
+// (replaces the method already in the file but since we can't easily remove it,
+//  we override by calling the tree builder from Update — see note below)
+// The actual BuildOutline() in the file is called from Update(), so we patch it
+// to call the tree builder instead. Do that by appending a wrapper that replaces
+// the call in Update.
+
+// =============================================================================
+//  AUDIO TRACK HELPERS  (declarations in LevelEditor.h, implemented here)
+// =============================================================================
+
+Rectangle LevelEditor::SeqAudioRowRect() const
+{
+    // Audio strip sits directly below the last track row in the timeline panel.
+    Rectangle tl = SeqTimelineRect();
+    int trackCount = (_activeSeq >= 0 && _activeSeq < (int)_seqList.size())
+        ? (int)_seqList[_activeSeq].tracks.size() : 0;
+    float y = tl.y + SEQ_RH + trackCount * SEQ_TH;
+    return { (float)SEQ_BW, y, (float)(_canvasW - SEQ_BW), SEQ_AUDIO_H };
+}
+
+void LevelEditor::SeqEnsureAudio(int idx)
+{
+    // Grow _seqAudio to at least idx+1 entries (parallel to _seqList).
+    while ((int)_seqAudio.size() <= idx)
+        _seqAudio.push_back(SeqAudio{});
+}
+
+void LevelEditor::SeqUnloadAudio(int idx)
+{
+    if (idx < 0 || idx >= (int)_seqAudio.size()) return;
+    SeqAudio& sa = _seqAudio[idx];
+    if (sa.loaded) {
+        StopMusicStream(sa.music);
+        UnloadMusicStream(sa.music);
+        sa.loaded = false;
+        sa.path[0] = '\0';
+    }
+}
+
+void LevelEditor::SeqLoadAudioFile(int idx, const char* path)
+{
+    SeqEnsureAudio(idx);
+    SeqUnloadAudio(idx);
+    SeqAudio& sa = _seqAudio[idx];
+    snprintf(sa.path, sizeof(sa.path), "%s", path);
+    sa.music = LoadMusicStream(path);
+    sa.loaded = (sa.music.stream.buffer != nullptr);
+    if (sa.loaded) SetStatus(TextFormat("Audio loaded: %s", path));
+    else           SetStatus(TextFormat("Failed to load audio: %s", path));
+}
+
+void LevelEditor::DrawSeqAudioBar()
+{
+    if (_activeSeq < 0 || _activeSeq >= (int)_seqList.size()) return;
+
+    Rectangle ar = SeqAudioRowRect();
+    DrawRectangleRec(ar, { 18, 20, 30, 255 });
+    DrawRectangleLinesEx(ar, 1, { 55, 60, 85, 255 });
+
+    SeqEnsureAudio(_activeSeq);
+    const SeqAudio& sa = _seqAudio[_activeSeq];
+
+    // Header column
+    Rectangle hdr = { ar.x, ar.y, (float)SEQ_HDR, ar.height };
+    DrawRectangleRec(hdr, { 22, 24, 36, 255 });
+    DrawRectangle((int)hdr.x, (int)hdr.y, 3, (int)hdr.height, { 100, 150, 255, 255 });
+    DrawText("AUDIO", (int)(hdr.x + 6), (int)(hdr.y + 6), 9, { 140, 160, 220, 255 });
+
+    // File label / drop zone
+    Rectangle dropZone = { ar.x + SEQ_HDR, ar.y, ar.width - SEQ_HDR, ar.height };
+    bool hov = CheckCollisionPointRec(GetMousePosition(), dropZone);
+    DrawRectangleRec(dropZone, hov ? Color{ 28, 34, 52, 255 } : Color{ 20, 22, 34, 255 });
+
+    if (sa.loaded && sa.path[0] != '\0') {
+        // Show filename and a simple duration bar
+        const char* fname = GetFileName(sa.path);
+        DrawText(fname, (int)(dropZone.x + 6), (int)(dropZone.y + 6), 9, { 160, 200, 255, 255 });
+
+        // If playing, show position indicator
+        if (_seqPlaying && sa.loaded) {
+            float dur = GetMusicTimeLength(sa.music);
+            float pos = GetMusicTimePlayed(sa.music);
+            if (dur > 0.f) {
+                float barW = dropZone.width * (pos / dur);
+                DrawRectangle((int)dropZone.x, (int)(dropZone.y + dropZone.height - 3),
+                    (int)barW, 3, { 80, 160, 255, 200 });
+            }
+        }
+    }
+    else {
+        DrawText("Drag audio file here or click to browse", (int)(dropZone.x + 6),
+            (int)(dropZone.y + 6), 9, { 80, 90, 120, 255 });
     }
 }

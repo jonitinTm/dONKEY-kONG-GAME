@@ -14,24 +14,25 @@ enum class EditorTool : int {
     SELECT = 0, PLAYER_SPAWN, REGULUS, CAVE,
     PLATFORM, LADDER, BEAM, PATH_NODE,
     NUKE_SPAWN, BEATRICE_SPAWN, ENEMY_SPAWN,
+    ELEVATOR,        // NEW
     TOOL_COUNT
 };
 enum class GizmoMode { SELECT = 0, MOVE, ROTATE, SCALE };
 enum class GizmoAxis { NONE, X, Y, FREE, RING };
 enum class ConnectMode { NONE, NEXT0, NEXT1 };
 
-struct SelectedEnt {
-    int type = -1, index = -1;
-    bool valid()  const { return type >= 0 && index >= 0; }
-    void clear() { type = -1; index = -1; }
-    bool operator==(const SelectedEnt& o) const { return type == o.type && index == o.index; }
-};
+// SelectedEnt is identical to EntityRef (defined in LevelData.h).
+// Using an alias keeps ParentChildRelation and the editor working with the same type,
+// eliminating all EntityRef/SelectedEnt conversion and == operator errors.
+using SelectedEnt = EntityRef;
 
 struct OutlineRow {
     SelectedEnt ent;
     const char* icon;
     char        name[48];
     Color       color;
+    int         depth = 0;    // indentation level
+    bool        hasChildren = false;
 };
 
 class LevelEditor
@@ -51,10 +52,12 @@ public:
     void ClearFlags() { _wantsMenu = false; _wantsPlay = false; }
 
     void SetGameTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder,
-        Texture2D* player, Texture2D* regulus, Texture2D* cave)
+        Texture2D* player, Texture2D* regulus, Texture2D* cave,
+        Texture2D* rope = nullptr)
     {
         _bgTex = bg; _beamTex = beam; _ladderTex = ladder;
         _playerTex = player; _regulusTex = regulus; _caveTex = cave;
+        _ropeTex = rope;
     }
     void SetTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder)
     {
@@ -112,6 +115,7 @@ private:
     Texture2D* _playerTex = nullptr;
     Texture2D* _regulusTex = nullptr;
     Texture2D* _caveTex = nullptr;
+    Texture2D* _ropeTex = nullptr;
 
     // ── Tool / gizmo state ────────────────────────────────────────────────────
     EditorTool  _tool = EditorTool::SELECT;
@@ -156,6 +160,15 @@ private:
 
     std::vector<OutlineRow> _outline;
     int _outlineScroll = 0;
+
+    // Outliner parent-child interaction
+    bool _outlCtxMenu = false;   // context menu visible
+    int  _outlCtxRow = -1;      // which row was right-clicked
+    bool _outlParentPick = false;   // "pick a parent" mode active
+    SelectedEnt _outlPickTarget = {};  // child waiting for a parent
+    bool _outlDragging = false;   // row being dragged
+    int  _outlDragRow = -1;
+    int  _outlDropRow = -1;
 
     bool    _fieldDrag = false;
     float* _fieldPtr = nullptr;
@@ -309,6 +322,19 @@ private:
 
     bool NumField(const char* label, float& val, float sens,
         float minV, float maxV, float x, float y, float fw);
+
+    // Parent-child helpers
+    SelectedEnt GetParent(SelectedEnt e)              const;
+    std::vector<SelectedEnt> GetChildren(SelectedEnt e) const;
+    void SetRelationParent(SelectedEnt child, SelectedEnt parent);
+    void RemoveRelation(SelectedEnt child);
+    void DeleteRelationsFor(SelectedEnt e);   // on entity delete
+    bool IsAncestor(SelectedEnt anc, SelectedEnt e) const;  // cycle guard
+    void BuildOutlineTree(SelectedEnt e, int depth);         // recursive
+
+    // Elevator draw helper
+    void DrawElevatorEnt(const ElevatorData& el, bool sel, bool msel) const;
+    Rectangle ElevRect(const ElevatorData& el) const;
 
     Rectangle  BrowserBtn(int row, int col, int cols) const;
     static const char* ToolName(EditorTool t);
