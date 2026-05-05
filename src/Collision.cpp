@@ -59,15 +59,23 @@ CollisionResult CollisionManager::Resolve(
     Vector2 TL = corners[0], TR = corners[1], BR = corners[2], BL = corners[3];
 
     // ── Broad-phase AABB ──────────────────────────────────────────────────────
-    float pMinX = fminf(TL.x, BL.x);          // left edge (always x)
-    float pMaxX = fmaxf(TR.x, BR.x);          // right edge (always x+w)
-    float pMinY = fminf(TL.y, TR.y);          // top of bounding box
-    float pMaxY = fmaxf(BL.y, BR.y);          // bottom of bounding box
+    float pMinX = fminf(TL.x, BL.x);
+    float pMaxX = fmaxf(TR.x, BR.x);
+    float pMinY = fminf(TL.y, TR.y);   // top of platform bounding box
+    float pMaxY = fmaxf(BL.y, BR.y);   // bottom of platform bounding box
 
-    if (player.x + player.width <= pMinX) return result;
-    if (player.x >= pMaxX) return result;
-    if (player.y + player.height <= pMinY) return result;
-    if (player.y >= pMaxY) return result;
+    float playerBot = player.y + player.height;
+    float playerTop = player.y;
+    float playerLeft = player.x;
+    float playerRight = player.x + player.width;
+
+    // Reject if no horizontal overlap
+    if (playerRight <= pMinX) return result;
+    if (playerLeft >= pMaxX) return result;
+    // Reject if player is entirely below the platform (can't land on top)
+    if (playerTop >= pMaxY) return result;
+    // Reject if player bottom hasn't reached the platform top yet
+    if (playerBot <= pMinY) return result;
 
     // ── Player bottom-edge sample points ─────────────────────────────────────
     Vector2 curBotL = { player.x,               player.y + player.height };

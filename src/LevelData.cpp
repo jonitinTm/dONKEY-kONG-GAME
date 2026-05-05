@@ -84,7 +84,7 @@ bool SaveLevel(const LevelData& lv, const char* folder)
 
     for (const auto& kz : lv.killZones)
         fprintf(f, "KILL_ZONE %.2f %.2f %.2f %.2f %d %.2f\n",
-            kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.tilt);
+            kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.rotation);
 
     fclose(f);
     return true;
@@ -172,8 +172,8 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         }
         else if (strcmp(tag, "KILL_ZONE") == 0) {
             KillZoneData kz; int texId = 0;
-            int parsed = fscanf(f, "%f %f %f %f %d %f", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.tilt);
-            if (parsed < 6) kz.tilt = 0.f;   // backward-compat: old files have no tilt
+            int parsed = fscanf(f, "%f %f %f %f %d %f", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.rotation);
+            if (parsed < 6) kz.rotation = 0.f;  // backward-compat: old files have no rotation
             kz.texId = (KillZoneTexture)texId;
             out.killZones.push_back(kz);
         }

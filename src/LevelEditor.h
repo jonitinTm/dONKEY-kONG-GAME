@@ -189,6 +189,18 @@ private:
     char  _status[256] = {};
     float _statusTimer = 0.f;
 
+    // ── Properties clipboard (UE-style copy/paste) ────────────────────────────
+    struct PropClipboard {
+        int          type = -1;   // EditorTool int, -1 = empty
+        PlatformData plat = {};
+        LadderData   lad = {};
+        KillZoneData kz = {};
+        WinZoneData  wz = {};
+        ElevatorData elev = {};
+    } _propClip;
+    void CopyProps();
+    void PasteProps();
+
     // ─────────────────────────────────────────────────────────────────────────
     // Cinematic Sequencer state
     // ─────────────────────────────────────────────────────────────────────────

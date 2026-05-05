@@ -54,7 +54,7 @@ struct KillZoneData {
     float          y = 0.f;
     float          w = 64.f;
     float          h = 64.f;
-    float          tilt = 0.f;           // rotation in degrees (shear model, like platforms)
+    float          rotation = 0.f;       // true rotation in degrees (0/90/180/270)
     KillZoneTexture texId = KillZoneTexture::NONE;
 };
 

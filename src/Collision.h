@@ -31,6 +31,8 @@ struct Platform
     static Platform Make(float x, float y, float w, float h,
         float tiltDeg = 0.f, Color col = DARKBROWN)
     {
+        // Mirror the editor: h==0 means "thin floor", drawn/collided as 12px tall.
+        if (h <= 0.f) h = 12.f;
         return { x, y, w, h, tiltDeg, col };
     }
 

@@ -756,48 +756,52 @@ bool LevelEditor::NumField(const char* label, float& val, float sens, float minV
 // ─────────────────────────────────────────────────────────────────────────────
 void LevelEditor::UpdateToolbar() {
     bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-    if (ctrl && IsKeyPressed(KEY_S)) SaveCurrentLevel();
-    if (ctrl && IsKeyPressed(KEY_Z)) Undo();
-    if (ctrl && IsKeyPressed(KEY_Y)) Redo();
-    if (ctrl && IsKeyPressed(KEY_C)) CopySelected();
-    if (ctrl && IsKeyPressed(KEY_V)) PasteClipboard(true);
-    if (ctrl && IsKeyPressed(KEY_D)) DuplicateSelected();
+    // While a NumField is in text-entry mode, suppress ALL editor hotkeys so
+    // typed characters (G, S, R, Delete, Backspace, Tab, etc.) go to the field.
+    if (!_fieldTyping) {
+        if (ctrl && IsKeyPressed(KEY_S)) SaveCurrentLevel();
+        if (ctrl && IsKeyPressed(KEY_Z)) Undo();
+        if (ctrl && IsKeyPressed(KEY_Y)) Redo();
+        if (ctrl && IsKeyPressed(KEY_C)) CopySelected();
+        if (ctrl && IsKeyPressed(KEY_V)) PasteClipboard(true);
+        if (ctrl && IsKeyPressed(KEY_D)) DuplicateSelected();
 
-    if (IsKeyPressed(KEY_H)) { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
-    if (IsKeyPressed(KEY_G) && _tool == EditorTool::SELECT && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::MOVE);
+        if (IsKeyPressed(KEY_H)) { _gridOn = !_gridOn; SetStatus(_gridOn ? "Grid ON" : "Grid OFF"); }
+        if (IsKeyPressed(KEY_G) && _tool == EditorTool::SELECT && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::MOVE);
 
-    if (IsKeyPressed(KEY_ONE) || IsKeyPressed(KEY_Q)) { _gizmo = GizmoMode::SELECT; _tool = EditorTool::SELECT; SetStatus("1/Q: SELECT mode"); }
-    if (IsKeyPressed(KEY_TWO) || IsKeyPressed(KEY_W)) { _gizmo = GizmoMode::MOVE;  _tool = EditorTool::SELECT; SetStatus("2/W: MOVE gizmo"); }
-    if (IsKeyPressed(KEY_THREE) || IsKeyPressed(KEY_E)) { _gizmo = GizmoMode::ROTATE; _tool = EditorTool::SELECT; SetStatus("3/E: ROTATE gizmo"); }
-    if (IsKeyPressed(KEY_FOUR)) { _gizmo = GizmoMode::SCALE; _tool = EditorTool::SELECT; SetStatus("4: SCALE gizmo"); }
-    if (IsKeyPressed(KEY_R) && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::ROTATE);
+        if (IsKeyPressed(KEY_ONE) || IsKeyPressed(KEY_Q)) { _gizmo = GizmoMode::SELECT; _tool = EditorTool::SELECT; SetStatus("1/Q: SELECT mode"); }
+        if (IsKeyPressed(KEY_TWO) || IsKeyPressed(KEY_W)) { _gizmo = GizmoMode::MOVE;  _tool = EditorTool::SELECT; SetStatus("2/W: MOVE gizmo"); }
+        if (IsKeyPressed(KEY_THREE) || IsKeyPressed(KEY_E)) { _gizmo = GizmoMode::ROTATE; _tool = EditorTool::SELECT; SetStatus("3/E: ROTATE gizmo"); }
+        if (IsKeyPressed(KEY_FOUR)) { _gizmo = GizmoMode::SCALE; _tool = EditorTool::SELECT; SetStatus("4: SCALE gizmo"); }
+        if (IsKeyPressed(KEY_R) && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::ROTATE);
 
-    if (IsKeyPressed(KEY_S) && !ctrl && _directOp == DirectOp::NONE) {
-        if (_seqOpen && _activeSeq >= 0 && _sel.valid()) SeqAddKeyframe();
-        else StartDirectOp(DirectOp::SCALE);
-    }
-
-    if (_directOp == DirectOp::NONE) {
-        if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
-            _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
-        if (IsKeyPressed(KEY_ESCAPE)) {
-            _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT; _gizmo = GizmoMode::SELECT;
-            _sel.clear(); _multiSel.clear(); _boxSelecting = false; _gizmoDragging = false;
-            SetStatus("Cancelled.");
+        if (IsKeyPressed(KEY_S) && !ctrl && _directOp == DirectOp::NONE) {
+            if (_seqOpen && _activeSeq >= 0 && _sel.valid()) SeqAddKeyframe();
+            else StartDirectOp(DirectOp::SCALE);
         }
-        if (IsKeyPressed(KEY_TAB)) {
-            _seqOpen = !_seqOpen;
-            if (!_seqOpen) SeqPreviewStop();
-            SeqLoad();
-            SetStatus(_seqOpen ? "Sequencer open (Tab to close)  SPACE=play  S=keyframe  RMB=pan  MWheel=zoom" : "Sequencer closed");
+
+        if (_directOp == DirectOp::NONE) {
+            if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
+                _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT; _gizmo = GizmoMode::SELECT;
+                _sel.clear(); _multiSel.clear(); _boxSelecting = false; _gizmoDragging = false;
+                SetStatus("Cancelled.");
+            }
+            if (IsKeyPressed(KEY_TAB)) {
+                _seqOpen = !_seqOpen;
+                if (!_seqOpen) SeqPreviewStop();
+                SeqLoad();
+                SetStatus(_seqOpen ? "Sequencer open (Tab to close)  SPACE=play  S=keyframe  RMB=pan  MWheel=zoom" : "Sequencer closed");
+            }
+            if (IsKeyPressed(KEY_LEFT_BRACKET)) { _gridDiv = (_gridDiv == 1) ? 4 : (_gridDiv == 4 ? 2 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
+            if (IsKeyPressed(KEY_RIGHT_BRACKET)) { _gridDiv = (_gridDiv == 1) ? 2 : (_gridDiv == 2 ? 4 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
+            if (!ctrl) {
+                if (IsKeyPressed(KEY_LEFT) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
+                if (IsKeyPressed(KEY_RIGHT) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(_levelId + 1); }
+            }
         }
-        if (IsKeyPressed(KEY_LEFT_BRACKET)) { _gridDiv = (_gridDiv == 1) ? 4 : (_gridDiv == 4 ? 2 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
-        if (IsKeyPressed(KEY_RIGHT_BRACKET)) { _gridDiv = (_gridDiv == 1) ? 2 : (_gridDiv == 2 ? 4 : 1); SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
-        if (!ctrl) {
-            if (IsKeyPressed(KEY_LEFT) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
-            if (IsKeyPressed(KEY_RIGHT) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(_levelId + 1); }
-        }
-    }
+    } // end !_fieldTyping
 
     if (!IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || !InToolbar()) return;
     Vector2 mouse = GetMousePosition();
@@ -1602,6 +1606,21 @@ void LevelEditor::DrawDataPanel() {
         auto& p = _level.platforms[_sel.index];
         if (NumField("W  ", p.w, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
         if (NumField("H  ", p.h, .5f, 0, 200, px, cy, fw)) {} cy += rowH;
+        {
+            float hw = (fw - 3) * 0.5f;
+            Rectangle cpR = { px, cy, hw, 15 }, ppR = { px + hw + 3, cy, hw, 15 };
+            bool cpH = CheckCollisionPointRec(GetMousePosition(), cpR);
+            bool ppH = CheckCollisionPointRec(GetMousePosition(), ppR);
+            bool canPaste = (_propClip.type == (int)EditorTool::PLATFORM);
+            DrawRectangleRec(cpR, cpH ? Color{ 50,80,50,255 } : Color{ 30,50,30,255 }); DrawRectangleLinesEx(cpR, 1, { 60,160,60,255 });
+            DrawText("Cpy Props", (int)(cpR.x + 2), (int)(cpR.y + 2), 9, { 120,220,120,255 });
+            DrawRectangleRec(ppR, canPaste ? (ppH ? Color{ 60,50,20,255 } : Color{ 40,35,15,255 }) : Color{ 25,28,38,255 });
+            DrawRectangleLinesEx(ppR, 1, canPaste ? Color{ 220,180,60,255 } : Color{ 50,55,70,255 });
+            DrawText("Pst Props", (int)(ppR.x + 2), (int)(ppR.y + 2), 9, canPaste ? Color{ 220,180,60,255 } : Color{ 80,85,100,255 });
+            if (cpH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) CopyProps();
+            if (ppH && canPaste && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); PasteProps(); }
+            cy += 18;
+        }
     }
     else if (_sel.type == (int)EditorTool::LADDER) {
         SectionHeader("── Scale ──────────────────");
@@ -1623,15 +1642,17 @@ void LevelEditor::DrawDataPanel() {
         if (NumField("W  ", kz.w, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
         if (NumField("H  ", kz.h, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
         SectionHeader("── Rotation ───────────────");
-        if (NumField("Tilt", kz.tilt, .3f, -89, 89, px, cy, fw)) {} cy += rowH;
+        if (NumField("Rot", kz.rotation, 1.f, -360, 360, px, cy, fw)) {} cy += rowH;
         float bw2kz = (fw - 4) / 4.f;
-        const float kzPresets[] = { -45,-15,15,45 }; const char* kzLabels[] = { "-45","-15","15","45" };
+        const float kzPresets[] = { 0.f, 90.f, 180.f, 270.f }; const char* kzLabels[] = { "0Â°", "90Â°", "180Â°", "270Â°" };
         for (int pi = 0; pi < 4; pi++) {
             Rectangle br = { px + pi * (bw2kz + 1),cy,bw2kz,14 };
             bool hov = CheckCollisionPointRec(GetMousePosition(), br);
-            DrawRectangleRec(br, hov ? Color{ 60,65,90,255 } : Color{ 35,38,55,255 });
-            int tw = MeasureText(kzLabels[pi], 9); DrawText(kzLabels[pi], (int)(br.x + br.width / 2 - tw / 2), (int)br.y + 2, 9, { 180,185,210,255 });
-            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); kz.tilt = kzPresets[pi]; }
+            bool isAct = (fabsf(kz.rotation - kzPresets[pi]) < 0.5f);
+            DrawRectangleRec(br, isAct ? Color{ 60,40,10,255 } : (hov ? Color{ 60,65,90,255 } : Color{ 35,38,55,255 }));
+            DrawRectangleLinesEx(br, 1.f, isAct ? Color{ 255,200,80,255 } : Color{ 55,60,85,255 });
+            int tw = MeasureText(kzLabels[pi], 9); DrawText(kzLabels[pi], (int)(br.x + br.width / 2 - tw / 2), (int)br.y + 2, 9, isAct ? Color{ 255,200,80,255 } : Color{ 180,185,210,255 });
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); kz.rotation = kzPresets[pi]; }
         }
         cy += 17;
         SectionHeader("── Texture ────────────────");
@@ -1654,8 +1675,24 @@ void LevelEditor::DrawDataPanel() {
             float sw2 = fminf(fw, 40.f), sh2 = sw2;
             DrawTexturePro(*_goldenPistonTex,
                 { 0, 0, (float)_goldenPistonTex->width, (float)_goldenPistonTex->height },
-                { px, cy, sw2, sh2 }, {}, 0.f, WHITE);
+                { px, cy, sw2, sh2 }, {}, kz.rotation, WHITE);
             cy += sh2 + 4;
+        }
+        // ── Copy / Paste props ────────────────────────────────────────────────
+        {
+            float hw = (fw - 3) * 0.5f;
+            Rectangle cpR = { px, cy, hw, 15 }, ppR = { px + hw + 3, cy, hw, 15 };
+            bool cpH = CheckCollisionPointRec(GetMousePosition(), cpR);
+            bool ppH = CheckCollisionPointRec(GetMousePosition(), ppR);
+            bool canPaste = (_propClip.type == (int)EditorTool::KILL_ZONE);
+            DrawRectangleRec(cpR, cpH ? Color{ 50,80,50,255 } : Color{ 30,50,30,255 }); DrawRectangleLinesEx(cpR, 1, { 60,160,60,255 });
+            DrawText("Cpy Props", (int)(cpR.x + 2), (int)(cpR.y + 2), 9, { 120,220,120,255 });
+            DrawRectangleRec(ppR, canPaste ? (ppH ? Color{ 60,50,20,255 } : Color{ 40,35,15,255 }) : Color{ 25,28,38,255 });
+            DrawRectangleLinesEx(ppR, 1, canPaste ? Color{ 220,180,60,255 } : Color{ 50,55,70,255 });
+            DrawText("Pst Props", (int)(ppR.x + 2), (int)(ppR.y + 2), 9, canPaste ? Color{ 220,180,60,255 } : Color{ 80,85,100,255 });
+            if (cpH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) CopyProps();
+            if (ppH && canPaste && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); PasteProps(); }
+            cy += 18;
         }
     }
     if (_sel.type == (int)EditorTool::PATH_NODE) {
@@ -2139,65 +2176,112 @@ void LevelEditor::DrawWinZoneEnt(const WinZoneData& wz, bool sel, bool msel) con
 // =============================================================================
 
 Rectangle LevelEditor::KillZoneRect(const KillZoneData& kz) const {
-    float yr = kz.w * tanf(kz.tilt * DEG2RAD);
-    float ymin = kz.y + fminf(0.f, yr);
-    return { kz.x, ymin, kz.w, kz.h + fabsf(yr) };
+    // AABB of the rotated rectangle (used for selection picking)
+    float cx = kz.x + kz.w * 0.5f, cy2 = kz.y + kz.h * 0.5f;
+    float hw = kz.w * 0.5f, hh = kz.h * 0.5f;
+    float rad = kz.rotation * DEG2RAD;
+    float ca = fabsf(cosf(rad)), sa = fabsf(sinf(rad));
+    float ew = hw * ca + hh * sa, eh = hw * sa + hh * ca;
+    return { cx - ew, cy2 - eh, ew * 2.f, eh * 2.f };
 }
 
 void LevelEditor::DrawKillZoneEnt(const KillZoneData& kz, bool sel, bool msel) const {
-    float h = kz.h;
-    float yr = kz.w * tanf(kz.tilt * DEG2RAD);
-    Vector2 TL = { kz.x,        kz.y };
-    Vector2 TR = { kz.x + kz.w, kz.y + yr };
-    Vector2 BL = { kz.x,        kz.y + h };
-    Vector2 BR = { kz.x + kz.w, kz.y + yr + h };
+    float cx = kz.x + kz.w * 0.5f, cy2 = kz.y + kz.h * 0.5f;
+    Vector2 origin = { kz.w * 0.5f, kz.h * 0.5f };  // pivot = centre
 
     Color fill = sel ? Color{ 255,60,60,55 } : msel ? Color{ 255,200,0,40 } : Color{ 255,30,30,28 };
     Color bc = sel ? YELLOW : msel ? Color{ 255,200,0,240 } : Color{ 255,60,60,200 };
     float lw = sel ? 2.5f : 1.5f;
 
-    // Filled parallelogram
-    DrawTriangle(TL, BL, TR, fill);
-    DrawTriangle(BL, BR, TR, fill);
+    // Filled rotated rectangle
+    DrawRectanglePro({ cx, cy2, kz.w, kz.h }, origin, kz.rotation, fill);
 
-    // Texture tiling (draw only if no tilt — tiling a sheared zone would be complex)
+    // Texture drawn rotated around the same centre
     Texture2D* tex = nullptr;
     if (kz.texId == KillZoneTexture::DK_GOLDEN_PISTON) tex = _goldenPistonTex;
-    if (tex && tex->id > 0 && fabsf(kz.tilt) < 0.5f) {
-        Rectangle r = { kz.x, kz.y, kz.w, kz.h };
-        float tw2 = (float)tex->width, th2 = (float)tex->height;
-        float scale = fmaxf(fminf(r.width / tw2, r.height / th2), 1.f);
-        float dw = tw2 * scale, dh = th2 * scale;
-        for (float ty = r.y; ty < r.y + r.height; ty += dh) {
-            for (float tx2 = r.x; tx2 < r.x + r.width; tx2 += dw) {
-                float cw = fminf(dw, r.x + r.width - tx2);
-                float ch = fminf(dh, r.y + r.height - ty);
-                DrawTexturePro(*tex, { 0.f,0.f,cw / scale,ch / scale }, { tx2,ty,cw,ch }, {}, 0.f,
-                    (msel && !sel) ? Color{ 255,180,80,200 } : WHITE);
-            }
-        }
+    if (tex && tex->id > 0) {
+        Rectangle dst = { cx, cy2, kz.w, kz.h };
+        DrawTexturePro(*tex,
+            { 0.f, 0.f, (float)tex->width, (float)tex->height },
+            dst, origin, kz.rotation,
+            (msel && !sel) ? Color{ 255,180,80,200 } : WHITE);
     }
 
-    // Outline edges
-    DrawLineEx(TL, TR, lw, bc);
-    DrawLineEx(BL, BR, lw, bc);
-    DrawLineEx(TL, BL, lw, bc);
-    DrawLineEx(TR, BR, lw, bc);
-    // Diagonal crosses
+    // Compute rotated corners for outline
+    float rad = kz.rotation * DEG2RAD;
+    float ca = cosf(rad), sa = sinf(rad);
+    float hw = kz.w * 0.5f, hh = kz.h * 0.5f;
+    auto rot = [&](float lx, float ly) -> Vector2 {
+        return { cx + lx * ca - ly * sa, cy2 + lx * sa + ly * ca };
+        };
+    Vector2 TL = rot(-hw, -hh), TR = rot(hw, -hh);
+    Vector2 BR = rot(hw, hh), BL = rot(-hw, hh);
+    DrawLineEx(TL, TR, lw, bc); DrawLineEx(TR, BR, lw, bc);
+    DrawLineEx(BR, BL, lw, bc); DrawLineEx(BL, TL, lw, bc);
     DrawLineEx(TL, BR, 1.5f, { 255,60,60,80 });
     DrawLineEx(TR, BL, 1.5f, { 255,60,60,80 });
 
-    DrawText("KILL", (int)(TL.x + 3), (int)(TL.y + 2), 9, bc);
-    if (fabsf(kz.tilt) > 0.1f) {
-        char b[32]; snprintf(b, sizeof(b), "%.1f\xc2\xb0", kz.tilt);
-        DrawText(b, (int)TL.x + 2, (int)TL.y - 12, 9, bc);
+    DrawText("KILL", (int)(TL.x + 2), (int)(TL.y + 2), 9, bc);
+    if (fabsf(kz.rotation) > 0.5f) {
+        char b[32]; snprintf(b, sizeof(b), "%.0f\xc2\xb0", kz.rotation);
+        DrawText(b, (int)(cx - MeasureText(b, 9) / 2), (int)(cy2 - 5), 9, bc);
     }
     if (kz.texId == KillZoneTexture::DK_GOLDEN_PISTON)
-        DrawText("GldPiston", (int)kz.x, (int)(BR.y + 2), 8, { 255,200,80,200 });
+        DrawText("GldPiston", (int)(BL.x), (int)(BL.y + 2), 8, { 255,200,80,200 });
     else
-        DrawText("no tex", (int)kz.x, (int)(BR.y + 2), 8, { 150,80,80,200 });
+        DrawText("no tex", (int)(BL.x), (int)(BL.y + 2), 8, { 150,80,80,200 });
     char buf[32]; snprintf(buf, sizeof(buf), "%.0fx%.0f", kz.w, kz.h);
-    DrawText(buf, (int)(TR.x - MeasureText(buf, 8)), (int)(BR.y + 2), 8, bc);
+    DrawText(buf, (int)(BR.x - MeasureText(buf, 8)), (int)(BR.y + 2), 8, bc);
+}
+
+
+// =============================================================================
+//  PROPERTIES CLIPBOARD  (UE-style copy/paste per entity type)
+// =============================================================================
+void LevelEditor::CopyProps() {
+    if (!_sel.valid()) return;
+    _propClip.type = _sel.type;
+    if (_sel.type == (int)EditorTool::PLATFORM && _sel.index < (int)_level.platforms.size())
+        _propClip.plat = _level.platforms[_sel.index];
+    else if (_sel.type == (int)EditorTool::KILL_ZONE && _sel.index < (int)_level.killZones.size())
+        _propClip.kz = _level.killZones[_sel.index];
+    else if (_sel.type == (int)EditorTool::LADDER && _sel.index < (int)_level.ladders.size())
+        _propClip.lad = _level.ladders[_sel.index];
+    else if (_sel.type == (int)EditorTool::WIN_ZONE && _level.hasWinZone)
+        _propClip.wz = _level.winZone;
+    else if (_sel.type == (int)EditorTool::ELEVATOR && _sel.index < (int)_level.elevators.size())
+        _propClip.elev = _level.elevators[_sel.index];
+    SetStatus("Properties copied.");
+}
+void LevelEditor::PasteProps() {
+    if (!_sel.valid() || _propClip.type != _sel.type) return;
+    if (_sel.type == (int)EditorTool::PLATFORM && _sel.index < (int)_level.platforms.size()) {
+        // Preserve position, copy everything else
+        float ox = _level.platforms[_sel.index].x, oy = _level.platforms[_sel.index].y;
+        _level.platforms[_sel.index] = _propClip.plat;
+        _level.platforms[_sel.index].x = ox; _level.platforms[_sel.index].y = oy;
+    }
+    else if (_sel.type == (int)EditorTool::KILL_ZONE && _sel.index < (int)_level.killZones.size()) {
+        float ox = _level.killZones[_sel.index].x, oy = _level.killZones[_sel.index].y;
+        _level.killZones[_sel.index] = _propClip.kz;
+        _level.killZones[_sel.index].x = ox; _level.killZones[_sel.index].y = oy;
+    }
+    else if (_sel.type == (int)EditorTool::LADDER && _sel.index < (int)_level.ladders.size()) {
+        float ox = _level.ladders[_sel.index].x, oy = _level.ladders[_sel.index].y;
+        _level.ladders[_sel.index] = _propClip.lad;
+        _level.ladders[_sel.index].x = ox; _level.ladders[_sel.index].y = oy;
+    }
+    else if (_sel.type == (int)EditorTool::WIN_ZONE && _level.hasWinZone) {
+        float ox = _level.winZone.x, oy = _level.winZone.y;
+        _level.winZone = _propClip.wz;
+        _level.winZone.x = ox; _level.winZone.y = oy;
+    }
+    else if (_sel.type == (int)EditorTool::ELEVATOR && _sel.index < (int)_level.elevators.size()) {
+        float ox = _level.elevators[_sel.index].x, oy = _level.elevators[_sel.index].y;
+        _level.elevators[_sel.index] = _propClip.elev;
+        _level.elevators[_sel.index].x = ox; _level.elevators[_sel.index].y = oy;
+    }
+    SetStatus("Properties pasted.");
 }
 
 // =============================================================================

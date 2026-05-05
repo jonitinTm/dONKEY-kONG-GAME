@@ -1540,6 +1540,17 @@ int main(void)
             float prevX = player.x, prevY = player.y;
             bool  playerIsMoving = false;
 
+            // Shared half-height hitbox anchored to player feet, used for
+            // barrel/enemy/killzone damage checks so the collision feel matches
+            // the platform collision box.
+            auto PlayerHitbox = [&]() -> Rectangle {
+                float colW = player.width * 0.5f;
+                float colH = player.height * 0.5f;
+                float offX = (player.width - colW) * 0.5f;  // centred horizontally
+                float offY = player.height - colH;           // anchored to feet
+                return { player.x + offX, player.y + offY, colW, colH };
+                };
+
             if (!isDying)
             {
                 for (auto& b : barrels)
@@ -1929,7 +1940,7 @@ int main(void)
                 for (const auto& b : barrels)
                 {
                     if (!b.active) continue;
-                    if (!CheckCollisionRecs(player, b.hitbox)) continue;
+                    if (!CheckCollisionRecs(PlayerHitbox(), b.hitbox)) continue;
                     bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
                         (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
                     if (fromBelow) continue;
@@ -1945,7 +1956,7 @@ int main(void)
                 for (auto& en : enemies)
                 {
                     UpdateEnemy(en, player, platforms, dt);
-                    if (en.active && !invincible && CheckCollisionRecs(player, en.hitbox))
+                    if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox))
                         TriggerDeath();
                 }
             }
@@ -2162,10 +2173,24 @@ int main(void)
                     if (!isGrounded) velocityY += gravity;
                     player.y += velocityY;
 
-                    CollisionResult col = CollisionManager::ResolveAll(
-                        player, velocityX, velocityY, platforms, prevX, prevY);
-                    isGrounded = col.grounded;
-                    if (col.grounded) isJumping = false;
+                    // Shrunk collision box anchored to player feet (50% height, bottom-aligned)
+                    {
+                        float colW = player.width * 0.5f;
+                        float colH = player.height * 0.5f;
+                        float colOffX = (player.width - colW) * 0.5f;
+                        float colOffY = player.height - colH;
+                        Rectangle colRect = { player.x + colOffX, player.y + colOffY, colW, colH };
+                        float     colPrevY = prevY + colOffY;
+
+                        CollisionResult col = CollisionManager::ResolveAll(
+                            colRect, velocityX, velocityY, platforms, prevX, colPrevY);
+
+                        // Mirror Y correction back so visual rect stays bottom-anchored
+                        player.y = colRect.y - colOffY;  // mirror Y correction back to visual rect
+
+                        isGrounded = col.grounded;
+                        if (col.grounded) isJumping = false;
+                    }
 
                     // ── Upward-moving platform push ───────────────────────────
                     // CollisionManager uses a one-way top-surface guard based on
@@ -2249,7 +2274,7 @@ int main(void)
             // ── Kill Zone collision ───────────────────────────────────────────
             if (!isDying && !invincible) {
                 for (const auto& kz : liveKillZones) {
-                    if (CheckCollisionRecs({ kz.x, kz.y, kz.w, kz.h }, player)) {
+                    if (CheckCollisionRecs({ kz.x, kz.y, kz.w, kz.h }, PlayerHitbox())) {
                         TriggerDeath();
                         break;
                     }
