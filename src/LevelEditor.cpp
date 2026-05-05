@@ -23,6 +23,7 @@ const char* LevelEditor::ToolName(EditorTool t) {
     case EditorTool::ELEVATOR:return"ELEVATOR";
     case EditorTool::WIN_ZONE:return"WIN ZONE";
     case EditorTool::KILL_ZONE:return"KILL ZONE";
+    case EditorTool::CONVEYOR:return"CONVEYOR";
     default:return"???";
     }
 }
@@ -37,6 +38,7 @@ Color LevelEditor::ToolColor(EditorTool t) {
     case EditorTool::ELEVATOR:return{ 255,140,50,255 };
     case EditorTool::WIN_ZONE:return{ 80,255,140,255 };
     case EditorTool::KILL_ZONE:return{ 255,60,60,255 };
+    case EditorTool::CONVEYOR:return{ 255,200,60,255 };
     default:return GRAY;
     }
 }
@@ -119,6 +121,7 @@ Vector2 LevelEditor::EntityCenter(const SelectedEnt& e) const {
     case EditorTool::BEAM: { Rectangle r = BeamRect(_level.beams[i]); return { r.x + r.width * .5f,r.y + r.height * .5f }; }
     case EditorTool::WIN_ZONE: { auto r = WinZoneRect(_level.winZone);       return { r.x + r.width * .5f, r.y + r.height * .5f }; }
     case EditorTool::KILL_ZONE: { auto r = KillZoneRect(_level.killZones[i]); return { r.x + r.width * .5f, r.y + r.height * .5f }; }
+    case EditorTool::CONVEYOR: { auto r = ConveyorRect(_level.conveyors[i]);  return { r.x + r.width * .5f, r.y + r.height * .5f }; }
     default: return GetEntPos(e);
     }
 }
@@ -143,6 +146,7 @@ Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const {
     case EditorTool::ELEVATOR:       return { _level.elevators[i].x, _level.elevators[i].y };
     case EditorTool::WIN_ZONE:       return { _level.winZone.x, _level.winZone.y };
     case EditorTool::KILL_ZONE:      return { _level.killZones[i].x, _level.killZones[i].y };
+    case EditorTool::CONVEYOR:       return { _level.conveyors[i].x, _level.conveyors[i].y };
     default: return {};
     }
 }
@@ -163,6 +167,7 @@ void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p) {
     case EditorTool::ELEVATOR:       _level.elevators[i].x = p.x; _level.elevators[i].y = p.y; break;
     case EditorTool::WIN_ZONE:       _level.winZone.x = p.x; _level.winZone.y = p.y; break;
     case EditorTool::KILL_ZONE:      _level.killZones[i].x = p.x; _level.killZones[i].y = p.y; break;
+    case EditorTool::CONVEYOR:       _level.conveyors[i].x = p.x; _level.conveyors[i].y = p.y; break;
     default: break;
     }
 }
@@ -190,6 +195,8 @@ bool LevelEditor::PickEntity(Vector2 p) {
     for (int i = 0; i < (int)_level.killZones.size(); i++)
         if (CheckCollisionPointRec(p, KillZoneRect(_level.killZones[i]))) { _sel = { (int)EditorTool::KILL_ZONE,i }; return true; }
     if (_level.hasWinZone && CheckCollisionPointRec(p, WinZoneRect(_level.winZone))) { _sel = { (int)EditorTool::WIN_ZONE,0 }; return true; }
+    for (int i = 0; i < (int)_level.conveyors.size(); i++)
+        if (CheckCollisionPointRec(p, ConveyorRect(_level.conveyors[i]))) { _sel = { (int)EditorTool::CONVEYOR,i }; return true; }
     if (_level.hasCave) {
         float cw = (_caveTex && _caveTex->id > 0) ? 64.f * 3.5f : 50.f;
         float ch = (_caveTex && _caveTex->id > 0) ? 32.f * 3.5f : 50.f;
@@ -219,6 +226,7 @@ void LevelEditor::BoxSelectEntities(Rectangle box) {
     for (int i = 0; i < (int)_level.elevators.size(); i++) if (CheckCollisionRecs(ElevRect(_level.elevators[i]), box)) _multiSel.push_back({ (int)EditorTool::ELEVATOR,i });
     for (int i = 0; i < (int)_level.killZones.size(); i++) if (CheckCollisionRecs(KillZoneRect(_level.killZones[i]), box)) _multiSel.push_back({ (int)EditorTool::KILL_ZONE,i });
     if (_level.hasWinZone && CheckCollisionRecs(WinZoneRect(_level.winZone), box)) _multiSel.push_back({ (int)EditorTool::WIN_ZONE,0 });
+    for (int i = 0; i < (int)_level.conveyors.size(); i++) if (CheckCollisionRecs(ConveyorRect(_level.conveyors[i]), box)) _multiSel.push_back({ (int)EditorTool::CONVEYOR,i });
     for (int i = 0; i < (int)_level.beams.size(); i++)     if (CheckCollisionRecs(BeamRect(_level.beams[i]), box))    _multiSel.push_back({ (int)EditorTool::BEAM,i });
     for (int i = 0; i < (int)_level.pathNodes.size(); i++)     AC(EditorTool::PATH_NODE, { _level.pathNodes[i].x,_level.pathNodes[i].y }, i);
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)    AC(EditorTool::NUKE_SPAWN, _level.nukeSpawns[i], i);
@@ -270,6 +278,7 @@ void LevelEditor::DeleteSelected() {
     case EditorTool::ELEVATOR:       DeleteRelationsFor(_sel); Er(_level.elevators, i); break;
     case EditorTool::WIN_ZONE:       _level.hasWinZone = false; break;
     case EditorTool::KILL_ZONE:      Er(_level.killZones, i); break;
+    case EditorTool::CONVEYOR:       Er(_level.conveyors, i); break;
     default: break;
     }
     _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
@@ -289,6 +298,7 @@ void LevelEditor::DeleteMultiSelected() {
     DT(EditorTool::BEAM, _level.beams); DT(EditorTool::NUKE_SPAWN, _level.nukeSpawns);
     DT(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns); DT(EditorTool::ENEMY_SPAWN, _level.enemySpawns);
     DT(EditorTool::ELEVATOR, _level.elevators); DT(EditorTool::KILL_ZONE, _level.killZones);
+    DT(EditorTool::CONVEYOR, _level.conveyors);
     std::vector<int> pi;
     for (const auto& e : _multiSel) if (e.type == (int)EditorTool::PATH_NODE) pi.push_back(e.index);
     if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && std::find(pi.begin(), pi.end(), _sel.index) == pi.end()) pi.push_back(_sel.index);
@@ -299,6 +309,8 @@ void LevelEditor::DeleteMultiSelected() {
         if (e.type == (int)EditorTool::REGULUS)      _level.hasRegulus = false;
         if (e.type == (int)EditorTool::CAVE)         _level.hasCave = false;
         if (e.type == (int)EditorTool::WIN_ZONE)     _level.hasWinZone = false;
+        if (e.type == (int)EditorTool::KILL_ZONE && e.index < (int)_level.killZones.size())  Er(_level.killZones, e.index);
+        if (e.type == (int)EditorTool::CONVEYOR && e.index < (int)_level.conveyors.size())  Er(_level.conveyors, e.index);
     }
     _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
     SetStatus("Deleted selection.");
@@ -639,6 +651,7 @@ void LevelEditor::BuildOutline() {
     for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) EmitRoot({ (int)EditorTool::BEATRICE_SPAWN,i });
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)  EmitRoot({ (int)EditorTool::ENEMY_SPAWN,i });
     for (int i = 0; i < (int)_level.killZones.size(); i++)    EmitRoot({ (int)EditorTool::KILL_ZONE,i });
+    for (int i = 0; i < (int)_level.conveyors.size(); i++)    EmitRoot({ (int)EditorTool::CONVEYOR,i });
 
     int vis = (int)(OutlinerRect().height - 20) / OUTLINE_ROW;
     int maxScroll = (int)_outline.size() - vis;
@@ -826,7 +839,7 @@ void LevelEditor::UpdateBrowser() {
     if (mouse.x >= _canvasW) return;
     const int r0[] = { 0,1,2,3,4,5 };
     const int r1[] = { 6,7,8,9,10,11 };
-    const int r2[] = { 12,13,-1,-1,-1,-1 };
+    const int r2[] = { 12,13,14,-1,-1,-1 };
     for (int c = 0; c < 6; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6)))
     {
         _tool = (EditorTool)r0[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
@@ -835,7 +848,7 @@ void LevelEditor::UpdateBrowser() {
     {
         _tool = (EditorTool)r1[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
-    for (int c = 0; c < 2; c++) if (r2[c] >= 0 && CheckCollisionPointRec(mouse, BrowserBtn(2, c, 6)))
+    for (int c = 0; c < 3; c++) if (r2[c] >= 0 && CheckCollisionPointRec(mouse, BrowserBtn(2, c, 6)))
     {
         _tool = (EditorTool)r2[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
@@ -1048,6 +1061,17 @@ void LevelEditor::UpdateCanvas() {
             _placingPlatform = false;
             _sel = { (int)EditorTool::KILL_ZONE, (int)_level.killZones.size() - 1 };
             SetStatus("Kill zone placed. Switch to SELECT to adjust.");
+        }
+        return;
+    }
+    if (_tool == EditorTool::CONVEYOR) {
+        if (lP) {
+            PushUndo();
+            ConveyorData cv;
+            cv.x = swm.x; cv.y = swm.y;
+            _level.conveyors.push_back(cv);
+            _sel = { (int)EditorTool::CONVEYOR, (int)_level.conveyors.size() - 1 };
+            SetStatus("Conveyor placed. Adjust length/direction in properties.");
         }
         return;
     }
@@ -1277,6 +1301,7 @@ void LevelEditor::DrawLevelEntities() {
     auto IS = [&](EditorTool t, int i) {return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
     auto IMS = [&](EditorTool t, int i) {return IsInMultiSel({ (int)t,i }); };
     for (int i = 0; i < (int)_level.elevators.size(); i++)  DrawElevatorEnt(_level.elevators[i], IS(EditorTool::ELEVATOR, i), IMS(EditorTool::ELEVATOR, i));
+    for (int i = 0; i < (int)_level.conveyors.size(); i++)  DrawConveyorEnt(_level.conveyors[i], IS(EditorTool::CONVEYOR, i), IMS(EditorTool::CONVEYOR, i));
     for (int i = 0; i < (int)_level.killZones.size(); i++)  DrawKillZoneEnt(_level.killZones[i], IS(EditorTool::KILL_ZONE, i), IMS(EditorTool::KILL_ZONE, i));
     if (_level.hasWinZone) DrawWinZoneEnt(_level.winZone, IS(EditorTool::WIN_ZONE, 0), IMS(EditorTool::WIN_ZONE, 0));
     for (int i = 0; i < (int)_level.platforms.size(); i++) DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
@@ -1363,7 +1388,7 @@ void LevelEditor::DrawBrowserUI() {
     DrawLine(0, by0, _canvasW, by0, { 70,80,110,255 });
     const EditorTool r0[] = { EditorTool::SELECT,EditorTool::PLAYER_SPAWN,EditorTool::REGULUS,EditorTool::CAVE,EditorTool::PLATFORM,EditorTool::LADDER };
     const EditorTool r1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN,EditorTool::ELEVATOR };
-    const EditorTool r2[] = { EditorTool::WIN_ZONE,EditorTool::KILL_ZONE };
+    const EditorTool r2[] = { EditorTool::WIN_ZONE,EditorTool::KILL_ZONE,EditorTool::CONVEYOR };
     auto DT = [&](int row, int col, int cols, EditorTool t) {
         Rectangle r = BrowserBtn(row, col, cols); bool act = (_tool == t); Color tc = ToolColor(t);
         DrawRectangleRec(r, act ? Color{ (unsigned char)(tc.r / 3),(unsigned char)(tc.g / 3),(unsigned char)(tc.b / 3),255 } : Color{ 30,32,44,255 });
@@ -1373,7 +1398,7 @@ void LevelEditor::DrawBrowserUI() {
         };
     for (int c = 0; c < 6; c++) DT(0, c, 6, r0[c]);
     for (int c = 0; c < 6; c++) DT(1, c, 6, r1[c]);
-    for (int c = 0; c < 2; c++) DT(2, c, 6, r2[c]);
+    for (int c = 0; c < 3; c++) DT(2, c, 6, r2[c]);
     float sy = (float)(_sh - 18);
     DrawRectangle(0, (int)sy - 2, _canvasW, 20, { 18,20,28,255 });
     const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Menu Tab=Seq";
@@ -1695,6 +1720,25 @@ void LevelEditor::DrawDataPanel() {
             cy += 18;
         }
     }
+    if (_sel.type == (int)EditorTool::CONVEYOR && _sel.index < (int)_level.conveyors.size()) {
+        auto& cv = _level.conveyors[_sel.index];
+        SectionHeader("── Conveyor ────────────────");
+        if (NumField("Len", cv.length, 2.f, 32, 4000, px, cy, fw)) {} cy += rowH;
+        if (NumField("Spd", cv.speed, 1.f, 10, 600, px, cy, fw)) {} cy += rowH;
+        if (NumField("Rot", cv.rotation, 0.3f, -89, 89, px, cy, fw)) {} cy += rowH;
+        // Direction buttons
+        float bw2cv = (fw - 4) / 2.f;
+        Rectangle rL = { px, cy, bw2cv, 18 }, rR = { px + bw2cv + 4, cy, bw2cv, 18 };
+        bool hL = CheckCollisionPointRec(GetMousePosition(), rL);
+        bool hR = CheckCollisionPointRec(GetMousePosition(), rR);
+        DrawRectangleRec(rL, cv.direction == -1 ? Color{ 20,100,40,255 } : (hL ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+        DrawRectangleRec(rR, cv.direction == 1 ? Color{ 20,100,40,255 } : (hR ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+        DrawText("< LEFT", (int)(rL.x + 4), (int)cy + 4, 9, cv.direction == -1 ? WHITE : Color{ 140,145,170,255 });
+        DrawText("RIGHT >", (int)(rR.x + 4), (int)cy + 4, 9, cv.direction == 1 ? WHITE : Color{ 140,145,170,255 });
+        if (hL && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = -1; }
+        if (hR && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = 1; }
+        cy += 22;
+    }
     if (_sel.type == (int)EditorTool::PATH_NODE) {
         SectionHeader("── Node Settings ──────────");
         auto& n = _level.pathNodes[_sel.index];
@@ -1705,8 +1749,8 @@ void LevelEditor::DrawDataPanel() {
         bool h0 = CheckCollisionPointRec(GetMousePosition(), rN0), h1 = CheckCollisionPointRec(GetMousePosition(), rN1);
         DrawRectangleRec(rN0, h0 ? Color{ 180,80,0,255 } : Color{ 80,40,0,255 }); DrawText("Set N0", (int)rN0.x + 4, (int)rN0.y + 2, 10, WHITE);
         DrawRectangleRec(rN1, h1 ? Color{ 0,100,180,255 } : Color{ 0,50,100,255 }); DrawText("Set N1", (int)rN1.x + 4, (int)rN1.y + 2, 10, WHITE);
-        if (h0 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT0; _connectFrom = _sel.index; SetStatus("Click node → N0"); }
-        if (h1 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT1; _connectFrom = _sel.index; SetStatus("Click node → N1"); }
+        if (h0 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT0; _connectFrom = _sel.index; SetStatus("Click node -> N0"); }
+        if (h1 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT1; _connectFrom = _sel.index; SetStatus("Click node -> N1"); }
         cy += 20;
         float bwS = (fw - 4) / 2.f;
         Rectangle rSpl = { px,cy,bwS,16 };
@@ -2381,4 +2425,60 @@ void LevelEditor::DrawSeqAudioBar() {
         }
     }
     else DrawText("Drag audio file here or click to browse", (int)(dropZone.x + 6), (int)(dropZone.y + 6), 9, { 80,90,120,255 });
+}
+// =============================================================================
+//  CONVEYOR ENTITY
+// =============================================================================
+
+Rectangle LevelEditor::ConveyorRect(const ConveyorData& cv) const {
+    return { cv.x, cv.y, cv.length, cv.beltH };
+}
+
+void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) const {
+    Color bc = sel ? YELLOW : (msel ? Color{ 255,220,60,240 } : Color{ 255,200,60,220 });
+    int frame = (int)(GetTime() * 6.f) & 1;
+    float rad = cv.rotation * DEG2RAD;
+    float ca = cosf(rad), sa = sinf(rad);
+    float ecW = cv.endCapW, bH = cv.beltH;
+    float midW = fmaxf(0.f, cv.length - 2.f * ecW);
+
+    auto DrawSec = [&](Texture2D* tex, float lx, float w, bool flipH) {
+        float wx = cv.x + lx * ca, wy = cv.y + lx * sa;
+        if (tex && tex->id > 0) {
+            float srcX = flipH ? (float)tex->width : 0.f;
+            float srcW = flipH ? -(float)tex->width : (float)tex->width;
+            DrawTexturePro(*tex, { srcX, 0, srcW, (float)tex->height },
+                { wx, wy, w, bH }, {}, cv.rotation, WHITE);
+        }
+        else {
+            DrawRectanglePro({ wx, wy, w, bH }, {}, cv.rotation, Color{ 80,70,40,180 });
+        }
+        };
+
+    DrawSec(_convSide[frame], 0.f, ecW, false);   // left — as-is (faces left)
+    if (midW > 0.f) {
+        if (_convM[frame] && _convM[frame]->id > 0) {
+            float tw = (float)_convM[frame]->width;
+            for (float lx = ecW; lx < ecW + midW; lx += tw) {
+                float sw = fminf(tw, ecW + midW - lx);
+                DrawTexturePro(*_convM[frame], { 0, 0, sw, (float)_convM[frame]->height },
+                    { cv.x + lx * ca, cv.y + lx * sa, sw, bH }, {}, cv.rotation, WHITE);
+            }
+        }
+        else {
+            float wx = cv.x + ecW * ca, wy = cv.y + ecW * sa;
+            DrawRectanglePro({ wx, wy, midW, bH }, {}, cv.rotation, Color{ 80,70,40,180 });
+        }
+    }
+    DrawSec(_convSide[frame], cv.length - ecW, ecW, true); // right — flipped
+
+    // Overlay: selection tint + direction arrow
+    DrawRectanglePro({ cv.x, cv.y, cv.length, bH }, {}, cv.rotation,
+        sel ? Color{ 255,220,60,30 } : Color{ 255,200,60,10 });
+    float arrowLx = cv.length * 0.5f;
+    float ax = cv.x + arrowLx * ca, ay = cv.y + arrowLx * sa;
+    float dx = cv.direction * 10.f * ca, dy = cv.direction * 10.f * sa;
+    DrawLineEx({ ax - dx, ay - dy }, { ax + dx, ay + dy }, 2.f, bc);
+    DrawText(TextFormat("%.0fpx/s %s", cv.speed, cv.direction == 1 ? "▶" : "◀"),
+        (int)cv.x + 2, (int)(cv.y + bH + 2), 9, bc);
 }

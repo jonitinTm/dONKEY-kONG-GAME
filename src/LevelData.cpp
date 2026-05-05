@@ -19,7 +19,7 @@ static void EnsureDir(const char* folder)
 {
     struct stat st = {};
     if (stat(folder, &st) != 0)
-        MKDIR(folder);
+        (void)MKDIR(folder);
 }
 
 static std::string LevelPath(int id, const char* folder)
@@ -72,6 +72,10 @@ bool SaveLevel(const LevelData& lv, const char* folder)
     for (const auto& e : lv.elevators)
         fprintf(f, "ELEVATOR %.2f %.2f %.2f %.2f %.2f %d\n",
             e.x, e.y, e.w, e.h, e.speed, e.direction);
+
+    for (const auto& cv : lv.conveyors)
+        fprintf(f, "CONVEYOR %.2f %.2f %.2f %.2f %d %.2f %.2f %.2f\n",
+            cv.x, cv.y, cv.length, cv.speed, cv.direction, cv.rotation, cv.endCapW, cv.beltH);
 
     for (const auto& r : lv.relations)
         fprintf(f, "RELATION %d %d %d %d %.2f %.2f\n",
@@ -155,6 +159,13 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             ElevatorData e;
             (void)fscanf(f, "%f %f %f %f %f %d", &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
             out.elevators.push_back(e);
+        }
+        else if (strcmp(tag, "CONVEYOR") == 0) {
+            ConveyorData cv;
+            (void)fscanf(f, "%f %f %f %f %d %f %f %f",
+                &cv.x, &cv.y, &cv.length, &cv.speed, &cv.direction,
+                &cv.rotation, &cv.endCapW, &cv.beltH);
+            out.conveyors.push_back(cv);
         }
         else if (strcmp(tag, "RELATION") == 0) {
             ParentChildRelation r;

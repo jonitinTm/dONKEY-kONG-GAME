@@ -17,6 +17,7 @@ enum class EditorTool : int {
     ELEVATOR,
     WIN_ZONE,
     KILL_ZONE,
+    CONVEYOR,
     TOOL_COUNT
 };
 enum class GizmoMode { SELECT = 0, MOVE, ROTATE, SCALE };
@@ -48,6 +49,13 @@ public:
     void SaveCurrentLevel();
     int  GetCurrentLevelId()    const { return _levelId; }
     const LevelData& GetLevel() const { return _level; }
+
+    void SetConveyorTextures(Texture2D* side1, Texture2D* side2,
+        Texture2D* mid1, Texture2D* mid2)
+    {
+        _convSide[0] = side1; _convSide[1] = side2;
+        _convM[0] = mid1;  _convM[1] = mid2;
+    }
 
     bool WantsMenu() const { return _wantsMenu; }
     bool WantsPlay() const { return _wantsPlay; }
@@ -119,6 +127,8 @@ private:
     Texture2D* _caveTex = nullptr;
     Texture2D* _ropeTex = nullptr;
     Texture2D* _goldenPistonTex = nullptr;  // Kill zone: DK_GOLDEN_PISTON
+    Texture2D* _convSide[2] = {};  // ConveyorSide_1, ConveyorSide_2 (left-facing; right end is flipped)
+    Texture2D* _convM[2] = {};     // ConveyorMid_1, ConveyorMid_2
 
     // ── Tool / gizmo state ────────────────────────────────────────────────────
     EditorTool  _tool = EditorTool::SELECT;
@@ -362,6 +372,9 @@ private:
     Rectangle WinZoneRect(const WinZoneData& wz) const;
     void DrawKillZoneEnt(const KillZoneData& kz, bool sel, bool msel) const;
     Rectangle KillZoneRect(const KillZoneData& kz) const;
+
+    void DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) const;
+    Rectangle ConveyorRect(const ConveyorData& cv) const;
 
     Rectangle  BrowserBtn(int row, int col, int cols) const;
     static const char* ToolName(EditorTool t);

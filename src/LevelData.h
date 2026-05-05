@@ -58,6 +58,19 @@ struct KillZoneData {
     KillZoneTexture texId = KillZoneTexture::NONE;
 };
 
+// ── Conveyor belt ─────────────────────────────────────────────────────────────
+
+struct ConveyorData {
+    float x = 0.f;
+    float y = 0.f;
+    float length = 192.f;   // total belt length (both end caps + tiled middle)
+    float speed = 80.f;     // px/sec push force applied to objects on top
+    int   direction = 1;    // 1 = right, -1 = left
+    float rotation = 0.f;   // degrees
+    float endCapW = 32.f;   // width of each end cap (matches texture native width)
+    float beltH = 24.f;   // height (matches texture native height)
+};
+
 // ── Elevator ─────────────────────────────────────────────────────────────────
 
 struct ElevatorData {
@@ -115,6 +128,7 @@ struct LevelData {
     std::vector<Vector2>            beatriceSpawns;
     std::vector<Vector2>            enemySpawns;
     std::vector<ElevatorData>        elevators;
+    std::vector<ConveyorData>        conveyors;
     std::vector<ParentChildRelation> relations;
 
     // ── Zone entities ───────────────────────────────────────────────────────

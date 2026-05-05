@@ -23,7 +23,7 @@ static constexpr float ACTIVE_SPAWN_INTERVAL = 1.2f;
 
 struct PathNode
 {
-    Vector2 pos;
+    Vector2 pos = { 0.f, 0.f };
     int     next[2] = { -1, -1 };
     int     rollThreshold = 5;
     bool    isSplitNode = false;
@@ -93,7 +93,7 @@ struct Enemy {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
+static Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f)
 {
     Barrel b;
@@ -111,7 +111,7 @@ Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     return b;
 }
 
-bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
+static bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f,
     bool forceBlue = false)
 {
@@ -128,7 +128,7 @@ bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
     return false;
 }
 
-void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
+static void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
 {
     if (!b.active || path.empty()) return;
 
@@ -178,7 +178,7 @@ void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
 //Funcion para updatear los enemigos
 
 
-void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
+static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     vector<Platform>& platforms, float delta)
 {
     if (!e.active) return;
@@ -276,7 +276,7 @@ void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
 
 //Dibujarlo en la pantallla
 
-void DrawEnemy(const Enemy& e,
+static void DrawEnemy(const Enemy& e,
     Texture2D& walkGrunt,   // textura andar  del conejo negro (GRUNT)
     Texture2D& jumpGrunt,   // textura saltar del conejo negro (GRUNT)
     Texture2D& walkSpecter, // textura andar  del conejo blanco (SPECTER)
@@ -337,7 +337,7 @@ void DrawEnemy(const Enemy& e,
 
 
 
-void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& barrels, int screenHeight)
+static void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& barrels, int screenHeight)
 {
     for (int i = 0; i < (int)path.size(); i++)
     {
@@ -352,7 +352,7 @@ void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& bar
     for (int i = 0; i < (int)path.size(); i++)
     {
         const PathNode& n = path[i];
-        Color fill;
+        Color fill = BLACK;
         if (i == 0)                                         fill = WHITE;
         else if (n.next[0] == -1 && n.next[1] == -1)       fill = RED;
         else if (n.isSplitNode && n.rollThreshold == 10)    fill = ORANGE;
@@ -404,7 +404,7 @@ int main(void)
 
     bool      debugPath = false;
 
-    int score = 0;
+    unsigned int score = 0;
     int currentLevelId = 1;   // which level is currently loaded / playing
 
     Rectangle wincondition = { 400, 150, 40, 40 };
@@ -547,6 +547,7 @@ int main(void)
     vector<ParentChildRelation> liveRelations;
     vector<float>               elevChildPhases;
     vector<KillZoneData>        liveKillZones;
+    vector<ConveyorData>        liveConveyors;
 
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
@@ -592,7 +593,7 @@ int main(void)
             if (enemySpawnPositions.size() < 2) return;   // not enough spawn points
 
             int idx1 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1);
-            int idx2;
+            int idx2 = 0;
             do { idx2 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1); } while (idx2 == idx1);
 
             auto initEnemy = [](Enemy& en, Vector2 pos, EnemyType t, float w, float h, float timerOffset)
@@ -778,6 +779,14 @@ int main(void)
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
     Texture2D RopeTex = LoadTexture("Assets/Textures/Architecture/Rope.png");
     Texture2D GoldenPistonTex = LoadTexture("Assets/Textures/Items/GoldenPiston.png");
+    Texture2D ConvSide[2] = {
+        LoadTexture("Assets/Textures/Items/ConveyorSide_1.png"),
+        LoadTexture("Assets/Textures/Items/ConveyorSide_2.png")
+    };
+    Texture2D ConvM[2] = {
+        LoadTexture("Assets/Textures/Items/ConveyorMid_1.png"),
+        LoadTexture("Assets/Textures/Items/ConveyorMid_2.png")
+    };
     Texture2D SnowFloor = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Floor.png");
 
     Texture2D BarrelMov1 = LoadTexture("Assets/Textures/Barrel/Dk_Barrel_Mov1.png");
@@ -906,7 +915,7 @@ int main(void)
     for (auto& pos : beamPositions)
         DrawTexturePro(beam,
             { 0, 0, (float)beam.width, (float)beam.height },
-            { pos.x, pos.y, beam.width * beamScale, beam.height * beamScale },
+            { pos.x, pos.y, (float)beam.width * beamScale, (float)beam.height * beamScale },
             { 0, 0 }, 0.f, WHITE);
     EndTextureMode();
     // NOTE: beam texture is kept alive so RebuildLayers can rebake staticLayer
@@ -944,6 +953,7 @@ int main(void)
     // ── Wire textures into the editor ─────────────────────────────────────────
     editor.SetGameTextures(&background, &beam, &LadderPart,
         &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex, &GoldenPistonTex);
+    editor.SetConveyorTextures(&ConvSide[0], &ConvSide[1], &ConvM[0], &ConvM[1]);
 
     // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
     auto RebuildLayers = [&]()
@@ -964,7 +974,7 @@ int main(void)
                 const auto& pos = beamPositions[bi];
                 DrawTexturePro(beam,
                     { 0, 0, (float)beam.width, (float)beam.height },
-                    { pos.x, pos.y, beam.width * bScale, beam.height * bScale },
+                    { pos.x, pos.y, (float)beam.width * bScale, (float)beam.height * bScale },
                     { 0, 0 }, 0.f, WHITE);
             }
             EndTextureMode();
@@ -1072,6 +1082,9 @@ int main(void)
             liveKillZones.clear();
             for (const auto& kz : lv.killZones)
                 liveKillZones.push_back(kz);
+
+            // Conveyors
+            liveConveyors = lv.conveyors;
         };
 
     Texture2D* image = &imgMarioIdle;
@@ -2281,7 +2294,19 @@ int main(void)
                 }
             }
 
-            // ── Win Condition ─────────────────────────────────────────────────
+            // ── Conveyor push ─────────────────────────────────────────────────
+            for (const auto& cv : liveConveyors) {
+                float rad = cv.rotation * DEG2RAD;
+                Rectangle belt = { cv.x, cv.y, cv.length, cv.beltH + 6.f };
+                float rawPush = cv.direction * cv.speed * dt;
+                float px2 = rawPush * cosf(rad);
+                float py2 = rawPush * sinf(rad);
+                if (isGrounded && CheckCollisionRecs(player, belt))
+                    velocityX += px2;
+                for (auto& en : enemies)
+                    if (en.grounded && CheckCollisionRecs(en.hitbox, belt))
+                        en.velocity.x += px2;
+            }
             if (CheckCollisionRecs(wincondition, player))
             {
                 LevelData nextLv;
@@ -2551,6 +2576,38 @@ int main(void)
                 }
             }
 
+            // 3.05 Conveyors
+            {
+                int frame = (int)(GetTime() * 6.0) & 1;
+                Texture2D& side = ConvSide[frame];
+                Texture2D& mid = ConvM[frame];
+                for (const auto& cv : liveConveyors) {
+                    float rad = cv.rotation * DEG2RAD;
+                    float ca = cosf(rad), sa = sinf(rad);
+                    float ecW = cv.endCapW, bH = cv.beltH;
+                    float midW = fmaxf(0.f, cv.length - 2.f * ecW);
+                    // Draw section at local-x offset; flipH mirrors the source rect
+                    auto DrawSec = [&](Texture2D& tex, float lx, float w, bool flipH) {
+                        if (tex.id == 0) return;
+                        float srcX = flipH ? (float)tex.width : 0.f;
+                        float srcW = flipH ? -(float)tex.width : (float)tex.width;
+                        float wx = cv.x + lx * ca, wy = cv.y + lx * sa;
+                        DrawTexturePro(tex, { srcX, 0, srcW, (float)tex.height },
+                            { wx, wy, w, bH }, {}, cv.rotation, WHITE);
+                        };
+                    DrawSec(side, 0.f, ecW, false);         // left cap (faces left, as-is)
+                    if (mid.id > 0 && midW > 0.f) {
+                        float tw = (float)mid.width;
+                        for (float lx = ecW; lx < ecW + midW; lx += tw) {
+                            float sw = fminf(tw, ecW + midW - lx);
+                            DrawTexturePro(mid, { 0, 0, sw, (float)mid.height },
+                                { cv.x + lx * ca, cv.y + lx * sa, sw, bH }, {}, cv.rotation, WHITE);
+                        }
+                    }
+                    DrawSec(side, cv.length - ecW, ecW, true); // right cap (flipped)
+                }
+            }
+
             // 3.1 Elevator-child beams — drawn live every frame
             {
                 const float bScale = 4.f;
@@ -2563,7 +2620,7 @@ int main(void)
                     const Vector2& pos = beamPositions[bi];
                     DrawTexturePro(beam,
                         { 0, 0, (float)beam.width, (float)beam.height },
-                        { pos.x, pos.y, beam.width * bScale, beam.height * bScale },
+                        { pos.x, pos.y, (float)beam.width * bScale, (float)beam.height * bScale },
                         { 0, 0 }, 0.f, WHITE);
                 }
             }
@@ -2696,7 +2753,7 @@ int main(void)
                     float thisH = image->height * scale;
                     float drawY = player.y + 10.0f + (baseH - thisH);
                     Rectangle src = { 0, 0, (float)image->width, (float)image->height };
-                    Rectangle dest = { player.x, drawY, image->width * scale, thisH };
+                    Rectangle dest = { player.x, drawY, (float)image->width * scale, thisH };
                     if (!facingRight && !onLadder) src.width *= -1;
                     DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
 
@@ -2722,7 +2779,7 @@ int main(void)
                 if (!b.active) continue;
                 Texture2D** rollSet = b.isBlue ? blueBarrelRoll : barrelRoll;
                 Texture2D** fallSet = b.isBlue ? blueBarrelFall : barrelFall;
-                Texture2D* tex;
+                Texture2D* tex = nullptr;
                 if (b.isFalling) tex = fallSet[b.animFrame % 2];
                 else
                 {
@@ -2760,7 +2817,7 @@ int main(void)
             // 7. HUD
             for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
             {
-                const char* scoreTxt = TextFormat("SCORE: %d", score);
+                const char* scoreTxt = TextFormat("SCORE: %u", score);
                 int sw = MeasureText(scoreTxt, 26);
                 DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW);
             }
@@ -2949,7 +3006,7 @@ int main(void)
             else
             {
                 DrawText("GAME OVER", 300, 380, 50, RED);
-                const char* scoreTxt = TextFormat("SCORE: %d", score);
+                const char* scoreTxt = TextFormat("SCORE: %u", score);
                 int sw = MeasureText(scoreTxt, 32);
                 DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
             }
