@@ -90,6 +90,14 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "KILL_ZONE %.2f %.2f %.2f %.2f %d %.2f %d\n",
             kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.rotation, kz.renderLayer);
 
+    // ── NEW: Lights ────────────────────────────────────────────────────────
+    // type x y r g b intensity radius angle direction bounces fog enabled
+    for (const auto& L : lv.lights)
+        fprintf(f, "LIGHT %d %.2f %.2f %.4f %.4f %.4f %.3f %.2f %.2f %.2f %d %.3f %d\n",
+            (int)L.type, L.x, L.y, L.r, L.g, L.b,
+            L.intensity, L.radius, L.angle, L.direction,
+            L.bounces, L.fogStrength, L.enabled ? 1 : 0);
+
     fclose(f);
     return true;
 }
@@ -189,13 +197,24 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         else if (strcmp(tag, "KILL_ZONE") == 0) {
             KillZoneData kz; int texId = 0, rl = 1;
             int parsed = fscanf(f, "%f %f %f %f %d %f %d", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.rotation, &rl);
-            if (parsed < 6) kz.rotation = 0.f;  // backward-compat: old files have no rotation
-            if (parsed < 7) rl = 1;              // backward-compat: old files have no renderLayer
+            if (parsed < 6) kz.rotation = 0.f;
+            if (parsed < 7) rl = 1;
             kz.texId = (KillZoneTexture)texId;
             kz.renderLayer = rl;
             out.killZones.push_back(kz);
         }
-        // unknown tag: skip rest of line
+        // ── NEW: Light ─────────────────────────────────────────────────────
+        else if (strcmp(tag, "LIGHT") == 0) {
+            LightData L;
+            int t = 0, en = 1;
+            int parsed = fscanf(f, "%d %f %f %f %f %f %f %f %f %f %d %f %d",
+                &t, &L.x, &L.y, &L.r, &L.g, &L.b,
+                &L.intensity, &L.radius, &L.angle, &L.direction,
+                &L.bounces, &L.fogStrength, &en);
+            L.type = (LightType)t;
+            L.enabled = (parsed < 13) ? true : (en != 0);
+            out.lights.push_back(L);
+        }
         else { char buf[512]; fgets(buf, sizeof(buf), f); }
     }
 
@@ -213,15 +232,14 @@ LevelData GetDefaultLevel1()
     lv.valid = true;
 
     lv.hasPlayerSpawn = true;
-    lv.playerSpawn = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f };   // = 269
+    lv.playerSpawn = { 35.0f + 64.0f * 3.5f + 10.0f, 817.0f };
 
     lv.hasRegulus = true;
     lv.regulusPos = { 22.0f, 225.0f };
 
     lv.hasCave = true;
-    lv.cavePos = { 35.0f, 768.0f };   // houseX, houseY (880 - 32*3.5)
+    lv.cavePos = { 35.0f, 768.0f };
 
-    // ── Platforms ────────────────────────────────────────────────────────────
     lv.platforms = {
         { 27,  880, 412, 0,  0.0f },
         { 430, 870, 420, 0, -3.0f },
@@ -233,7 +251,6 @@ LevelData GetDefaultLevel1()
         { 60,  240, 400, 0,  0.0f },
     };
 
-    // ── Ladders ──────────────────────────────────────────────────────────────
     lv.ladders = {
         { 675, 245, 40, 104 },
         { 160, 375, 40, 102 },
@@ -245,7 +262,6 @@ LevelData GetDefaultLevel1()
         { 670, 760, 40, 105 },
     };
 
-    // ── Barrel path (28 nodes) ────────────────────────────────────────────────
     lv.pathNodes = {
         { 125, 210, { 1,-1},  9, false },
         { 438, 210, { 2,-1},  5, false },
@@ -277,7 +293,6 @@ LevelData GetDefaultLevel1()
         { 148, 850, {-1,-1},  5, false },
     };
 
-    // ── Beam positions (decorative) ───────────────────────────────────────────
     lv.beams = {
         {  50,225},{114,225},{178,225},{212,225},{276,225},{340,225},
         {372,225},{436,230},{468,230},{532,235},{564,235},{628,240},
@@ -300,25 +315,19 @@ LevelData GetDefaultLevel1()
         {360,120},{424,120},{456,120},{296,150},{264,150},
     };
 
-    // ── Nuke spawns ───────────────────────────────────────────────────────────
     lv.nukeSpawns = {
         {150,845},{330,845},{180,693},{480,693},{650,693},
         {250,563},{570,563},{150,433},{500,433},{300,303},
     };
-
-    // ── Beatrice spawns ───────────────────────────────────────────────────────
     lv.beatriceSpawns = {
         {250,750},{500,750},{150,620},{420,620},{660,620},
         {200,490},{480,490},{310,360},{560,360},
     };
-
-    // ── Enemy spawns ──────────────────────────────────────────────────────────
     lv.enemySpawns = {
         {180,706},{620,706},{200,576},{550,576},
         {160,446},{520,446},{200,316},{500,316},
     };
 
-    // ── Win zone (top of the level, near Regulus) ─────────────────────────────
     lv.hasWinZone = true;
     lv.winZone = { 22.f, 180.f, 160.f, 60.f };
 

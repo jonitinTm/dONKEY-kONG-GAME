@@ -43,15 +43,12 @@ struct WinZoneData {
 };
 
 // ── Beam ──────────────────────────────────────────────────────────────────────
-// texVariant: 0 = default "Dk_FloorPart", 1-10 = "Dk_FloorPart1" .. "Dk_FloorPart10"
-// renderLayer: 0 = below kill-zones (default), higher = drawn later (on top)
-
 struct BeamData {
     float x = 0.f;
     float y = 0.f;
-    int   texVariant = 0;   // 0 = Dk_FloorPart (default), 1-10 = variant
-    int   renderLayer = 0;   // 0 = default (below kill zones)
-    bool  flipX = false;     // mirror texture left-right
+    int   texVariant = 0;
+    int   renderLayer = 0;
+    bool  flipX = false;
 };
 
 // ── Kill zone ─────────────────────────────────────────────────────────────────
@@ -66,9 +63,9 @@ struct KillZoneData {
     float          y = 0.f;
     float          w = 64.f;
     float          h = 64.f;
-    float          rotation = 0.f;       // true rotation in degrees (0/90/180/270)
+    float          rotation = 0.f;
     KillZoneTexture texId = KillZoneTexture::NONE;
-    int            renderLayer = 1;      // 1 = default (above beams at layer 0)
+    int            renderLayer = 1;
 };
 
 // ── Conveyor belt ─────────────────────────────────────────────────────────────
@@ -76,26 +73,63 @@ struct KillZoneData {
 struct ConveyorData {
     float x = 0.f;
     float y = 0.f;
-    float length = 192.f;   // total belt length (both end caps + tiled middle)
-    float speed = 80.f;     // px/sec push force applied to objects on top
-    int   direction = 1;    // 1 = right, -1 = left
-    float rotation = 0.f;   // degrees
-    float endCapW = 32.f;   // width of each end cap (matches texture native width)
-    float beltH = 24.f;   // height (matches texture native height)
+    float length = 192.f;
+    float speed = 80.f;
+    int   direction = 1;
+    float rotation = 0.f;
+    float endCapW = 32.f;
+    float beltH = 24.f;
 };
 
 // ── Elevator ─────────────────────────────────────────────────────────────────
 
 struct ElevatorData {
     float x = 0.f;
-    float y = 0.f;   // top of shaft
+    float y = 0.f;
     float w = 48.f;
     float h = 200.f;
-    float speed = 60.f;  // px/sec children move
-    int   direction = 1;   // 1 = children go up, -1 = down
+    float speed = 60.f;
+    int   direction = 1;
 };
 
-// ── Generic entity reference (type = EditorTool int, index = vector index) ───
+// ── Light ─────────────────────────────────────────────────────────────────────
+// One struct covers all three light types. Set `type` to choose semantics:
+//   POINT : omnidirectional, falloff by `radius`.
+//   SPOT  : `direction` (degrees, 0 = right, 90 = down) and `angle` (full cone).
+//   SKY   : directional ambient — `direction` is the angle the sky comes FROM,
+//           e.g. 270 = light comes from directly above (since +Y is down).
+//           `radius` doubles as the max ray length we trace toward the sky.
+
+enum class LightType : int {
+    POINT = 0,
+    SPOT = 1,
+    SKY = 2,
+};
+
+struct LightData {
+    LightType type = LightType::POINT;
+
+    float x = 0.f;
+    float y = 0.f;
+
+    // Color in linear 0..1
+    float r = 1.f;
+    float g = 0.92f;
+    float b = 0.78f;
+
+    float intensity = 1.0f;     // emissiveness multiplier
+    float radius = 220.f;    // POINT/SPOT falloff; SKY: max trace dist
+
+    float angle = 60.f;     // SPOT: cone full-angle in degrees
+    float direction = 270.f;    // SPOT: aim dir; SKY: incoming dir (270 = from above)
+
+    int   bounces = 0;        // 0 = direct only; 1 = enable GI bounce pass
+    float fogStrength = 0.f;      // 0 = no volumetric fog; ~0.5 = nice god rays
+
+    bool  enabled = true;
+};
+
+// ── Generic entity reference ─────────────────────────────────────────────────
 
 struct EntityRef {
     int type = -1;
@@ -107,7 +141,6 @@ struct EntityRef {
 };
 
 // ── Parent-child relationship ─────────────────────────────────────────────────
-// For elevator children, offsetY is the initial phase (0..elev.h) at attachment.
 
 struct ParentChildRelation {
     EntityRef parent;
@@ -120,19 +153,17 @@ struct ParentChildRelation {
 
 struct LevelData {
     int  id = 0;
-    bool valid = false;    // false → not loaded yet
+    bool valid = false;
 
-    // ── Singleton entities ──────────────────────────────────────────────────
     bool    hasPlayerSpawn = false;
     Vector2 playerSpawn = { 269.f, 817.f };
 
     bool    hasRegulus = false;
-    Vector2 regulusPos = { 22.f,  225.f };    // x = REGULUS_X, y = platform top
+    Vector2 regulusPos = { 22.f,  225.f };
 
     bool    hasCave = false;
-    Vector2 cavePos = { 35.f,  768.f };       // houseX, houseY
+    Vector2 cavePos = { 35.f,  768.f };
 
-    // ── Multi-instance entities ─────────────────────────────────────────────
     std::vector<PlatformData> platforms;
     std::vector<LadderData>   ladders;
     std::vector<BeamData>     beams;
@@ -144,23 +175,17 @@ struct LevelData {
     std::vector<ConveyorData>        conveyors;
     std::vector<ParentChildRelation> relations;
 
-    // ── Zone entities ───────────────────────────────────────────────────────
     bool         hasWinZone = false;
     WinZoneData  winZone;
     std::vector<KillZoneData> killZones;
+
+    // ── NEW: Lights ─────────────────────────────────────────────────────────
+    std::vector<LightData> lights;
 };
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
-/// Save  →  <folder>/level_<id>.lvl   (creates folder if needed)
 bool SaveLevel(const LevelData& lv, const char* folder = "Levels");
-
-/// Load  ←  <folder>/level_<id>.lvl
-/// Returns false if the file does not exist.
 bool LoadLevel(LevelData& out, int id, const char* folder = "Levels");
-
-/// Returns the hardcoded level 1 (exact copy of main_patch.cpp data).
 LevelData GetDefaultLevel1();
-
-/// Writes a self-contained C++ snippet you can paste into main_patch.cpp.
 void ExportLevelAsCpp(const LevelData& lv, const char* outFile = "LevelExport.cpp");
