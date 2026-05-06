@@ -784,6 +784,20 @@ int main(void)
     Texture2D imgMarioClimbEnd1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd1.png");
     Texture2D imgMarioClimbEnd2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd2.png");
     Texture2D imgMarioClimbDown = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_IdleBack.png");
+
+    // ── Emote / SubaruDance textures ──────────────────────────────────────────
+    static constexpr int EMOTE_FRAME_COUNT = 5;
+    Texture2D imgSubaruDance[EMOTE_FRAME_COUNT] = {
+        LoadTexture("Assets/Textures/Characters/Mario/SubaruDance1.png"),
+        LoadTexture("Assets/Textures/Characters/Mario/SubaruDance2.png"),
+        LoadTexture("Assets/Textures/Characters/Mario/SubaruDance3.png"),
+        LoadTexture("Assets/Textures/Characters/Mario/SubaruDance4.png"),
+        LoadTexture("Assets/Textures/Characters/Mario/SubaruDance5.png"),
+    };
+    bool  isEmoting = false;
+    int   emoteFrame = 0;
+    float emoteTimer = 0.f;
+    static constexpr float EMOTE_FRAME_SPD = 0.12f;  // seconds per dance frame
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
     Texture2D RopeTex = LoadTexture("Assets/Textures/Architecture/Rope.png");
     Texture2D GoldenPistonTex = LoadTexture("Assets/Textures/Items/GoldenPiston.png");
@@ -926,7 +940,9 @@ int main(void)
         if (b.renderLayer > 0) continue;  // high-layer beams drawn live after kill zones
         Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
             ? &beamVariants[b.texVariant - 1] : &beam;
-        DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+        float bSrcX = b.flipX ? (float)bTex->width : 0.f;
+        float bSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
+        DrawTexturePro(*bTex, { bSrcX, 0, bSrcW, (float)bTex->height },
             { b.x, b.y, (float)bTex->width * beamScale, (float)bTex->height * beamScale },
             { 0, 0 }, 0.f, WHITE);
     }
@@ -994,7 +1010,9 @@ int main(void)
                 if (isElevChild) continue;
                 Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
                     ? &beamVariants[b.texVariant - 1] : &beam;
-                DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+                float rbSrcX = b.flipX ? (float)bTex->width : 0.f;
+                float rbSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
+                DrawTexturePro(*bTex, { rbSrcX, 0, rbSrcW, (float)bTex->height },
                     { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
                     { 0, 0 }, 0.f, WHITE);
             }
@@ -1203,6 +1221,9 @@ int main(void)
             ladderEntryClamp = false;
             walkFrame = 0;
             animationTimer = 0.0f;
+            isEmoting = false;
+            emoteFrame = 0;
+            emoteTimer = 0.f;
             image = &imgMarioIdle;
         };
 
@@ -1394,8 +1415,8 @@ int main(void)
     {
         float dt = GetFrameTime();
 
-        // B = back to menu from anywhere, always
-        if (IsKeyPressed(KEY_B) && currentScreen != MENU) {
+        // N = back to menu from anywhere, always
+        if (IsKeyPressed(KEY_N) && currentScreen != MENU) {
             editor.ClearFlags();
             currentScreen = MENU;
         }
@@ -1441,8 +1462,8 @@ int main(void)
         // ── LEVEL EDITOR ──────────────────────────────────────────────────────
         else if (currentScreen == LEVEL_EDITOR)
         {
-            // B key checked here FIRST, before any editor code runs
-            if (IsKeyPressed(KEY_B)) {
+            // N key checked here FIRST, before any editor code runs
+            if (IsKeyPressed(KEY_N)) {
                 editor.ClearFlags();
                 Cinematic::Global.LoadAll();   // pick up any new sequences saved in editor
                 currentScreen = MENU;
@@ -1450,6 +1471,7 @@ int main(void)
             else {
                 editor.Update(dt);
                 if (editor.WantsMenu()) { editor.ClearFlags(); currentScreen = MENU; }
+                if (editor.WantsEmote()) { editor.ClearFlags(); /* emote not active in editor mode */ }
                 if (editor.WantsPlay()) {
                     editor.ClearFlags();
                     // Apply the editor's current level to the live game data
@@ -2283,7 +2305,28 @@ int main(void)
                     }
 
                     // ── Player animation selection ────────────────────────────
-                    if (isJumping)
+                    // B key: start emote (only when grounded and not moving)
+                    if (IsKeyPressed(KEY_B) && !isDying && isGrounded && !onLadder && !playerIsMoving)
+                    {
+                        isEmoting = true;
+                        emoteFrame = 0;
+                        emoteTimer = 0.f;
+                    }
+                    // Cancel emote if player starts moving or jumps
+                    if (isEmoting && (playerIsMoving || isJumping || isDying))
+                        isEmoting = false;
+                    // Advance emote animation; loop through frames 1-5
+                    if (isEmoting)
+                    {
+                        emoteTimer += dt;
+                        if (emoteTimer >= EMOTE_FRAME_SPD)
+                        {
+                            emoteTimer = fmod(emoteTimer, EMOTE_FRAME_SPD);
+                            emoteFrame = (emoteFrame + 1) % EMOTE_FRAME_COUNT;
+                        }
+                        image = &imgSubaruDance[emoteFrame];
+                    }
+                    else if (isJumping)
                     {
                         if (playerHasBeatrice)      image = &Dk_Mario_Jump_Beatrice;
                         else if (playerHasNuke)     image = &imgMarioJumpNuke;
@@ -2312,7 +2355,7 @@ int main(void)
                 }
             }
 
-            if (isDying) image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling;
+            if (isDying) { isEmoting = false; image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling; }
 
             // ── Kill Zone collision ───────────────────────────────────────────
             if (!isDying && !invincible) {
@@ -2662,6 +2705,26 @@ int main(void)
             // 3. Beams (static — pre-baked, excludes elevator children)
             DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
 
+            // 3.05b Elevator-child beams — drawn live, behind kill zones
+            {
+                const float bScale = 4.f;
+                for (int ri = 0; ri < (int)liveRelations.size(); ri++)
+                {
+                    const auto& rel = liveRelations[ri];
+                    if (rel.parent.type != 11 || rel.child.type != 6) continue;
+                    int bi = rel.child.index;
+                    if (bi < 0 || bi >= (int)beamPositions.size()) continue;
+                    const auto& b = beamPositions[bi];
+                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                        ? &beamVariants[b.texVariant - 1] : &beam;
+                    float ecSrcX = b.flipX ? (float)bTex->width : 0.f;
+                    float ecSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
+                    DrawTexturePro(*bTex, { ecSrcX, 0, ecSrcW, (float)bTex->height },
+                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
+                        { 0, 0 }, 0.f, WHITE);
+                }
+            }
+
             // 3.0 Kill zones
             for (const auto& kz : liveKillZones) {
                 if (kz.texId == KillZoneTexture::DK_GOLDEN_PISTON && GoldenPistonTex.id > 0) {
@@ -2698,7 +2761,9 @@ int main(void)
                     if (isElevChild) continue;
                     Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
                         ? &beamVariants[b.texVariant - 1] : &beam;
-                    DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+                    float hlSrcX = b.flipX ? (float)bTex->width : 0.f;
+                    float hlSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
+                    DrawTexturePro(*bTex, { hlSrcX, 0, hlSrcW, (float)bTex->height },
                         { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
                         { 0, 0 }, 0.f, WHITE);
                 }
@@ -2740,24 +2805,6 @@ int main(void)
                         }
                     }
                     DrawSec(side, cv.length - ecW, ecW, true); // right cap (flipped)
-                }
-            }
-
-            // 3.1 Elevator-child beams — drawn live every frame
-            {
-                const float bScale = 4.f;
-                for (int ri = 0; ri < (int)liveRelations.size(); ri++)
-                {
-                    const auto& rel = liveRelations[ri];
-                    if (rel.parent.type != 11 || rel.child.type != 6) continue;
-                    int bi = rel.child.index;
-                    if (bi < 0 || bi >= (int)beamPositions.size()) continue;
-                    const auto& b = beamPositions[bi];
-                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
-                        ? &beamVariants[b.texVariant - 1] : &beam;
-                    DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
-                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
-                        { 0, 0 }, 0.f, WHITE);
                 }
             }
 
