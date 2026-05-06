@@ -54,7 +54,7 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "LADDER %.2f %.2f %.2f %.2f\n", l.x, l.y, l.w, l.h);
 
     for (const auto& b : lv.beams)
-        fprintf(f, "BEAM %.2f %.2f %d %d\n", b.x, b.y, b.texVariant, b.renderLayer);
+        fprintf(f, "BEAM %.2f %.2f %d %d %d\n", b.x, b.y, b.texVariant, b.renderLayer, (int)b.flipX);
 
     for (const auto& n : lv.pathNodes)
         fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d\n",
@@ -134,9 +134,11 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         }
         else if (strcmp(tag, "BEAM") == 0) {
             BeamData b;
-            int parsed = fscanf(f, "%f %f %d %d", &b.x, &b.y, &b.texVariant, &b.renderLayer);
+            int flipXi = 0;
+            int parsed = fscanf(f, "%f %f %d %d %d", &b.x, &b.y, &b.texVariant, &b.renderLayer, &flipXi);
             if (parsed < 3) b.texVariant = 0;
             if (parsed < 4) b.renderLayer = 0;
+            b.flipX = (parsed >= 5 && flipXi != 0);
             out.beams.push_back(b);
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
@@ -359,7 +361,7 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
 
     fprintf(f, "// Beam positions\nvector<BeamData> beamPositions = {\n");
     for (int i = 0; i < (int)lv.beams.size(); i++) {
-        fprintf(f, "    { %.0f, %.0f, %d, %d },", lv.beams[i].x, lv.beams[i].y, lv.beams[i].texVariant, lv.beams[i].renderLayer);
+        fprintf(f, "    { %.0f, %.0f, %d, %d, %s },", lv.beams[i].x, lv.beams[i].y, lv.beams[i].texVariant, lv.beams[i].renderLayer, lv.beams[i].flipX ? "true" : "false");
         if ((i + 1) % 6 == 0) fprintf(f, "\n");
     }
     fprintf(f, "\n};\n\n");

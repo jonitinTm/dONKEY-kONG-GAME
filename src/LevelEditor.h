@@ -57,9 +57,10 @@ public:
         _convM[0] = mid1;  _convM[1] = mid2;  _convM[2] = mid3;
     }
 
-    bool WantsMenu() const { return _wantsMenu; }
-    bool WantsPlay() const { return _wantsPlay; }
-    void ClearFlags() { _wantsMenu = false; _wantsPlay = false; }
+    bool WantsMenu()  const { return _wantsMenu; }
+    bool WantsPlay()  const { return _wantsPlay; }
+    bool WantsEmote() const { return _wantsEmote; }
+    void ClearFlags() { _wantsMenu = false; _wantsPlay = false; _wantsEmote = false; }
 
     void SetGameTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder,
         Texture2D* player, Texture2D* regulus, Texture2D* cave,
@@ -142,7 +143,7 @@ private:
     EditorTool  _tool = EditorTool::SELECT;
     GizmoMode   _gizmo = GizmoMode::SELECT;
     SelectedEnt _sel;
-    bool _gridOn = true, _wantsMenu = false, _wantsPlay = false;
+    bool _gridOn = true, _wantsMenu = false, _wantsPlay = false, _wantsEmote = false;
     int  _gridDiv = 1;
 
     GizmoAxis _gizmoHot = GizmoAxis::NONE;

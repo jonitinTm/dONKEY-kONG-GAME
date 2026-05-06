@@ -51,6 +51,7 @@ struct BeamData {
     float y = 0.f;
     int   texVariant = 0;   // 0 = Dk_FloorPart (default), 1-10 = variant
     int   renderLayer = 0;   // 0 = default (below kill zones)
+    bool  flipX = false;     // mirror texture left-right
 };
 
 // ── Kill zone ─────────────────────────────────────────────────────────────────

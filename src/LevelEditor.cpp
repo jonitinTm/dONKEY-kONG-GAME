@@ -828,6 +828,8 @@ void LevelEditor::UpdateToolbar() {
                 if (IsKeyPressed(KEY_LEFT) && _levelId > 1) { SaveCurrentLevel(); LoadLevel(_levelId - 1); }
                 if (IsKeyPressed(KEY_RIGHT) && _levelId < 10) { SaveCurrentLevel(); LoadLevel(_levelId + 1); }
             }
+            if (IsKeyPressed(KEY_B)) { _wantsEmote = true; SetStatus("Emote!"); }
+            if (IsKeyPressed(KEY_N)) { _wantsMenu = true; }
         }
     } // end !_fieldTyping
 
@@ -840,7 +842,7 @@ void LevelEditor::UpdateToolbar() {
     if (CheckCollisionPointRec(mouse, TBtn(4))) { _gridDiv = (_gridDiv == 1) ? 2 : (_gridDiv == 2) ? 4 : 1; SetStatus(TextFormat("Grid ÷%d", _gridDiv)); }
     if (CheckCollisionPointRec(mouse, TBtn(5))) SaveCurrentLevel();
     if (CheckCollisionPointRec(mouse, TBtn(6))) { SaveCurrentLevel(); _wantsPlay = true; }
-    if (CheckCollisionPointRec(mouse, TBtn(7))) _wantsMenu = true;
+    if (CheckCollisionPointRec(mouse, TBtn(7))) _wantsEmote = true;
 }
 
 Rectangle LevelEditor::BrowserBtn(int row, int col, int cols) const {
@@ -1132,11 +1134,11 @@ void LevelEditor::Update(float dt) {
     }
 
     if (_seqOpen) UpdateSequencer();
-    if (_wantsMenu || _wantsPlay) return;
+    if (_wantsMenu || _wantsPlay || _wantsEmote) return;
     if (_directOp != DirectOp::NONE) { UpdateDirectOp(); return; }
 
     UpdateToolbar();
-    if (_wantsMenu || _wantsPlay) return;
+    if (_wantsMenu || _wantsPlay || _wantsEmote) return;
 
     UpdateBrowser();
     UpdateRightPanel();
@@ -1203,7 +1205,10 @@ void LevelEditor::DrawBeamEnt(const BeamData& b, bool sel, bool msel) const {
 
     if (tex) {
         float s = 4.f, w = tex->width * s, h = tex->height * s;
-        DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { b.x, b.y, w, h }, {}, 0.f, WHITE);
+        // flipX: negative source width mirrors the texture horizontally
+        float srcX = b.flipX ? (float)tex->width : 0.f;
+        float srcW = b.flipX ? -(float)tex->width : (float)tex->width;
+        DrawTexturePro(*tex, { srcX, 0, srcW, (float)tex->height }, { b.x, b.y, w, h }, {}, 0.f, WHITE);
         if (sel)            DrawRectangleLinesEx({ b.x, b.y, w, h }, 2.f, YELLOW);
         if (msel && !sel)   DrawRectangleLinesEx({ b.x, b.y, w, h }, 2.f, { 255,200,0,200 });
     }
@@ -1409,7 +1414,7 @@ void LevelEditor::DrawToolbarUI() const {
     TB(0, "<", { 40,42,55,255 }, WHITE); TB(1, TextFormat("Lv%d", _levelId), { 50,55,75,255 }, YELLOW);
     TB(2, ">", { 40,42,55,255 }, WHITE); TB(3, _gridOn ? "H:Grid ON" : "H:Grid OFF", { 40,42,55,255 }, _gridOn ? GREEN : GRAY);
     TB(4, TextFormat("÷%d", _gridDiv), { 40,42,55,255 }, { 100,200,255,255 });
-    TB(5, "^S Save", { 30,80,50,255 }, WHITE); TB(6, "PLAY", { 30,60,100,255 }, WHITE); TB(7, "B: MENU", { 80,30,30,255 }, WHITE);
+    TB(5, "^S Save", { 30,80,50,255 }, WHITE); TB(6, "PLAY", { 30,60,100,255 }, WHITE); TB(7, "B: EMOTE", { 60,30,80,255 }, WHITE);
     const char* gn[] = { "1/Q:SEL","2/W:MOV","3/E:ROT","4:SCL" };
     Color gc[] = { LIGHTGRAY,{230,60,60,255},{220,150,0,255},{60,210,60,255} };
     float gx = 4.f;
@@ -1439,7 +1444,7 @@ void LevelEditor::DrawBrowserUI() {
     for (int c = 0; c < 3; c++) DT(2, c, 6, r2[c]);
     float sy = (float)(_sh - 18);
     DrawRectangle(0, (int)sy - 2, _canvasW, 20, { 18,20,28,255 });
-    const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Menu Tab=Seq";
+    const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Emote N=Menu Tab=Seq";
     DrawText(smsg, 6, (int)sy, 10, _statusTimer > 0.f ? YELLOW : Color{ 90,95,110,255 });
 }
 
@@ -1744,7 +1749,21 @@ void LevelEditor::DrawDataPanel() {
             cy += rowH;
         }
         DrawText("0=below killzones, 1+=above", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 13;
-    }
+        // ── Flip X ────────────────────────────────────────────────────────────
+        SectionHeader("── Flip ───────────────────");
+        {
+            Rectangle flipR = { px, cy, fw, 18 };
+            bool hFlip = CheckCollisionPointRec(GetMousePosition(), flipR);
+            DrawRectangleRec(flipR, bm.flipX ? Color{ 40,20,80,255 } : (hFlip ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+            DrawRectangleLinesEx(flipR, bm.flipX ? 2.f : 1.f, bm.flipX ? Color{ 180,100,255,255 } : Color{ 70,75,100,255 });
+            const char* flipLbl = bm.flipX ? "Flip X: ON  ◀▶" : "Flip X: OFF  ▶◀";
+            int flw = MeasureText(flipLbl, 9);
+            DrawText(flipLbl, (int)(flipR.x + flipR.width / 2 - flw / 2), (int)flipR.y + 5, 9,
+                bm.flipX ? Color{ 200,150,255,255 } : Color{ 170,175,200,255 });
+            if (hFlip && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.flipX = !bm.flipX; }
+            cy += 22;
+        }
+    }   // end BEAM section
     if (_sel.type == (int)EditorTool::WIN_ZONE) {
         auto& wz = _level.winZone;
         SectionHeader("── Win Zone ───────────────");
