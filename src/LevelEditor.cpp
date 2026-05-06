@@ -2458,11 +2458,16 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
     DrawSec(_convSide[frame], 0.f, ecW, false);   // left — as-is (faces left)
     if (midW > 0.f) {
         if (_convM[frame] && _convM[frame]->id > 0) {
-            float tw = (float)_convM[frame]->width;
-            for (float lx = ecW; lx < ecW + midW; lx += tw) {
-                float sw = fminf(tw, ecW + midW - lx);
-                DrawTexturePro(*_convM[frame], { 0, 0, sw, (float)_convM[frame]->height },
-                    { cv.x + lx * ca, cv.y + lx * sa, sw, bH }, {}, cv.rotation, WHITE);
+            // Tile the middle at ecW world-pixels per tile (same visual size as
+            // the side caps).  Partial last tiles are source-cropped, not stretched.
+            float tileDisp = ecW;
+            for (float lx = ecW; lx < ecW + midW; lx += tileDisp) {
+                float drawW = fminf(tileDisp, ecW + midW - lx);
+                float srcCropW = (float)_convM[frame]->width * (drawW / tileDisp);
+                DrawTexturePro(*_convM[frame],
+                    { 0, 0, srcCropW, (float)_convM[frame]->height },
+                    { cv.x + lx * ca, cv.y + lx * sa, drawW, bH },
+                    {}, cv.rotation, WHITE);
             }
         }
         else {

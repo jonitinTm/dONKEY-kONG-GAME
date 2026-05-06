@@ -548,6 +548,7 @@ int main(void)
     vector<float>               elevChildPhases;
     vector<KillZoneData>        liveKillZones;
     vector<ConveyorData>        liveConveyors;
+    int                         conveyorPlatStart = 0; // index in platforms[] where conveyor surfaces begin
 
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
@@ -1085,6 +1086,14 @@ int main(void)
 
             // Conveyors
             liveConveyors = lv.conveyors;
+
+            // Add a thin invisible platform at the top surface of each conveyor
+            // so that physics (CollisionManager) can land entities on them.
+            // These are appended AFTER the real level platforms so they can be
+            // stripped and rebuilt on each ApplyLevelData without bookkeeping.
+            conveyorPlatStart = (int)platforms.size();
+            for (const auto& cv : lv.conveyors)
+                platforms.push_back(Platform::Make(cv.x, cv.y, cv.length, 0.f, cv.rotation));
         };
 
     Texture2D* image = &imgMarioIdle;
@@ -2295,17 +2304,93 @@ int main(void)
             }
 
             // ── Conveyor push ─────────────────────────────────────────────────
-            for (const auto& cv : liveConveyors) {
+            // Direct position drift applied AFTER collision resolution so the
+            // effect is constant and frame-rate-independent.  Velocity is NOT
+            // touched — the belt nudges world position each tick, exactly like
+            // a real conveyor surface.  Collision surfaces are added to platforms[]
+            // in ApplyLevelData so entities actually land on the belt.
+            for (int cvi = 0; cvi < (int)liveConveyors.size(); cvi++) {
+                const ConveyorData& cv = liveConveyors[cvi];
                 float rad = cv.rotation * DEG2RAD;
-                Rectangle belt = { cv.x, cv.y, cv.length, cv.beltH + 6.f };
-                float rawPush = cv.direction * cv.speed * dt;
-                float px2 = rawPush * cosf(rad);
-                float py2 = rawPush * sinf(rad);
-                if (isGrounded && CheckCollisionRecs(player, belt))
-                    velocityX += px2;
-                for (auto& en : enemies)
-                    if (en.grounded && CheckCollisionRecs(en.hitbox, belt))
-                        en.velocity.x += px2;
+                float driftX = cv.direction * cv.speed * dt * cosf(rad);
+                float driftY = cv.direction * cv.speed * dt * sinf(rad);
+
+                // Detection zone: a few pixels above the visual top so entities
+                // whose feet are flush with the platform edge are still caught.
+                Rectangle belt = { cv.x, cv.y - 4.f, cv.length, cv.beltH + 8.f };
+
+                // ── Player ──────────────────────────────────────────────────
+                if (!isDying && !onLadder && isGrounded) {
+                    float colW = player.width * 0.5f;
+                    float colH = player.height * 0.5f;
+                    float offX = (player.width - colW) * 0.5f;
+                    float offY = player.height - colH;
+                    Rectangle feet = { player.x + offX, player.y + offY, colW, colH };
+                    if (CheckCollisionRecs(feet, belt)) {
+                        player.x += driftX;
+                        player.y += driftY;
+                    }
+                }
+
+                // ── Enemies ──────────────────────────────────────────────────
+                for (auto& en : enemies) {
+                    if (!en.active || !en.grounded) continue;
+                    if (CheckCollisionRecs(en.hitbox, belt)) {
+                        en.hitbox.x += driftX;
+                        en.hitbox.y += driftY;
+                    }
+                }
+
+                // ── Barrels ──────────────────────────────────────────────────
+                // Only non-falling (rolling) barrels are affected.
+                for (auto& b : barrels) {
+                    if (!b.active || b.isFalling) continue;
+                    Rectangle bFeet = { b.hitbox.x,
+                                        b.hitbox.y + b.hitbox.height - 6.f,
+                                        b.hitbox.width, 6.f };
+                    if (CheckCollisionRecs(bFeet, belt)) {
+                        b.hitbox.x += driftX;
+                        b.hitbox.y += driftY;
+                    }
+                }
+
+                // ── Relation children parented to this conveyor ──────────────
+                // Items (nukes, beatrices, beams…) placed on the belt in the
+                // editor will drift with the surface at runtime.
+                EntityRef convRef;
+                convRef.type = (int)EditorTool::CONVEYOR;
+                convRef.index = cvi;
+                for (const auto& rel : liveRelations) {
+                    if (rel.parent != convRef) continue;
+                    int ci = rel.child.index;
+                    switch (rel.child.type) {
+                    case (int)EditorTool::NUKE_SPAWN:
+                        if (ci >= 0 && ci < (int)nukeSpawnNodes.size())
+                        {
+                            nukeSpawnNodes[ci].x += driftX; nukeSpawnNodes[ci].y += driftY;
+                        }
+                        break;
+                    case (int)EditorTool::BEATRICE_SPAWN:
+                        if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())
+                        {
+                            beatriceSpawnNodes[ci].x += driftX; beatriceSpawnNodes[ci].y += driftY;
+                        }
+                        break;
+                    case (int)EditorTool::ENEMY_SPAWN:
+                        if (ci >= 0 && ci < (int)enemySpawnPositions.size())
+                        {
+                            enemySpawnPositions[ci].x += driftX; enemySpawnPositions[ci].y += driftY;
+                        }
+                        break;
+                    case (int)EditorTool::BEAM:
+                        if (ci >= 0 && ci < (int)beamPositions.size())
+                        {
+                            beamPositions[ci].x += driftX; beamPositions[ci].y += driftY;
+                        }
+                        break;
+                    default: break;
+                    }
+                }
             }
             if (CheckCollisionRecs(wincondition, player))
             {
@@ -2597,11 +2682,17 @@ int main(void)
                         };
                     DrawSec(side, 0.f, ecW, false);         // left cap (faces left, as-is)
                     if (mid.id > 0 && midW > 0.f) {
-                        float tw = (float)mid.width;
-                        for (float lx = ecW; lx < ecW + midW; lx += tw) {
-                            float sw = fminf(tw, ecW + midW - lx);
-                            DrawTexturePro(mid, { 0, 0, sw, (float)mid.height },
-                                { cv.x + lx * ca, cv.y + lx * sa, sw, bH }, {}, cv.rotation, WHITE);
+                        // Each middle tile is displayed at ecW world-pixels wide
+                        // (same as a side cap) so all three sections have identical
+                        // visual scale.  Partial last tiles are source-cropped so
+                        // the texture is never stretched — only tiled.
+                        float tileDisp = ecW;
+                        for (float lx = ecW; lx < ecW + midW; lx += tileDisp) {
+                            float drawW = fminf(tileDisp, ecW + midW - lx);
+                            float srcCropW = (float)mid.width * (drawW / tileDisp);
+                            DrawTexturePro(mid, { 0, 0, srcCropW, (float)mid.height },
+                                { cv.x + lx * ca, cv.y + lx * sa, drawW, bH },
+                                {}, cv.rotation, WHITE);
                         }
                     }
                     DrawSec(side, cv.length - ecW, ecW, true); // right cap (flipped)
