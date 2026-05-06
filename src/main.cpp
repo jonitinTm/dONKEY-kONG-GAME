@@ -709,7 +709,7 @@ int main(void)
     for (auto& bb : beaBullets) bb.active = false;
 
     // ── Beam positions ────────────────────────────────────────────────────────
-    vector<Vector2> beamPositions = {
+    vector<BeamData> beamPositions = {
         {  50, 225 }, { 114, 225 }, { 178, 225 }, { 212, 225 },
         { 276, 225 }, { 340, 225 }, { 372, 225 }, { 436, 230 },
         { 468, 230 }, { 532, 235 }, { 564, 235 }, { 628, 240 },
@@ -772,6 +772,13 @@ int main(void)
     Texture2D imgMarioFalling = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Falling.png");
     Texture2D background = LoadTexture("Wiki/SubaruStairs.png");
     Texture2D beam = LoadTexture("Assets/Textures/Architecture/Dk_FloorPart.png");
+    // Variant beam textures (Dk_FloorPart1..10); missing files load as id=0 (graceful)
+    Texture2D beamVariants[10];
+    for (int i = 0; i < 10; i++) {
+        char path[128];
+        snprintf(path, sizeof(path), "Assets/Textures/Architecture/Dk_FloorPart%d.png", i + 1);
+        beamVariants[i] = LoadTexture(path);
+    }
     Texture2D imgMarioClimb1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder1.png");
     Texture2D imgMarioClimb2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder2.png");
     Texture2D imgMarioClimbEnd1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd1.png");
@@ -915,11 +922,14 @@ int main(void)
     BeginTextureMode(staticLayer);
     ClearBackground(BLANK);
     float beamScale = 4.0f;
-    for (auto& pos : beamPositions)
-        DrawTexturePro(beam,
-            { 0, 0, (float)beam.width, (float)beam.height },
-            { pos.x, pos.y, (float)beam.width * beamScale, (float)beam.height * beamScale },
+    for (auto& b : beamPositions) {
+        if (b.renderLayer > 0) continue;  // high-layer beams drawn live after kill zones
+        Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+            ? &beamVariants[b.texVariant - 1] : &beam;
+        DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+            { b.x, b.y, (float)bTex->width * beamScale, (float)bTex->height * beamScale },
             { 0, 0 }, 0.f, WHITE);
+    }
     EndTextureMode();
     // NOTE: beam texture is kept alive so RebuildLayers can rebake staticLayer
 
@@ -957,16 +967,24 @@ int main(void)
     editor.SetGameTextures(&background, &beam, &LadderPart,
         &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex, &GoldenPistonTex);
     editor.SetConveyorTextures(&ConvSide[0], &ConvSide[1], &ConvSide[2], &ConvM[0], &ConvM[1], &ConvM[2]);
+    {
+        Texture2D* bvPtrs[10];
+        for (int i = 0; i < 10; i++) bvPtrs[i] = &beamVariants[i];
+        editor.SetBeamVariantTextures(bvPtrs);
+    }
 
     // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
     auto RebuildLayers = [&]()
         {
-            // Beam layer — elevator-child beams are excluded and drawn live instead
+            // Beam layer — elevator-child beams and high-layer beams are excluded
+            // and drawn live instead
             float bScale = 4.0f;
             BeginTextureMode(staticLayer);
             ClearBackground(BLANK);
             for (int bi = 0; bi < (int)beamPositions.size(); bi++)
             {
+                const auto& b = beamPositions[bi];
+                if (b.renderLayer > 0) continue;  // drawn live after kill zones
                 bool isElevChild = false;
                 for (const auto& rel : liveRelations)
                     if (rel.parent.type == 11 && rel.child.type == 6 && rel.child.index == bi)
@@ -974,10 +992,10 @@ int main(void)
                         isElevChild = true; break;
                     }
                 if (isElevChild) continue;
-                const auto& pos = beamPositions[bi];
-                DrawTexturePro(beam,
-                    { 0, 0, (float)beam.width, (float)beam.height },
-                    { pos.x, pos.y, (float)beam.width * bScale, (float)beam.height * bScale },
+                Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                    ? &beamVariants[b.texVariant - 1] : &beam;
+                DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+                    { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
                     { 0, 0 }, 0.f, WHITE);
             }
             EndTextureMode();
@@ -1051,7 +1069,7 @@ int main(void)
 
             // Beam positions + rebuild baked layers
             beamPositions.clear();
-            for (const auto& v : lv.beams)           beamPositions.push_back(v);
+            for (const auto& b : lv.beams) beamPositions.push_back(b);
 
             // Cave / house position
             if (lv.hasCave) {
@@ -1348,8 +1366,9 @@ int main(void)
                     st.height > 0.f ? st.height : ladders[i].height);
             break;
         case 6: // BEAM
-            if (i >= 0 && i < (int)beamPositions.size())
-                beamPositions[i] = { st.x, st.y };
+            if (i >= 0 && i < (int)beamPositions.size()) {
+                beamPositions[i].x = st.x; beamPositions[i].y = st.y;
+            }
             break;
         case 7: // PATH NODE
             if (i >= 0 && i < (int)barrelPath.size()) {
@@ -1545,7 +1564,7 @@ int main(void)
                 switch (rel.child.type) {
                 case 4: if (ci >= 0 && ci < (int)platforms.size()) platforms[ci] = Platform::Make(cx, cy, platforms[ci].width, 0, 0.f); break;
                 case 5: if (ci >= 0 && ci < (int)ladders.size())   ladders[ci] = Ladder::Make(cx, cy, ladders[ci].width, ladders[ci].height); break;
-                case 6: if (ci >= 0 && ci < (int)beamPositions.size()) beamPositions[ci] = { cx, cy }; break;
+                case 6: if (ci >= 0 && ci < (int)beamPositions.size()) { beamPositions[ci].x = cx; beamPositions[ci].y = cy; } break;
                 case 8: if (ci >= 0 && ci < (int)nukeSpawnNodes.size())      nukeSpawnNodes[ci] = { cx,cy }; break;
                 case 9: if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[ci] = { cx,cy }; break;
                 case 10:if (ci >= 0 && ci < (int)enemySpawnPositions.size())  enemySpawnPositions[ci] = { cx,cy }; break;
@@ -2663,6 +2682,28 @@ int main(void)
                 }
             }
 
+            // 3.01 High-layer beams (renderLayer > 0) — drawn live, on top of kill zones
+            {
+                const float bScale = 4.f;
+                for (int bi = 0; bi < (int)beamPositions.size(); bi++) {
+                    const auto& b = beamPositions[bi];
+                    if (b.renderLayer <= 0) continue;
+                    // Skip elevator children (they're drawn separately below)
+                    bool isElevChild = false;
+                    for (const auto& rel : liveRelations)
+                        if (rel.parent.type == 11 && rel.child.type == 6 && rel.child.index == bi)
+                        {
+                            isElevChild = true; break;
+                        }
+                    if (isElevChild) continue;
+                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                        ? &beamVariants[b.texVariant - 1] : &beam;
+                    DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
+                        { 0, 0 }, 0.f, WHITE);
+                }
+            }
+
             // 3.05 Conveyors
             {
                 int rawFrame = (int)(GetTime() * 9.0) % 3;
@@ -2711,10 +2752,11 @@ int main(void)
                     if (rel.parent.type != 11 || rel.child.type != 6) continue;
                     int bi = rel.child.index;
                     if (bi < 0 || bi >= (int)beamPositions.size()) continue;
-                    const Vector2& pos = beamPositions[bi];
-                    DrawTexturePro(beam,
-                        { 0, 0, (float)beam.width, (float)beam.height },
-                        { pos.x, pos.y, (float)beam.width * bScale, (float)beam.height * bScale },
+                    const auto& b = beamPositions[bi];
+                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                        ? &beamVariants[b.texVariant - 1] : &beam;
+                    DrawTexturePro(*bTex, { 0, 0, (float)bTex->width, (float)bTex->height },
+                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
                         { 0, 0 }, 0.f, WHITE);
                 }
             }
@@ -3123,7 +3165,9 @@ int main(void)
     UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
-    UnloadTexture(beam);              UnloadTexture(LadderPart);
+    UnloadTexture(beam);
+    for (int i = 0; i < 10; i++) if (beamVariants[i].id > 0) UnloadTexture(beamVariants[i]);
+    UnloadTexture(LadderPart);
     UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
     UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
     UnloadTexture(BarrelFall1);       UnloadTexture(BarrelFall2);

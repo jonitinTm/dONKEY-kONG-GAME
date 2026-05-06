@@ -104,9 +104,15 @@ bool LevelEditor::PointInPlatform(Vector2 pt, const PlatformData& pd) const {
     return InT(pt, TL, TR, BL) || InT(pt, TR, BR, BL);
 }
 Rectangle LevelEditor::LadRect(const LadderData& l)    const { return { l.x,l.y,l.w,l.h }; }
-Rectangle LevelEditor::BeamRect(Vector2 pos)             const {
-    if (_beamTex && _beamTex->id > 0) { float s = 4.f; return { pos.x,pos.y,_beamTex->width * s,_beamTex->height * s }; }
-    return { pos.x - 8.f,pos.y - 4.f,16.f,8.f };
+Rectangle LevelEditor::BeamRect(const BeamData& b)            const {
+    // Use the variant texture if available, else fall back to the default beam texture
+    Texture2D* tex = nullptr;
+    if (b.texVariant >= 1 && b.texVariant <= 10 && _beamVariantTex[b.texVariant - 1] && _beamVariantTex[b.texVariant - 1]->id > 0)
+        tex = _beamVariantTex[b.texVariant - 1];
+    else if (_beamTex && _beamTex->id > 0)
+        tex = _beamTex;
+    if (tex) { float s = 4.f; return { b.x, b.y, tex->width * s, tex->height * s }; }
+    return { b.x - 8.f, b.y - 4.f, 16.f, 8.f };
 }
 Vector2 LevelEditor::PlatformCenter(const PlatformData& p) const {
     float h = (p.h > 0.f) ? p.h : 12.f, yr = p.w * tanf(p.tilt * DEG2RAD);
@@ -138,7 +144,7 @@ Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const {
     case EditorTool::CAVE:           return _level.cavePos;
     case EditorTool::PLATFORM:       return { _level.platforms[i].x,_level.platforms[i].y };
     case EditorTool::LADDER:         return { _level.ladders[i].x,_level.ladders[i].y };
-    case EditorTool::BEAM:           return _level.beams[i];
+    case EditorTool::BEAM:           return { _level.beams[i].x, _level.beams[i].y };
     case EditorTool::PATH_NODE:      return { _level.pathNodes[i].x,_level.pathNodes[i].y };
     case EditorTool::NUKE_SPAWN:     return _level.nukeSpawns[i];
     case EditorTool::BEATRICE_SPAWN: return _level.beatriceSpawns[i];
@@ -159,7 +165,7 @@ void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p) {
     case EditorTool::CAVE:           _level.cavePos = p;     break;
     case EditorTool::PLATFORM:       _level.platforms[i].x = p.x; _level.platforms[i].y = p.y; break;
     case EditorTool::LADDER:         _level.ladders[i].x = p.x;   _level.ladders[i].y = p.y;   break;
-    case EditorTool::BEAM:           _level.beams[i] = p; break;
+    case EditorTool::BEAM:           _level.beams[i].x = p.x; _level.beams[i].y = p.y; break;
     case EditorTool::PATH_NODE:      _level.pathNodes[i].x = p.x; _level.pathNodes[i].y = p.y; break;
     case EditorTool::NUKE_SPAWN:     _level.nukeSpawns[i] = p; break;
     case EditorTool::BEATRICE_SPAWN: _level.beatriceSpawns[i] = p; break;
@@ -329,7 +335,7 @@ void LevelEditor::CopySelected() {
         case EditorTool::LADDER:         ce.lad = _level.ladders[i]; break;
         case EditorTool::PATH_NODE:      ce.node = _level.pathNodes[i];
             ce.node.next[0] = -1; ce.node.next[1] = -1; break;
-        case EditorTool::BEAM:           ce.pos = _level.beams[i]; break;
+        case EditorTool::BEAM:           ce.beam = _level.beams[i]; break;
         case EditorTool::NUKE_SPAWN:     ce.pos = _level.nukeSpawns[i]; break;
         case EditorTool::BEATRICE_SPAWN: ce.pos = _level.beatriceSpawns[i]; break;
         case EditorTool::ENEMY_SPAWN:    ce.pos = _level.enemySpawns[i]; break;
@@ -372,7 +378,8 @@ void LevelEditor::PasteClipboard(bool grabAfter) {
         }
         case EditorTool::BEAM: {
             ne.index = (int)_level.beams.size();
-            _level.beams.push_back({ ce.pos.x + OFF,ce.pos.y + OFF }); break;
+            BeamData b = ce.beam; b.x += OFF; b.y += OFF;
+            _level.beams.push_back(b); break;
         }
         case EditorTool::NUKE_SPAWN: {
             ne.index = (int)_level.nukeSpawns.size();
@@ -1098,7 +1105,7 @@ void LevelEditor::UpdateCanvas() {
         case EditorTool::PLAYER_SPAWN:   _level.hasPlayerSpawn = true; _level.playerSpawn = swm; SetStatus("Player spawn set."); break;
         case EditorTool::REGULUS:        _level.hasRegulus = true; _level.regulusPos = swm; SetStatus("Regulus set."); break;
         case EditorTool::CAVE:           _level.hasCave = true; _level.cavePos = swm; SetStatus("Cave set."); break;
-        case EditorTool::BEAM:           _level.beams.push_back(swm); SetStatus("Beam placed."); break;
+        case EditorTool::BEAM:           _level.beams.push_back({ swm.x, swm.y }); SetStatus("Beam placed."); break;
         case EditorTool::NUKE_SPAWN:     _level.nukeSpawns.push_back(swm); SetStatus("Nuke spawn."); break;
         case EditorTool::BEATRICE_SPAWN: _level.beatriceSpawns.push_back(swm); SetStatus("Beatrice spawn."); break;
         case EditorTool::ENEMY_SPAWN:    _level.enemySpawns.push_back(swm); SetStatus("Enemy spawn."); break;
@@ -1186,15 +1193,23 @@ void LevelEditor::DrawCircEnt(Vector2 pos, float rad, Color c, bool sel, bool ms
     DrawCircleV(pos, rad, c);
     if (lbl) { int tw = MeasureText(lbl, 9); DrawText(lbl, (int)pos.x - tw / 2, (int)pos.y - 4, 9, BLACK); }
 }
-void LevelEditor::DrawBeamEnt(Vector2 pos, bool sel, bool msel) const {
-    if (_beamTex && _beamTex->id > 0) {
-        float s = 4.f, w = _beamTex->width * s, h = _beamTex->height * s;
-        DrawTexturePro(*_beamTex, { 0,0,(float)_beamTex->width,(float)_beamTex->height }, { pos.x,pos.y,w,h }, {}, 0.f, WHITE);
-        if (sel) DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, YELLOW);
-        if (msel && !sel) DrawRectangleLinesEx({ pos.x,pos.y,w,h }, 2.f, { 255,200,0,200 });
+void LevelEditor::DrawBeamEnt(const BeamData& b, bool sel, bool msel) const {
+    // Select the right texture: variant 1-10 first, then default, then placeholder
+    Texture2D* tex = nullptr;
+    if (b.texVariant >= 1 && b.texVariant <= 10 && _beamVariantTex[b.texVariant - 1] && _beamVariantTex[b.texVariant - 1]->id > 0)
+        tex = _beamVariantTex[b.texVariant - 1];
+    else if (_beamTex && _beamTex->id > 0)
+        tex = _beamTex;
+
+    if (tex) {
+        float s = 4.f, w = tex->width * s, h = tex->height * s;
+        DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { b.x, b.y, w, h }, {}, 0.f, WHITE);
+        if (sel)            DrawRectangleLinesEx({ b.x, b.y, w, h }, 2.f, YELLOW);
+        if (msel && !sel)   DrawRectangleLinesEx({ b.x, b.y, w, h }, 2.f, { 255,200,0,200 });
     }
     else {
-        Rectangle r = BeamRect(pos); DrawRectangleRec(r, { 120,120,120,80 });
+        Rectangle r = BeamRect(b);
+        DrawRectangleRec(r, { 120,120,120,80 });
         DrawRectangleLinesEx(r, 1.f, sel ? YELLOW : (msel ? Color{ 255,200,0,200 } : GRAY));
     }
 }
@@ -1306,19 +1321,34 @@ void LevelEditor::DrawGrid() const {
     for (float y = 0; y <= (float)_sh; y += gs) { bool maj = (fmodf(y, (float)GRID_SZ) < .5f); DrawLine(0, (int)y, _sw, (int)y, maj ? Color{ 55,60,80,255 } : Color{ 35,38,52,255 }); }
 }
 void LevelEditor::DrawLevelEntities() {
-    auto IS = [&](EditorTool t, int i) {return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
-    auto IMS = [&](EditorTool t, int i) {return IsInMultiSel({ (int)t,i }); };
+    auto IS = [&](EditorTool t, int i) { return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
+    auto IMS = [&](EditorTool t, int i) { return IsInMultiSel({ (int)t, i }); };
+
+    // Draw elevators and conveyors first (always underneath everything)
     for (int i = 0; i < (int)_level.elevators.size(); i++)  DrawElevatorEnt(_level.elevators[i], IS(EditorTool::ELEVATOR, i), IMS(EditorTool::ELEVATOR, i));
     for (int i = 0; i < (int)_level.conveyors.size(); i++)  DrawConveyorEnt(_level.conveyors[i], IS(EditorTool::CONVEYOR, i), IMS(EditorTool::CONVEYOR, i));
-    for (int i = 0; i < (int)_level.killZones.size(); i++)  DrawKillZoneEnt(_level.killZones[i], IS(EditorTool::KILL_ZONE, i), IMS(EditorTool::KILL_ZONE, i));
     if (_level.hasWinZone) DrawWinZoneEnt(_level.winZone, IS(EditorTool::WIN_ZONE, 0), IMS(EditorTool::WIN_ZONE, 0));
-    for (int i = 0; i < (int)_level.platforms.size(); i++) DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
-    for (int i = 0; i < (int)_level.ladders.size(); i++)   DrawLadEnt(_level.ladders[i], IS(EditorTool::LADDER, i), IMS(EditorTool::LADDER, i));
-    for (int i = 0; i < (int)_level.beams.size(); i++)     DrawBeamEnt(_level.beams[i], IS(EditorTool::BEAM, i), IMS(EditorTool::BEAM, i));
+    for (int i = 0; i < (int)_level.platforms.size(); i++)  DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
+    for (int i = 0; i < (int)_level.ladders.size(); i++)    DrawLadEnt(_level.ladders[i], IS(EditorTool::LADDER, i), IMS(EditorTool::LADDER, i));
+
+    // ── Layer-sorted beam + kill-zone drawing ────────────────────────────────
+    // Collect (layer, kind, index): kind 0=beam, kind 1=killzone
+    struct LayerItem { int layer; int kind; int idx; };
+    std::vector<LayerItem> items;
+    items.reserve(_level.beams.size() + _level.killZones.size());
+    for (int i = 0; i < (int)_level.beams.size(); i++) items.push_back({ _level.beams[i].renderLayer,     0, i });
+    for (int i = 0; i < (int)_level.killZones.size(); i++) items.push_back({ _level.killZones[i].renderLayer, 1, i });
+    // Stable sort by layer so equal layers keep insertion order (beams before kill zones)
+    std::stable_sort(items.begin(), items.end(), [](const LayerItem& a, const LayerItem& b) { return a.layer < b.layer; });
+    for (const auto& it : items) {
+        if (it.kind == 0) DrawBeamEnt(_level.beams[it.idx], IS(EditorTool::BEAM, it.idx), IMS(EditorTool::BEAM, it.idx));
+        else              DrawKillZoneEnt(_level.killZones[it.idx], IS(EditorTool::KILL_ZONE, it.idx), IMS(EditorTool::KILL_ZONE, it.idx));
+    }
+
     DrawPathNodes();
-    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)     DrawCircEnt(_level.nukeSpawns[i], 10.f, SKYBLUE, IS(EditorTool::NUKE_SPAWN, i), IMS(EditorTool::NUKE_SPAWN, i), "N");
+    for (int i = 0; i < (int)_level.nukeSpawns.size(); i++) DrawCircEnt(_level.nukeSpawns[i], 10.f, SKYBLUE, IS(EditorTool::NUKE_SPAWN, i), IMS(EditorTool::NUKE_SPAWN, i), "N");
     for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) DrawCircEnt(_level.beatriceSpawns[i], 10.f, MAGENTA, IS(EditorTool::BEATRICE_SPAWN, i), IMS(EditorTool::BEATRICE_SPAWN, i), "B");
-    for (int i = 0; i < (int)_level.enemySpawns.size(); i++)    DrawCircEnt(_level.enemySpawns[i], 10.f, RED, IS(EditorTool::ENEMY_SPAWN, i), IMS(EditorTool::ENEMY_SPAWN, i), "E");
+    for (int i = 0; i < (int)_level.enemySpawns.size(); i++) DrawCircEnt(_level.enemySpawns[i], 10.f, RED, IS(EditorTool::ENEMY_SPAWN, i), IMS(EditorTool::ENEMY_SPAWN, i), "E");
     if (_level.hasPlayerSpawn) DrawPlayerSpawn(_level.playerSpawn, IS(EditorTool::PLAYER_SPAWN, 0), IMS(EditorTool::PLAYER_SPAWN, 0));
     if (_level.hasRegulus)     DrawRegulusEnt(_level.regulusPos, IS(EditorTool::REGULUS, 0), IMS(EditorTool::REGULUS, 0));
     if (_level.hasCave)        DrawCaveEnt(_level.cavePos, IS(EditorTool::CAVE, 0), IMS(EditorTool::CAVE, 0));
@@ -1661,6 +1691,60 @@ void LevelEditor::DrawDataPanel() {
         if (NumField("W  ", l.w, 1.f, 8, 200, px, cy, fw)) {} cy += rowH;
         if (NumField("H  ", l.h, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
     }
+    if (_sel.type == (int)EditorTool::BEAM && _sel.index < (int)_level.beams.size()) {
+        auto& bm = _level.beams[_sel.index];
+        SectionHeader("── Beam Texture ───────────");
+        // Row 1: default + variants 1-5
+        {
+            const int COLS = 6;
+            float tbw = (fw - (COLS - 1) * 2.f) / COLS;
+            for (int ti = 0; ti < COLS; ti++) {
+                Rectangle tb = { px + ti * (tbw + 2.f), cy, tbw, 16 };
+                bool isActive = (bm.texVariant == ti);
+                bool hov = CheckCollisionPointRec(GetMousePosition(), tb);
+                DrawRectangleRec(tb, isActive ? Color{ 60,40,10,255 } : (hov ? Color{ 45,48,68,255 } : Color{ 28,32,48,255 }));
+                DrawRectangleLinesEx(tb, isActive ? 2.f : 1.f, isActive ? Color{ 255,200,80,255 } : Color{ 70,75,100,255 });
+                const char* lbl = (ti == 0) ? "Def" : TextFormat("%d", ti);
+                int nlw = MeasureText(lbl, 9);
+                DrawText(lbl, (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
+                    isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = ti; }
+            }
+            cy += 20;
+        }
+        // Row 2: variants 6-10
+        {
+            const int COLS = 5;
+            float tbw = (fw - (COLS - 1) * 2.f) / COLS;
+            for (int ti = 0; ti < COLS; ti++) {
+                int varIdx = ti + 6;
+                Rectangle tb = { px + ti * (tbw + 2.f), cy, tbw, 16 };
+                bool isActive = (bm.texVariant == varIdx);
+                bool hov = CheckCollisionPointRec(GetMousePosition(), tb);
+                DrawRectangleRec(tb, isActive ? Color{ 60,40,10,255 } : (hov ? Color{ 45,48,68,255 } : Color{ 28,32,48,255 }));
+                DrawRectangleLinesEx(tb, isActive ? 2.f : 1.f, isActive ? Color{ 255,200,80,255 } : Color{ 70,75,100,255 });
+                const char* lbl = TextFormat("%d", varIdx);
+                int nlw = MeasureText(lbl, 9);
+                DrawText(lbl, (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
+                    isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = varIdx; }
+            }
+            cy += 20;
+        }
+        // Show the texture name
+        const char* varName = (bm.texVariant == 0) ? "Dk_FloorPart (default)"
+            : TextFormat("Dk_FloorPart%d", bm.texVariant);
+        DrawText(varName, (int)px, (int)cy, 9, { 130,200,130,255 }); cy += 13;
+        SectionHeader("── Render Layer ───────────");
+        {
+            float rlF = (float)bm.renderLayer;
+            if (NumField("Layer", rlF, 1.f, -10, 100, px, cy, fw)) {
+                PushUndo(); bm.renderLayer = (int)rlF;
+            }
+            cy += rowH;
+        }
+        DrawText("0=below killzones, 1+=above", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 13;
+    }
     if (_sel.type == (int)EditorTool::WIN_ZONE) {
         auto& wz = _level.winZone;
         SectionHeader("── Win Zone ───────────────");
@@ -1711,6 +1795,15 @@ void LevelEditor::DrawDataPanel() {
                 { px, cy, sw2, sh2 }, {}, kz.rotation, WHITE);
             cy += sh2 + 4;
         }
+        SectionHeader("── Render Layer ───────────");
+        {
+            float rlF = (float)kz.renderLayer;
+            if (NumField("Layer", rlF, 1.f, -10, 100, px, cy, fw)) {
+                PushUndo(); kz.renderLayer = (int)rlF;
+            }
+            cy += rowH;
+        }
+        DrawText("1=above beams, 0=same level", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 13;
         // ── Copy / Paste props ────────────────────────────────────────────────
         {
             float hw = (fw - 3) * 0.5f;
@@ -1933,7 +2026,7 @@ void LevelEditor::SeqPreviewUpdate(float dt) {
         switch (st.entityType) {
         case 4: if (idx >= 0 && idx < (int)_level.platforms.size()) { _level.platforms[idx].x = st.x; _level.platforms[idx].y = st.y; if (st.tilt != 0.f) _level.platforms[idx].tilt = st.tilt; if (st.width > 0.f) _level.platforms[idx].w = st.width; } break;
         case 5: if (idx >= 0 && idx < (int)_level.ladders.size()) { _level.ladders[idx].x = st.x; _level.ladders[idx].y = st.y; } break;
-        case 6: if (idx >= 0 && idx < (int)_level.beams.size()) _level.beams[idx] = { st.x, st.y }; break;
+        case 6: if (idx >= 0 && idx < (int)_level.beams.size()) { _level.beams[idx].x = st.x; _level.beams[idx].y = st.y; } break;
         case 1: _level.playerSpawn = { st.x, st.y }; break;
         case 2: _level.regulusPos = { st.x, st.y }; break;
         case 3: _level.cavePos = { st.x, st.y }; break;

@@ -69,6 +69,12 @@ public:
         _playerTex = player; _regulusTex = regulus; _caveTex = cave;
         _ropeTex = rope; _goldenPistonTex = goldenPiston;
     }
+    // Pass the 10 variant beam textures (Dk_FloorPart1 .. Dk_FloorPart10)
+    // Indices 0..9 correspond to texVariant 1..10. Pass nullptr for unused slots.
+    void SetBeamVariantTextures(Texture2D* variants[10])
+    {
+        for (int i = 0; i < 10; i++) _beamVariantTex[i] = variants[i];
+    }
     void SetTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder)
     {
         _bgTex = bg; _beamTex = beam; _ladderTex = ladder;
@@ -111,7 +117,8 @@ private:
         PlatformData plat = {};
         LadderData   lad = {};
         PathNodeData node = {};
-        Vector2      pos = {};
+        BeamData     beam = {};   // used for BEAM clipboard entries
+        Vector2      pos = {};    // used for spawn-point entries
     };
     std::vector<ClipboardEntry> _clipboard;
     void CopySelected();
@@ -120,7 +127,8 @@ private:
 
     // ── Textures ──────────────────────────────────────────────────────────────
     Texture2D* _bgTex = nullptr;
-    Texture2D* _beamTex = nullptr;
+    Texture2D* _beamTex = nullptr;         // Dk_FloorPart (default, texVariant=0)
+    Texture2D* _beamVariantTex[10] = {};   // Dk_FloorPart1..10 (texVariant=1..10)
     Texture2D* _ladderTex = nullptr;
     Texture2D* _playerTex = nullptr;
     Texture2D* _regulusTex = nullptr;
@@ -301,7 +309,7 @@ private:
 
     Rectangle PlatRect(const PlatformData& p)                const;
     Rectangle LadRect(const LadderData& l)                   const;
-    Rectangle BeamRect(Vector2 pos)                          const;
+    Rectangle BeamRect(const BeamData& b)                        const;
     bool      PointInPlatform(Vector2 pt, const PlatformData& p) const;
     Vector2   PlatformCenter(const PlatformData& p)          const;
     Vector2   EntityCenter(const SelectedEnt& e)             const;
@@ -345,7 +353,7 @@ private:
     void DrawPlatEnt(const PlatformData& p, bool sel, bool msel) const;
     void DrawLadEnt(const LadderData& l, bool sel, bool msel) const;
     void DrawCircEnt(Vector2 pos, float r, Color c, bool sel, bool msel, const char* lbl) const;
-    void DrawBeamEnt(Vector2 pos, bool sel, bool msel)           const;
+    void DrawBeamEnt(const BeamData& b, bool sel, bool msel)      const;
     void DrawPathNodes();
     void DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const;
     void DrawRegulusEnt(Vector2 pos, bool sel, bool msel)  const;

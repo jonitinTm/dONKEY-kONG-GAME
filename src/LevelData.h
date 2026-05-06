@@ -42,6 +42,17 @@ struct WinZoneData {
     float h = 128.f;
 };
 
+// ── Beam ──────────────────────────────────────────────────────────────────────
+// texVariant: 0 = default "Dk_FloorPart", 1-10 = "Dk_FloorPart1" .. "Dk_FloorPart10"
+// renderLayer: 0 = below kill-zones (default), higher = drawn later (on top)
+
+struct BeamData {
+    float x = 0.f;
+    float y = 0.f;
+    int   texVariant = 0;   // 0 = Dk_FloorPart (default), 1-10 = variant
+    int   renderLayer = 0;   // 0 = default (below kill zones)
+};
+
 // ── Kill zone ─────────────────────────────────────────────────────────────────
 
 enum class KillZoneTexture : int {
@@ -56,6 +67,7 @@ struct KillZoneData {
     float          h = 64.f;
     float          rotation = 0.f;       // true rotation in degrees (0/90/180/270)
     KillZoneTexture texId = KillZoneTexture::NONE;
+    int            renderLayer = 1;      // 1 = default (above beams at layer 0)
 };
 
 // ── Conveyor belt ─────────────────────────────────────────────────────────────
@@ -122,7 +134,7 @@ struct LevelData {
     // ── Multi-instance entities ─────────────────────────────────────────────
     std::vector<PlatformData> platforms;
     std::vector<LadderData>   ladders;
-    std::vector<Vector2>      beams;
+    std::vector<BeamData>     beams;
     std::vector<PathNodeData> pathNodes;
     std::vector<Vector2>            nukeSpawns;
     std::vector<Vector2>            beatriceSpawns;

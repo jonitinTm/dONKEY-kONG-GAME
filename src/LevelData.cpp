@@ -54,7 +54,7 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "LADDER %.2f %.2f %.2f %.2f\n", l.x, l.y, l.w, l.h);
 
     for (const auto& b : lv.beams)
-        fprintf(f, "BEAM %.2f %.2f\n", b.x, b.y);
+        fprintf(f, "BEAM %.2f %.2f %d %d\n", b.x, b.y, b.texVariant, b.renderLayer);
 
     for (const auto& n : lv.pathNodes)
         fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d\n",
@@ -87,8 +87,8 @@ bool SaveLevel(const LevelData& lv, const char* folder)
             lv.winZone.x, lv.winZone.y, lv.winZone.w, lv.winZone.h);
 
     for (const auto& kz : lv.killZones)
-        fprintf(f, "KILL_ZONE %.2f %.2f %.2f %.2f %d %.2f\n",
-            kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.rotation);
+        fprintf(f, "KILL_ZONE %.2f %.2f %.2f %.2f %d %.2f %d\n",
+            kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.rotation, kz.renderLayer);
 
     fclose(f);
     return true;
@@ -133,7 +133,10 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             out.ladders.push_back(l);
         }
         else if (strcmp(tag, "BEAM") == 0) {
-            Vector2 b; (void)fscanf(f, "%f %f", &b.x, &b.y);
+            BeamData b;
+            int parsed = fscanf(f, "%f %f %d %d", &b.x, &b.y, &b.texVariant, &b.renderLayer);
+            if (parsed < 3) b.texVariant = 0;
+            if (parsed < 4) b.renderLayer = 0;
             out.beams.push_back(b);
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
@@ -182,10 +185,12 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             out.hasWinZone = true;
         }
         else if (strcmp(tag, "KILL_ZONE") == 0) {
-            KillZoneData kz; int texId = 0;
-            int parsed = fscanf(f, "%f %f %f %f %d %f", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.rotation);
+            KillZoneData kz; int texId = 0, rl = 1;
+            int parsed = fscanf(f, "%f %f %f %f %d %f %d", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.rotation, &rl);
             if (parsed < 6) kz.rotation = 0.f;  // backward-compat: old files have no rotation
+            if (parsed < 7) rl = 1;              // backward-compat: old files have no renderLayer
             kz.texId = (KillZoneTexture)texId;
+            kz.renderLayer = rl;
             out.killZones.push_back(kz);
         }
         // unknown tag: skip rest of line
@@ -352,9 +357,9 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
     }
     fprintf(f, "};\n\n");
 
-    fprintf(f, "// Beam positions\nvector<Vector2> beamPositions = {\n");
+    fprintf(f, "// Beam positions\nvector<BeamData> beamPositions = {\n");
     for (int i = 0; i < (int)lv.beams.size(); i++) {
-        fprintf(f, "    { %.0f, %.0f },", lv.beams[i].x, lv.beams[i].y);
+        fprintf(f, "    { %.0f, %.0f, %d, %d },", lv.beams[i].x, lv.beams[i].y, lv.beams[i].texVariant, lv.beams[i].renderLayer);
         if ((i + 1) % 6 == 0) fprintf(f, "\n");
     }
     fprintf(f, "\n};\n\n");
