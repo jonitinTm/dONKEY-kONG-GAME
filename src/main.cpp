@@ -376,13 +376,13 @@ static void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barre
     int lx = 10, ly = screenHeight - 125;
     DrawRectangle(6, ly, 190, 120, { 0,0,0,180 });
     DrawText("[F1] toggle debug", lx, ly + 4, 9, GRAY);
-    DrawCircleV({ (float)(lx + 5),(float)(ly + 20) }, 5, WHITE);  DrawText("Start", lx + 14, ly + 15, 9, WHITE);
-    DrawCircleV({ (float)(lx + 5),(float)(ly + 34) }, 5, GREEN);  DrawText("Split 50/50", lx + 14, ly + 29, 9, GREEN);
-    DrawCircleV({ (float)(lx + 5),(float)(ly + 48) }, 5, ORANGE); DrawText("Edge (fall)", lx + 14, ly + 43, 9, ORANGE);
-    DrawCircleV({ (float)(lx + 5),(float)(ly + 62) }, 5, YELLOW); DrawText("Obligatory", lx + 14, ly + 57, 9, YELLOW);
-    DrawCircleV({ (float)(lx + 5),(float)(ly + 76) }, 5, RED);    DrawText("End", lx + 14, ly + 71, 9, RED);
-    DrawLineEx({ (float)lx,(float)(ly + 90) }, { (float)(lx + 18),(float)(ly + 90) }, 2, { 255,140,0,255 }); DrawText("Stair/Fall", lx + 22, ly + 85, 9, { 255,140,0,255 });
-    DrawLineEx({ (float)lx,(float)(ly + 104) }, { (float)(lx + 18),(float)(ly + 104) }, 2, { 0,200,255,255 }); DrawText("Flat/Roll", lx + 22, ly + 99, 9, { 0,200,255,255 });
+    DrawCircleV({ (float)(lx + 5),(float)(ly + 20) }, 5.f, WHITE);  DrawText("Start", lx + 14, ly + 15, 9, WHITE);
+    DrawCircleV({ (float)(lx + 5),(float)(ly + 34) }, 5.f, GREEN);  DrawText("Split 50/50", lx + 14, ly + 29, 9, GREEN);
+    DrawCircleV({ (float)(lx + 5),(float)(ly + 48) }, 5.f, ORANGE); DrawText("Edge (fall)", lx + 14, ly + 43, 9, ORANGE);
+    DrawCircleV({ (float)(lx + 5),(float)(ly + 62) }, 5.f, YELLOW); DrawText("Obligatory", lx + 14, ly + 57, 9, YELLOW);
+    DrawCircleV({ (float)(lx + 5),(float)(ly + 76) }, 5.f, RED);    DrawText("End", lx + 14, ly + 71, 9, RED);
+    DrawLineEx({ (float)lx,(float)(ly + 90) }, { (float)(lx + 18),(float)(ly + 90) }, 2.f, { 255,140,0,255 }); DrawText("Stair/Fall", lx + 22, ly + 85, 9, { 255,140,0,255 });
+    DrawLineEx({ (float)lx,(float)(ly + 104) }, { (float)(lx + 18),(float)(ly + 104) }, 2.f, { 0,200,255,255 }); DrawText("Flat/Roll", lx + 22, ly + 99, 9, { 0,200,255,255 });
     DrawText("Dot=barrel", lx, ly + 113, 9, GRAY);
 }
 
@@ -780,13 +780,15 @@ int main(void)
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
     Texture2D RopeTex = LoadTexture("Assets/Textures/Architecture/Rope.png");
     Texture2D GoldenPistonTex = LoadTexture("Assets/Textures/Items/GoldenPiston.png");
-    Texture2D ConvSide[2] = {
+    Texture2D ConvSide[3] = {
         LoadTexture("Assets/Textures/Items/ConveyorSide_1.png"),
-        LoadTexture("Assets/Textures/Items/ConveyorSide_2.png")
+        LoadTexture("Assets/Textures/Items/ConveyorSide_2.png"),
+        LoadTexture("Assets/Textures/Items/ConveyorSide_3.png")
     };
-    Texture2D ConvM[2] = {
+    Texture2D ConvM[3] = {
         LoadTexture("Assets/Textures/Items/ConveyorMid_1.png"),
-        LoadTexture("Assets/Textures/Items/ConveyorMid_2.png")
+        LoadTexture("Assets/Textures/Items/ConveyorMid_2.png"),
+        LoadTexture("Assets/Textures/Items/ConveyorMid_3.png")
     };
     Texture2D SnowFloor = LoadTexture("Assets/Textures/Characters/FireSprites/Snow_Floor.png");
 
@@ -954,7 +956,7 @@ int main(void)
     // ── Wire textures into the editor ─────────────────────────────────────────
     editor.SetGameTextures(&background, &beam, &LadderPart,
         &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex, &GoldenPistonTex);
-    editor.SetConveyorTextures(&ConvSide[0], &ConvSide[1], &ConvM[0], &ConvM[1]);
+    editor.SetConveyorTextures(&ConvSide[0], &ConvSide[1], &ConvSide[2], &ConvM[0], &ConvM[1], &ConvM[2]);
 
     // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
     auto RebuildLayers = [&]()
@@ -2663,10 +2665,11 @@ int main(void)
 
             // 3.05 Conveyors
             {
-                int frame = (int)(GetTime() * 6.0) & 1;
-                Texture2D& side = ConvSide[frame];
-                Texture2D& mid = ConvM[frame];
+                int rawFrame = (int)(GetTime() * 9.0) % 3;
                 for (const auto& cv : liveConveyors) {
+                    int frame = (cv.direction == 1) ? rawFrame : (2 - rawFrame);
+                    Texture2D& side = ConvSide[frame];
+                    Texture2D& mid = ConvM[frame];
                     float rad = cv.rotation * DEG2RAD;
                     float ca = cosf(rad), sa = sinf(rad);
                     float ecW = cv.endCapW, bH = cv.beltH;

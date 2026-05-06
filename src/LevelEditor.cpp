@@ -470,7 +470,8 @@ void LevelEditor::StartDirectOp(DirectOp op) {
     if (!_sel.valid() && _multiSel.empty()) return;
     if (op == DirectOp::ROTATE && _sel.type != (int)EditorTool::PLATFORM) return;
     if (op == DirectOp::SCALE && _sel.type != (int)EditorTool::PLATFORM
-        && _sel.type != (int)EditorTool::LADDER) return;
+        && _sel.type != (int)EditorTool::LADDER
+        && _sel.type != (int)EditorTool::CONVEYOR) return;
     PushUndo();
     _directOp = op; _grabAxisX = false; _grabAxisY = false;
     _grabMouseStart = WorldMouse();
@@ -483,6 +484,8 @@ void LevelEditor::StartDirectOp(DirectOp op) {
             _grabValOrigin = _level.platforms[_sel.index].w;
         else if (op == DirectOp::SCALE && _sel.type == (int)EditorTool::LADDER)
             _grabValOrigin = _level.ladders[_sel.index].h;
+        else if (op == DirectOp::SCALE && _sel.type == (int)EditorTool::CONVEYOR)
+            _grabValOrigin = _level.conveyors[_sel.index].length;
         else _grabValOrigin = 0.f;
     }
     if (_multiSel.size() > 1) {
@@ -492,6 +495,7 @@ void LevelEditor::StartDirectOp(DirectOp op) {
             if (op == DirectOp::ROTATE && e.type == (int)EditorTool::PLATFORM && e.index < (int)_level.platforms.size()) v = _level.platforms[e.index].tilt;
             if (op == DirectOp::SCALE && e.type == (int)EditorTool::PLATFORM && e.index < (int)_level.platforms.size()) v = _level.platforms[e.index].w;
             if (op == DirectOp::SCALE && e.type == (int)EditorTool::LADDER && e.index < (int)_level.ladders.size())   v = _level.ladders[e.index].h;
+            if (op == DirectOp::SCALE && e.type == (int)EditorTool::CONVEYOR && e.index < (int)_level.conveyors.size()) v = _level.conveyors[e.index].length;
             _grabValOrigins.push_back(v);
         }
     }
@@ -536,6 +540,8 @@ void LevelEditor::UpdateDirectOp() {
                 _level.platforms[_sel.index].w = fmaxf((float)GRID_SZ, _grabValOrigin + delta.x);
             if (_sel.type == (int)EditorTool::LADDER && doH)
                 _level.ladders[_sel.index].h = fmaxf((float)GRID_SZ, _grabValOrigin - delta.y);
+            if (_sel.type == (int)EditorTool::CONVEYOR && doW)
+                _level.conveyors[_sel.index].length = fmaxf(64.f, _grabValOrigin + delta.x);
         }
         for (int i = 0; i < (int)_multiSel.size(); i++) {
             const auto& e = _multiSel[i];
@@ -543,6 +549,8 @@ void LevelEditor::UpdateDirectOp() {
                 _level.platforms[e.index].w = fmaxf((float)GRID_SZ, _grabValOrigins[i] + delta.x);
             if (e.type == (int)EditorTool::LADDER && doH && e.index < (int)_level.ladders.size())
                 _level.ladders[e.index].h = fmaxf((float)GRID_SZ, _grabValOrigins[i] - delta.y);
+            if (e.type == (int)EditorTool::CONVEYOR && doW && e.index < (int)_level.conveyors.size())
+                _level.conveyors[e.index].length = fmaxf(64.f, _grabValOrigins[i] + delta.x);
         }
     }
     if (IsKeyPressed(KEY_ENTER) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) ConfirmDirectOp();
@@ -2436,7 +2444,11 @@ Rectangle LevelEditor::ConveyorRect(const ConveyorData& cv) const {
 
 void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) const {
     Color bc = sel ? YELLOW : (msel ? Color{ 255,220,60,240 } : Color{ 255,200,60,220 });
-    int frame = (int)(GetTime() * 6.f) & 1;
+
+    // 3-frame animation: right-moving plays frames 0→1→2, left-moving plays 2→1→0
+    int rawFrame = (int)(GetTime() * 9.f) % 3;   // 0,1,2 cycling at 9fps (3fps per frame)
+    int frame = (cv.direction == 1) ? rawFrame : (2 - rawFrame);  // right=1,2,3 | left=3,2,1
+
     float rad = cv.rotation * DEG2RAD;
     float ca = cosf(rad), sa = sinf(rad);
     float ecW = cv.endCapW, bH = cv.beltH;
@@ -2455,11 +2467,11 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
         }
         };
 
-    DrawSec(_convSide[frame], 0.f, ecW, false);   // left — as-is (faces left)
+    DrawSec(_convSide[frame], 0.f, ecW, false);   // left cap
     if (midW > 0.f) {
         if (_convM[frame] && _convM[frame]->id > 0) {
-            // Tile the middle at ecW world-pixels per tile (same visual size as
-            // the side caps).  Partial last tiles are source-cropped, not stretched.
+            // Tile the middle at ecW world-pixels per tile.
+            // Partial last tiles are source-cropped, not stretched.
             float tileDisp = ecW;
             for (float lx = ecW; lx < ecW + midW; lx += tileDisp) {
                 float drawW = fminf(tileDisp, ecW + midW - lx);
@@ -2475,7 +2487,7 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
             DrawRectanglePro({ wx, wy, midW, bH }, {}, cv.rotation, Color{ 80,70,40,180 });
         }
     }
-    DrawSec(_convSide[frame], cv.length - ecW, ecW, true); // right — flipped
+    DrawSec(_convSide[frame], cv.length - ecW, ecW, true); // right cap — flipped
 
     // Overlay: selection tint + direction arrow
     DrawRectanglePro({ cv.x, cv.y, cv.length, bH }, {}, cv.rotation,
