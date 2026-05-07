@@ -1,21 +1,25 @@
 #pragma once
 // ============================================================
 //  Lighting.h
-//  2D raytraced lighting system for raylib.
+//  2D raytraced lighting system for raylib (optimised).
 //
-//  Approach (per-pixel software raytracing in a fragment shader):
-//    1. You render your normal scene into our offscreen "scene" target.
-//    2. You render light-blocking silhouettes into our "occluder" target.
-//    3. We run a fragment shader that, for every screen pixel, casts a
-//       ray through the occluder mask towards every light to determine
-//       direct visibility, accumulates volumetric in-scattering along
-//       the ray for fog, and applies skylight as a directional ray.
-//    4. A second blur pass simulates a single GI bounce.
-//    5. The lit result is drawn to the active framebuffer.
+//  Architecture
+//  ────────────
+//  • Scene is rendered at FULL resolution into _sceneRT.
+//  • Lighting math runs at HALF resolution into _directLitRT
+//    (4× fewer pixel-shader invocations than full-res).
+//  • Optional bounce: blur(_directLitRT) → _bounceRT, then a
+//    second lighting pass adds bounce.  Result: _finalLightRT.
+//  • Compose pass runs at FULL res: scene * lighting (bilinear
+//    upsampled) + ambient floor.
 //
-//  This is NOT GPU hardware raytracing (raylib has no DXR/RTX path).
-//  Visually it gives you crisp shadows, soft falloff, spot cones,
-//  god rays through gaps, and color bleed — the "UE-ish" 2D look.
+//  This is software per-pixel raytracing in a fragment shader,
+//  not GPU hardware RT (raylib has no DXR/RTX path). Visually:
+//  crisp shadows, spot cones, god rays, 1-bounce GI.
+//
+//  Two-instance pattern: instantiate one LightingSystem for
+//  gameplay (sized to screen) and another for the editor canvas
+//  (sized to the editor's canvas region) — they're independent.
 // ============================================================
 #include "raylib.h"
 #include "LevelData.h"
@@ -23,92 +27,77 @@
 class LightingSystem
 {
 public:
-    // Init with the screen size you render at (matches main.cpp's screenWidth/Height).
-    void Init(int screenW, int screenH);
+    enum class Quality { LOW = 0, MEDIUM = 1, HIGH = 2 };
+
+    LightingSystem() = default;
+    ~LightingSystem();
+    LightingSystem(const LightingSystem&) = delete;
+    LightingSystem& operator=(const LightingSystem&) = delete;
+
+    // rtW/rtH: dimensions of the area to be lit (full resolution of scene).
+    // For gameplay: pass screenWidth/screenHeight.
+    // For editor:   pass _canvasW / (int)_canvasH.
+    void Init(int rtW, int rtH, Quality q = Quality::MEDIUM);
     void Shutdown();
 
-    // Set how dark the world is when no light reaches a pixel (0 = pitch black, 1 = unlit).
-    // Default 0.08 — almost black, dramatic. Bump to 0.25 for "evening" instead of "night".
-    void SetGlobalAmbient(float a) { _globalAmbient = a; }
-
-    // How aggressively the unlit areas are darkened (0 = lights add only / no darkening,
-    // 1 = scene starts pitch black and lights reveal). Default 0.85.
-    void SetGlobalDarkness(float d) { _globalDarkness = d; }
-
-    // Optional: tint the global ambient (sky color, distant haze). Default warmish dark blue.
-    void SetAmbientColor(Color c) { _ambientColor = c; }
+    // Tweakables — safe to call any time.
+    void  SetGlobalAmbient(float a) { _globalAmbient = a; }
+    void  SetGlobalDarkness(float d) { _globalDarkness = d; }
+    void  SetAmbientColor(Color c) { _ambientColor = c; }
+    Quality GetQuality() const { return _quality; }
 
     // ── Frame flow ──────────────────────────────────────────────────────────
-    // Wrap everything that should be lit:
-    //     lighting.BeginScene(cam);
-    //         <... your normal BeginMode2D draws: bg, platforms, beams, player, etc ...>
-    //     lighting.EndScene();
-    //
-    // Wrap the silhouettes that block light (platforms, beams, kill zones).
-    // Draw them in solid white — the pixel value's red channel is the occlusion mask.
-    //     lighting.BeginOccluders(cam);
-    //         <... draw filled rects of every light-blocking object in WHITE ...>
-    //     lighting.EndOccluders();
-    //
-    // Either order works. After both are populated, call Composite once:
-    //     lighting.Composite(level, cam);   // draws final lit image to current target
-
     void BeginScene(Camera2D cam);
     void EndScene();
 
     void BeginOccluders(Camera2D cam);
     void EndOccluders();
-
-    // Convenience: draws the standard occluders for you (platforms, beams, kill zones).
-    // If you want full control, skip this and use Begin/EndOccluders directly.
     void BakeOccludersFromLevel(const LevelData& lv, Camera2D cam);
 
-    // Final pass: applies lighting and draws to whatever target is currently active.
-    // Call this between BeginDrawing() and EndDrawing(), but OUTSIDE any BeginMode2D.
-    void Composite(const LevelData& lv, Camera2D cam);
+    // dst.width <= 0 means "full RT size at (0,0)"
+    void Composite(const LevelData& lv, Camera2D cam, Rectangle dst = { -1.f, -1.f, 0.f, 0.f });
 
-    // Optional debug: draws the occluder mask in the corner so you can see what's
-    // being treated as light-blocker.
+    // Debug
     void DebugDrawOccluder(Rectangle dst);
-    // Draws the raw scene texture (no lighting) in dst — useful for A/B comparison.
     void DebugDrawScene(Rectangle dst);
 
 private:
-    int  _w = 0, _h = 0;
-    bool _ready = false;
+    bool    _ready = false;
+    Quality _quality = Quality::MEDIUM;
 
+    int _rtW = 0, _rtH = 0;     // scene RT dims (full canvas/screen)
+    int _liW = 0, _liH = 0;     // lighting RT dims (half-res by default)
+
+    // Render targets
     RenderTexture2D _sceneRT = {};
     RenderTexture2D _occluderRT = {};
-    RenderTexture2D _directLitRT = {};   // direct lighting result (input to bounce)
-    RenderTexture2D _bounceRT = {};      // blurred direct → 1-bounce approximation
-    RenderTexture2D _scratchRT = {};     // separable-blur scratch / general scratch
+    RenderTexture2D _directLitRT = {};
+    RenderTexture2D _scratchRT = {};
+    RenderTexture2D _bounceRT = {};
+    RenderTexture2D _finalLightRT = {};
 
-    Shader _lightShader = {};            // raytracing pass
-    Shader _blurShader = {};             // gaussian blur for bounce / softening
+    // Shaders
+    Shader _lightShader = {};
+    Shader _blurShader = {};
+    Shader _composeShader = {};
 
-    // Uniform locations cached for speed
-    int _locLightCount = -1;
-    int _locLightPos = -1;
-    int _locLightCol = -1;
-    int _locLightExtra = -1;
-    int _locResolution = -1;
-    int _locCamOffset = -1;
-    int _locAmbient = -1;
-    int _locAmbientCol = -1;
-    int _locDarkness = -1;
-    int _locTime = -1;
-    int _locOccluderTex = -1;
-    int _locBounceTex = -1;
-    int _locUseBounce = -1;
+    // Cached uniform locations
+    int _locLP_count = -1, _locLP_pos = -1, _locLP_col = -1, _locLP_extra = -1;
+    int _locLP_resolution = -1, _locLP_worldOrigin = -1, _locLP_worldPerPx = -1;
+    int _locLP_ambient = -1, _locLP_ambientCol = -1;
+    int _locLP_time = -1, _locLP_useBounce = -1;
+    int _locLP_occTex = -1, _locLP_bounceTex = -1;
 
-    int _locBlurDir = -1;
-    int _locBlurRes = -1;
+    int _locBL_dir = -1;
+
+    int _locCM_lightTex = -1, _locCM_ambient = -1, _locCM_ambientCol = -1, _locCM_darkness = -1;
 
     float _globalAmbient = 0.08f;
     float _globalDarkness = 0.85f;
-    Color _ambientColor = { 40, 50, 80, 255 };  // dark cool tint
+    Color _ambientColor = { 40, 50, 80, 255 };
     float _time = 0.f;
 
     void RunBlur(RenderTexture2D src, RenderTexture2D dst, Vector2 dir);
     void UploadLights(const LevelData& lv);
+    void DoLightingPass(Camera2D cam, RenderTexture2D dst, bool useBounce);
 };

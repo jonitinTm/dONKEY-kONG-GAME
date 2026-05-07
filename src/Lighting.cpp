@@ -1,67 +1,71 @@
 // ============================================================
-//  Lighting.cpp
+//  Lighting.cpp  (v3 — simpler, blend-mode compose)
+//
+//  Pipeline:
+//   1. Scene  → _sceneRT     (full res, your in-world content)
+//   2. Occluders → _occluderRT (half res, white = blocker)
+//   3. Lighting (ray-march)  → _finalLightRT (half res, with
+//      ambient floor BAKED IN — so the RT is a complete
+//      multiplier you can apply to the scene with no compose
+//      shader needed).
+//   4. Composite: blit _sceneRT to backbuffer, then blit
+//      _finalLightRT on top with BLEND_MULTIPLIED.
+//
+//  Why this is more robust than v2:
+//   • No compose shader to fail to compile.
+//   • Standard raylib blend modes — well-tested by the engine.
+//   • The lighting RT alone is a complete "darkness map" — you
+//     can also DebugDraw it and it'll look right on its own.
 // ============================================================
 #include "Lighting.h"
-#include "rlgl.h"
 #include <cmath>
-#include <vector>
 #include <cstring>
+#include <cstdio>
 
-// ── Maximum lights uploaded per frame ─────────────────────────────────────────
-// Must match the array size in the shader.
 static constexpr int MAX_LIGHTS = 32;
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  GLSL: per-pixel raytracing pass
-//  Inputs : sceneTex (rendered scene), occluderTex (white = blocks light),
-//           bounceTex (blurred direct-lit pass for 1-bounce GI).
-//  Output : final lit pixel.
+//  Lighting shader.  Runs at HALF resolution.  Outputs a multiplier the
+//  scene will be multiplied by — with ambient floor pre-baked into it.
+//  finalColor.rgb = max(ambientFloor, ambientColor*globalAmbient + Σ lightContrib)
 // ─────────────────────────────────────────────────────────────────────────────
 static const char* LIGHTING_FS = R"GLSL(
 #version 330
 
-in vec2 fragTexCoord;
-in vec4 fragColor;
+in  vec2 fragTexCoord;
+in  vec4 fragColor;
 out vec4 finalColor;
 
-uniform sampler2D texture0;       // scene (raylib's default texture slot)
+uniform sampler2D texture0;        // carrier — unused by us, but raylib binds it
 uniform sampler2D occluderTex;
 uniform sampler2D bounceTex;
 
 uniform vec2  resolution;
-uniform vec2  camOffset;          // worldX = pixelX + camOffset.x  (for ray math in world space)
-uniform float globalAmbient;
+uniform vec2  worldOrigin;
+uniform vec2  worldPerPx;
+uniform float globalAmbient;       // 0..1
+uniform float globalDarkness;      // 0..1   (final floor = (1-darkness) + darkness*globalAmbient)
 uniform vec3  ambientColor;
-uniform float globalDarkness;
 uniform float uTime;
 uniform int   useBounce;
 
 #define MAX_LIGHTS 32
 uniform int  lightCount;
-// xy = world pos, z = radius (or sky max-distance), w = type (0=point,1=spot,2=sky)
-uniform vec4 lightPos  [MAX_LIGHTS];
-// rgb = linear color, a = intensity
-uniform vec4 lightCol  [MAX_LIGHTS];
-// x = spot/sky direction (radians), y = spot half-angle (radians),
-// z = fog strength, w = bounces (>0 means contributes to bounce pass)
-uniform vec4 lightExtra[MAX_LIGHTS];
+uniform vec4 lightPos  [MAX_LIGHTS];   // xy=worldPos, z=radius, w=type
+uniform vec4 lightCol  [MAX_LIGHTS];   // rgb=color, a=intensity
+uniform vec4 lightExtra[MAX_LIGHTS];   // x=dirRad, y=halfAngRad, z=fogStrength, w=bounces
 
-// Sample occluder at a world-space position. Y is flipped because raylib RTs
-// have inverted Y when read back via texture().
 float sampleOccluder(vec2 worldPos) {
-    vec2 screen = worldPos - camOffset;
+    vec2 screen = (worldPos - worldOrigin) / worldPerPx;
     vec2 uv = screen / resolution;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
     return texture(occluderTex, vec2(uv.x, 1.0 - uv.y)).r;
 }
 
-// Visibility from `from` to `to` — 1.0 = clear LOS, 0.0 = blocked.
-// We bias the start away from the source pixel so a pixel inside an occluder
-// (e.g. the surface of a platform) can still receive light from outside.
 float visibility(vec2 from, vec2 to) {
-    const int STEPS = 28;
+    const int STEPS = 16;
     vec2 d = (to - from) / float(STEPS);
-    vec2 p = from + d * 1.5;            // bias away from `from`
+    vec2 p = from + d * 1.5;
     for (int i = 2; i < STEPS - 1; i++) {
         if (sampleOccluder(p) > 0.5) return 0.0;
         p += d;
@@ -69,26 +73,14 @@ float visibility(vec2 from, vec2 to) {
     return 1.0;
 }
 
-// Soft visibility — averages a few rays slightly perpendicular for penumbra.
-float softVisibility(vec2 from, vec2 to) {
-    vec2 dir = normalize(to - from);
-    vec2 perp = vec2(-dir.y, dir.x);
-    float v = 0.0;
-    v += visibility(from, to);
-    v += visibility(from, to + perp * 4.0);
-    v += visibility(from, to - perp * 4.0);
-    return v / 3.0;
-}
-
 vec3 directContribution(int i, vec2 pixelPos) {
     int type = int(lightPos[i].w + 0.5);
-
-    // ── Skylight: directional ray cast in -direction; if blocked, occluded ──
     if (type == 2) {
+        // Skylight
         float ang = lightExtra[i].x;
-        vec2 toSky = vec2(cos(ang), sin(ang));   // direction toward "sky"
+        vec2 toSky = vec2(cos(ang), sin(ang));
         float maxDist = lightPos[i].z;
-        const int SKY_STEPS = 18;
+        const int SKY_STEPS = 12;
         vec2 d = toSky * (maxDist / float(SKY_STEPS));
         vec2 p = pixelPos + d * 1.5;
         for (int s = 0; s < SKY_STEPS; s++) {
@@ -98,31 +90,26 @@ vec3 directContribution(int i, vec2 pixelPos) {
         return lightCol[i].rgb * lightCol[i].a;
     }
 
-    vec2 lp = lightPos[i].xy;
+    vec2  lp     = lightPos[i].xy;
     float radius = lightPos[i].z;
-    vec2 toL = lp - pixelPos;
-    float dist = length(toL);
+    vec2  toL    = lp - pixelPos;
+    float dist   = length(toL);
     if (dist > radius) return vec3(0.0);
 
     float coneFactor = 1.0;
     if (type == 1) {
-        // Spotlight cone
-        vec2 spotDir = vec2(cos(lightExtra[i].x), sin(lightExtra[i].x));
-        float halfAng = lightExtra[i].y;
-        vec2 toLN = toL / max(dist, 0.0001);
-        // Note: spotDir points where the light shines, so the vector FROM light TO pixel
-        // should align with spotDir. That vector is -toLN.
-        float cosA = dot(-toLN, spotDir);
+        vec2  spotDir  = vec2(cos(lightExtra[i].x), sin(lightExtra[i].x));
+        float halfAng  = lightExtra[i].y;
+        vec2  toLN     = toL / max(dist, 0.0001);
+        float cosA     = dot(-toLN, spotDir);
         float coneEdge = cos(halfAng);
         if (cosA < coneEdge) return vec3(0.0);
-        // Soft falloff at the cone edge
         coneFactor = smoothstep(coneEdge, mix(coneEdge, 1.0, 0.25), cosA);
     }
 
-    float vis = softVisibility(pixelPos, lp);
+    float vis = visibility(pixelPos, lp);
     if (vis < 0.001) return vec3(0.0);
 
-    // Inverse-quadratic-ish falloff with hard cutoff at radius.
     float t = clamp(1.0 - dist / radius, 0.0, 1.0);
     float atten = t * t;
 
@@ -133,23 +120,23 @@ vec3 volumetricContribution(int i, vec2 pixelPos) {
     float fogStr = lightExtra[i].z;
     if (fogStr <= 0.001) return vec3(0.0);
     int type = int(lightPos[i].w + 0.5);
-    if (type == 2) return vec3(0.0); // skip sky for volumetric (would tint everything)
+    if (type == 2) return vec3(0.0);
 
-    vec2 lp = lightPos[i].xy;
+    vec2  lp     = lightPos[i].xy;
     float radius = lightPos[i].z;
-    vec2 toL = lp - pixelPos;
-    float dist = length(toL);
+    vec2  toL    = lp - pixelPos;
+    float dist   = length(toL);
     if (dist > radius * 1.2) return vec3(0.0);
 
-    const int FOG_STEPS = 24;
+    const int FOG_STEPS = 12;
     vec2 d = toL / float(FOG_STEPS);
     vec2 p = pixelPos + d * 0.5;
     vec3 accum = vec3(0.0);
     float stepLen = length(d);
 
-    vec2 spotDir = vec2(0.0);
+    bool  isSpot  = (type == 1);
+    vec2  spotDir = vec2(0.0);
     float halfAng = 0.0;
-    bool isSpot = (type == 1);
     if (isSpot) {
         spotDir = vec2(cos(lightExtra[i].x), sin(lightExtra[i].x));
         halfAng = lightExtra[i].y;
@@ -163,13 +150,10 @@ vec3 volumetricContribution(int i, vec2 pixelPos) {
 
             float cone = 1.0;
             if (isSpot) {
-                vec2 fromL = (p - lp) / max(dl, 0.0001);
-                float c = dot(fromL, spotDir);
+                vec2  fromL = (p - lp) / max(dl, 0.0001);
+                float c     = dot(fromL, spotDir);
                 cone = smoothstep(cos(halfAng) - 0.05, cos(halfAng), c);
             }
-
-            // Anisotropic-ish in-scatter: brighter when looking toward light.
-            // In 2D we approximate by just using attenuation.
             accum += lightCol[i].rgb * lightCol[i].a * at * cone;
         }
         p += d;
@@ -178,55 +162,49 @@ vec3 volumetricContribution(int i, vec2 pixelPos) {
 }
 
 void main() {
-    vec2 pixelPos = vec2(fragTexCoord.x, 1.0 - fragTexCoord.y) * resolution + camOffset;
+    vec2 screenPx = vec2(fragTexCoord.x, 1.0 - fragTexCoord.y) * resolution;
+    vec2 pixelPos = screenPx * worldPerPx + worldOrigin;
 
-    vec3 sceneColor = texture(texture0, fragTexCoord).rgb;
-
+    // Ambient term
     vec3 lighting = ambientColor * globalAmbient;
-    vec3 fog      = vec3(0.0);
 
     int n = min(lightCount, MAX_LIGHTS);
     for (int i = 0; i < n; i++) {
         lighting += directContribution(i, pixelPos);
-        fog      += volumetricContribution(i, pixelPos);
+        lighting += volumetricContribution(i, pixelPos);
     }
 
-    // 1-bounce GI via blurred direct-lit texture.
     if (useBounce == 1) {
-        vec3 b = texture(bounceTex, fragTexCoord).rgb;
+        vec3 b = texture(bounceTex, vec2(fragTexCoord.x, 1.0 - fragTexCoord.y)).rgb;
         lighting += b * 0.6;
     }
 
-    // Compose: darken the unlit scene, then multiply by accumulated lighting.
-    // mix(1, ambient, darkness) means if darkness=1, base contribution is just ambient,
-    // and lights have to bring it back up.
-    vec3 baseFloor = sceneColor * mix(1.0, globalAmbient, globalDarkness);
-    vec3 lit       = sceneColor * lighting;
+    // Bake the floor: even pure-dark areas multiply scene by this much.
+    // floor = (1 - darkness) + darkness * globalAmbient
+    //   darkness=0 → floor=1 → no darkening
+    //   darkness=1 → floor=globalAmbient → full darkening
+    float floorVal = mix(1.0, globalAmbient, globalDarkness);
+    lighting = max(lighting, vec3(floorVal));
 
-    // max() avoids "subtractive" double-darkening; lights only add brightness.
-    vec3 outCol = max(baseFloor, lit);
+    // Mild headroom for lights brighter than 1.0
+    lighting = min(lighting, vec3(1.6));
 
-    // Volumetric is additive; clamp final result.
-    outCol += fog;
-    outCol = min(outCol, vec3(1.4));   // small headroom over 1.0 for bloom-ish feel
-
-    finalColor = vec4(outCol, 1.0);
+    finalColor = vec4(lighting, 1.0);
 }
 )GLSL";
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  GLSL: simple 9-tap gaussian blur (for the bounce pass)
+//  Separable 9-tap blur (used only for bounce).
 // ─────────────────────────────────────────────────────────────────────────────
 static const char* BLUR_FS = R"GLSL(
 #version 330
-in vec2 fragTexCoord;
+in  vec2 fragTexCoord;
 out vec4 finalColor;
 uniform sampler2D texture0;
-uniform vec2 blurDir;       // (1/w, 0) for horizontal, (0, 1/h) for vertical
-uniform vec2 resolution;
+uniform vec2 blurDir;
 
 void main() {
-    vec2 step = blurDir * 1.5;          // 1.5 px tap distance
+    vec2 step = blurDir * 1.5;
     vec3 c = vec3(0.0);
     c += texture(texture0, fragTexCoord - step * 4.0).rgb * 0.05;
     c += texture(texture0, fragTexCoord - step * 3.0).rgb * 0.09;
@@ -244,43 +222,64 @@ void main() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Implementation
 // ─────────────────────────────────────────────────────────────────────────────
-void LightingSystem::Init(int screenW, int screenH)
+LightingSystem::~LightingSystem() { Shutdown(); }
+
+void LightingSystem::Init(int rtW, int rtH, Quality q)
 {
-    _w = screenW;
-    _h = screenH;
+    if (_ready) Shutdown();
 
-    _sceneRT     = LoadRenderTexture(_w, _h);
-    _occluderRT  = LoadRenderTexture(_w, _h);
-    _directLitRT = LoadRenderTexture(_w, _h);
-    _bounceRT    = LoadRenderTexture(_w, _h);
-    _scratchRT   = LoadRenderTexture(_w, _h);
+    _rtW = rtW; _rtH = rtH;
+    _liW = (rtW + 1) / 2;
+    _liH = (rtH + 1) / 2;
+    _quality = q;
 
-    SetTextureFilter(_sceneRT.texture,     TEXTURE_FILTER_BILINEAR);
-    SetTextureFilter(_occluderRT.texture,  TEXTURE_FILTER_POINT);    // crisp shadow edges
+    _sceneRT = LoadRenderTexture(_rtW, _rtH);
+    _occluderRT = LoadRenderTexture(_liW, _liH);
+    _directLitRT = LoadRenderTexture(_liW, _liH);
+    _scratchRT = LoadRenderTexture(_liW, _liH);
+    _bounceRT = LoadRenderTexture(_liW, _liH);
+    _finalLightRT = LoadRenderTexture(_liW, _liH);
+
+    SetTextureFilter(_sceneRT.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(_occluderRT.texture, TEXTURE_FILTER_POINT);
     SetTextureFilter(_directLitRT.texture, TEXTURE_FILTER_BILINEAR);
-    SetTextureFilter(_bounceRT.texture,    TEXTURE_FILTER_BILINEAR);
-    SetTextureFilter(_scratchRT.texture,   TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(_scratchRT.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(_bounceRT.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(_finalLightRT.texture, TEXTURE_FILTER_BILINEAR);
 
     _lightShader = LoadShaderFromMemory(nullptr, LIGHTING_FS);
-    _blurShader  = LoadShaderFromMemory(nullptr, BLUR_FS);
+    _blurShader = LoadShaderFromMemory(nullptr, BLUR_FS);
 
-    // Cache uniform locations
-    _locLightCount  = GetShaderLocation(_lightShader, "lightCount");
-    _locLightPos    = GetShaderLocation(_lightShader, "lightPos");
-    _locLightCol    = GetShaderLocation(_lightShader, "lightCol");
-    _locLightExtra  = GetShaderLocation(_lightShader, "lightExtra");
-    _locResolution  = GetShaderLocation(_lightShader, "resolution");
-    _locCamOffset   = GetShaderLocation(_lightShader, "camOffset");
-    _locAmbient     = GetShaderLocation(_lightShader, "globalAmbient");
-    _locAmbientCol  = GetShaderLocation(_lightShader, "ambientColor");
-    _locDarkness    = GetShaderLocation(_lightShader, "globalDarkness");
-    _locTime        = GetShaderLocation(_lightShader, "uTime");
-    _locOccluderTex = GetShaderLocation(_lightShader, "occluderTex");
-    _locBounceTex   = GetShaderLocation(_lightShader, "bounceTex");
-    _locUseBounce   = GetShaderLocation(_lightShader, "useBounce");
+    // ── Compose shader is no longer used; we use BLEND_MULTIPLIED instead.
+    _composeShader.id = 0;
 
-    _locBlurDir = GetShaderLocation(_blurShader, "blurDir");
-    _locBlurRes = GetShaderLocation(_blurShader, "resolution");
+    _locLP_count = GetShaderLocation(_lightShader, "lightCount");
+    _locLP_pos = GetShaderLocation(_lightShader, "lightPos");
+    _locLP_col = GetShaderLocation(_lightShader, "lightCol");
+    _locLP_extra = GetShaderLocation(_lightShader, "lightExtra");
+    _locLP_resolution = GetShaderLocation(_lightShader, "resolution");
+    _locLP_worldOrigin = GetShaderLocation(_lightShader, "worldOrigin");
+    _locLP_worldPerPx = GetShaderLocation(_lightShader, "worldPerPx");
+    _locLP_ambient = GetShaderLocation(_lightShader, "globalAmbient");
+    _locLP_ambientCol = GetShaderLocation(_lightShader, "ambientColor");
+    _locLP_time = GetShaderLocation(_lightShader, "uTime");
+    _locLP_useBounce = GetShaderLocation(_lightShader, "useBounce");
+    _locLP_occTex = GetShaderLocation(_lightShader, "occluderTex");
+    _locLP_bounceTex = GetShaderLocation(_lightShader, "bounceTex");
+    // NEW: darkness used by lighting shader
+    int locDarkness = GetShaderLocation(_lightShader, "globalDarkness");
+    _locCM_darkness = locDarkness;   // reuse this slot
+
+    _locBL_dir = GetShaderLocation(_blurShader, "blurDir");
+
+    // Print diagnostics so the user can tell if a shader failed.
+    printf("[Lighting] lightShader.id=%u  blurShader.id=%u  rtW=%d rtH=%d  liW=%d liH=%d\n",
+        _lightShader.id, _blurShader.id, _rtW, _rtH, _liW, _liH);
+    printf("[Lighting] uniforms: count=%d pos=%d col=%d extra=%d res=%d origin=%d wpp=%d "
+        "amb=%d ambCol=%d time=%d useBnc=%d occ=%d bnc=%d dark=%d\n",
+        _locLP_count, _locLP_pos, _locLP_col, _locLP_extra, _locLP_resolution,
+        _locLP_worldOrigin, _locLP_worldPerPx, _locLP_ambient, _locLP_ambientCol,
+        _locLP_time, _locLP_useBounce, _locLP_occTex, _locLP_bounceTex, locDarkness);
 
     _ready = true;
 }
@@ -291,8 +290,9 @@ void LightingSystem::Shutdown()
     UnloadRenderTexture(_sceneRT);
     UnloadRenderTexture(_occluderRT);
     UnloadRenderTexture(_directLitRT);
-    UnloadRenderTexture(_bounceRT);
     UnloadRenderTexture(_scratchRT);
+    UnloadRenderTexture(_bounceRT);
+    UnloadRenderTexture(_finalLightRT);
     UnloadShader(_lightShader);
     UnloadShader(_blurShader);
     _ready = false;
@@ -314,8 +314,13 @@ void LightingSystem::EndScene()
 void LightingSystem::BeginOccluders(Camera2D cam)
 {
     BeginTextureMode(_occluderRT);
-    ClearBackground(BLACK);   // black = open space
-    BeginMode2D(cam);
+    ClearBackground(BLACK);
+
+    Camera2D halfCam = cam;
+    halfCam.zoom *= 0.5f;
+    halfCam.offset.x *= 0.5f;
+    halfCam.offset.y *= 0.5f;
+    BeginMode2D(halfCam);
 }
 void LightingSystem::EndOccluders()
 {
@@ -327,28 +332,22 @@ void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
 {
     BeginOccluders(cam);
 
-    // Platforms — solid silhouettes. We approximate tilted platforms as their AABB,
-    // which is fine for shadowing purposes.
     for (const auto& p : lv.platforms) {
-        float h = (p.h <= 0.f) ? 8.f : p.h;       // matches Platform::Make default
+        float h = (p.h <= 0.f) ? 8.f : p.h;
         DrawRectangleRec({ p.x, p.y, p.w, h }, WHITE);
     }
-    // Beams — assume a reasonable 64x16 silhouette per beam.
     for (const auto& b : lv.beams) {
         DrawRectangleRec({ b.x, b.y, 64.f, 16.f }, WHITE);
     }
-    // Kill zones occlude too (golden pistons block light).
     for (const auto& kz : lv.killZones) {
         if (kz.texId == KillZoneTexture::NONE) continue;
         DrawRectanglePro({ kz.x + kz.w * 0.5f, kz.y + kz.h * 0.5f, kz.w, kz.h },
-                         { kz.w * 0.5f, kz.h * 0.5f }, kz.rotation, WHITE);
+            { kz.w * 0.5f, kz.h * 0.5f }, kz.rotation, WHITE);
     }
-    // Conveyors block as their bounding rect.
     for (const auto& cv : lv.conveyors) {
         DrawRectanglePro({ cv.x, cv.y, cv.length, cv.beltH },
-                         { 0, cv.beltH * 0.5f }, cv.rotation, WHITE);
+            { 0, cv.beltH * 0.5f }, cv.rotation, WHITE);
     }
-    // Elevators — solid rectangle.
     for (const auto& el : lv.elevators) {
         DrawRectangleRec({ el.x, el.y, el.w, el.h }, WHITE);
     }
@@ -356,142 +355,153 @@ void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
     EndOccluders();
 }
 
-// ── Composite (final lit pass) ───────────────────────────────────────────────
+// ── Light upload ─────────────────────────────────────────────────────────────
 void LightingSystem::UploadLights(const LevelData& lv)
 {
-    float pos[MAX_LIGHTS * 4]   = {};
-    float col[MAX_LIGHTS * 4]   = {};
-    float ext[MAX_LIGHTS * 4]   = {};
+    float pos[MAX_LIGHTS * 4] = {};
+    float col[MAX_LIGHTS * 4] = {};
+    float ext[MAX_LIGHTS * 4] = {};
 
     int n = 0;
     for (size_t k = 0; k < lv.lights.size() && n < MAX_LIGHTS; k++) {
         const LightData& L = lv.lights[k];
         if (!L.enabled) continue;
 
-        pos[n*4 + 0] = L.x;
-        pos[n*4 + 1] = L.y;
-        pos[n*4 + 2] = L.radius;
-        pos[n*4 + 3] = (float)(int)L.type;
+        pos[n * 4 + 0] = L.x;
+        pos[n * 4 + 1] = L.y;
+        pos[n * 4 + 2] = L.radius;
+        pos[n * 4 + 3] = (float)(int)L.type;
 
-        col[n*4 + 0] = L.r;
-        col[n*4 + 1] = L.g;
-        col[n*4 + 2] = L.b;
-        col[n*4 + 3] = L.intensity;
+        col[n * 4 + 0] = L.r;
+        col[n * 4 + 1] = L.g;
+        col[n * 4 + 2] = L.b;
+        col[n * 4 + 3] = L.intensity;
 
-        ext[n*4 + 0] = L.direction * (3.14159265f / 180.f);
-        ext[n*4 + 1] = (L.angle * 0.5f) * (3.14159265f / 180.f);
-        ext[n*4 + 2] = L.fogStrength;
-        ext[n*4 + 3] = (float)L.bounces;
+        ext[n * 4 + 0] = L.direction * (3.14159265f / 180.f);
+        ext[n * 4 + 1] = (L.angle * 0.5f) * (3.14159265f / 180.f);
+        ext[n * 4 + 2] = L.fogStrength;
+        ext[n * 4 + 3] = (float)L.bounces;
         n++;
     }
 
-    SetShaderValue (_lightShader, _locLightCount, &n, SHADER_UNIFORM_INT);
+    SetShaderValue(_lightShader, _locLP_count, &n, SHADER_UNIFORM_INT);
     if (n > 0) {
-        SetShaderValueV(_lightShader, _locLightPos,   pos, SHADER_UNIFORM_VEC4, n);
-        SetShaderValueV(_lightShader, _locLightCol,   col, SHADER_UNIFORM_VEC4, n);
-        SetShaderValueV(_lightShader, _locLightExtra, ext, SHADER_UNIFORM_VEC4, n);
+        SetShaderValueV(_lightShader, _locLP_pos, pos, SHADER_UNIFORM_VEC4, n);
+        SetShaderValueV(_lightShader, _locLP_col, col, SHADER_UNIFORM_VEC4, n);
+        SetShaderValueV(_lightShader, _locLP_extra, ext, SHADER_UNIFORM_VEC4, n);
     }
 }
 
+// ── Blur (separable) ─────────────────────────────────────────────────────────
 void LightingSystem::RunBlur(RenderTexture2D src, RenderTexture2D dst, Vector2 dir)
 {
     BeginTextureMode(dst);
     ClearBackground(BLANK);
     BeginShaderMode(_blurShader);
     float dirArr[2] = { dir.x, dir.y };
-    float resArr[2] = { (float)_w, (float)_h };
-    SetShaderValue(_blurShader, _locBlurDir, dirArr, SHADER_UNIFORM_VEC2);
-    SetShaderValue(_blurShader, _locBlurRes, resArr, SHADER_UNIFORM_VEC2);
+    SetShaderValue(_blurShader, _locBL_dir, dirArr, SHADER_UNIFORM_VEC2);
     DrawTextureRec(src.texture,
-                   { 0, 0, (float)src.texture.width, -(float)src.texture.height },
-                   { 0, 0 }, WHITE);
+        { 0, 0, (float)src.texture.width, -(float)src.texture.height },
+        { 0, 0 }, WHITE);
     EndShaderMode();
     EndTextureMode();
 }
 
-void LightingSystem::Composite(const LevelData& lv, Camera2D cam)
+// ── One lighting pass ────────────────────────────────────────────────────────
+void LightingSystem::DoLightingPass(Camera2D cam, RenderTexture2D dst, bool useBounce)
+{
+    float resArr[2] = { (float)_liW, (float)_liH };
+    float worldOrigin[2] = {
+        cam.target.x - cam.offset.x / cam.zoom,
+        cam.target.y - cam.offset.y / cam.zoom
+    };
+    float wppX = ((float)_rtW / (float)_liW) / cam.zoom;
+    float wppY = ((float)_rtH / (float)_liH) / cam.zoom;
+    float worldPerPx[2] = { wppX, wppY };
+
+    Color amb = _ambientColor;
+    float ambArr[3] = { amb.r / 255.f, amb.g / 255.f, amb.b / 255.f };
+
+    SetShaderValue(_lightShader, _locLP_resolution, resArr, SHADER_UNIFORM_VEC2);
+    SetShaderValue(_lightShader, _locLP_worldOrigin, worldOrigin, SHADER_UNIFORM_VEC2);
+    SetShaderValue(_lightShader, _locLP_worldPerPx, worldPerPx, SHADER_UNIFORM_VEC2);
+    SetShaderValue(_lightShader, _locLP_ambient, &_globalAmbient, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(_lightShader, _locLP_ambientCol, ambArr, SHADER_UNIFORM_VEC3);
+    SetShaderValue(_lightShader, _locLP_time, &_time, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(_lightShader, _locCM_darkness, &_globalDarkness, SHADER_UNIFORM_FLOAT);
+    int ub = useBounce ? 1 : 0;
+    SetShaderValue(_lightShader, _locLP_useBounce, &ub, SHADER_UNIFORM_INT);
+
+    BeginTextureMode(dst);
+    ClearBackground(BLACK);
+    BeginShaderMode(_lightShader);
+    SetShaderValueTexture(_lightShader, _locLP_occTex, _occluderRT.texture);
+    SetShaderValueTexture(_lightShader, _locLP_bounceTex, _bounceRT.texture);
+    DrawTextureRec(_occluderRT.texture,
+        { 0, 0, (float)_occluderRT.texture.width, -(float)_occluderRT.texture.height },
+        { 0, 0 }, WHITE);
+    EndShaderMode();
+    EndTextureMode();
+}
+
+// ── Composite ────────────────────────────────────────────────────────────────
+void LightingSystem::Composite(const LevelData& lv, Camera2D cam, Rectangle dst)
 {
     if (!_ready) return;
     _time += GetFrameTime();
 
     UploadLights(lv);
 
-    float resArr[2] = { (float)_w, (float)_h };
-    // Camera offset converts screen-space to world-space coords (cam.target gives world
-    // origin at screen center when offset=center, but our cam typically uses offset=(0,0)
-    // and target=(0,0) so screenPx == worldPx). We honour the general case:
-    float camOff[2] = {
-        cam.target.x - cam.offset.x / cam.zoom,
-        cam.target.y - cam.offset.y / cam.zoom
-    };
-    Color amb = _ambientColor;
-    float ambArr[3] = { amb.r / 255.f, amb.g / 255.f, amb.b / 255.f };
-
-    SetShaderValue(_lightShader, _locResolution, resArr,           SHADER_UNIFORM_VEC2);
-    SetShaderValue(_lightShader, _locCamOffset,  camOff,           SHADER_UNIFORM_VEC2);
-    SetShaderValue(_lightShader, _locAmbient,    &_globalAmbient,  SHADER_UNIFORM_FLOAT);
-    SetShaderValue(_lightShader, _locAmbientCol, ambArr,           SHADER_UNIFORM_VEC3);
-    SetShaderValue(_lightShader, _locDarkness,   &_globalDarkness, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(_lightShader, _locTime,       &_time,           SHADER_UNIFORM_FLOAT);
-
-    // ── Pass 1: direct lighting (no bounce yet) into _directLitRT ───────────
     bool anyBounce = false;
-    for (const auto& L : lv.lights) if (L.bounces > 0 && L.enabled) { anyBounce = true; break; }
-
-    int useBounce = 0;
-    SetShaderValue(_lightShader, _locUseBounce, &useBounce, SHADER_UNIFORM_INT);
-
-    BeginTextureMode(_directLitRT);
-    ClearBackground(BLACK);
-    BeginShaderMode(_lightShader);
-    SetShaderValueTexture(_lightShader, _locOccluderTex, _occluderRT.texture);
-    // Bind a placeholder bounce texture; not sampled because useBounce=0.
-    SetShaderValueTexture(_lightShader, _locBounceTex, _occluderRT.texture);
-    DrawTextureRec(_sceneRT.texture,
-                   { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
-                   { 0, 0 }, WHITE);
-    EndShaderMode();
-    EndTextureMode();
+    for (const auto& L : lv.lights) {
+        if (L.enabled && L.bounces > 0) { anyBounce = true; break; }
+    }
 
     if (anyBounce) {
-        // ── Pass 2: separable blur of the direct-lit image into _bounceRT ──
-        //  _directLitRT  --H-->  _scratchRT  --V-->  _bounceRT
-        RunBlur(_directLitRT, _scratchRT, { 1.f / (float)_w, 0.f });
-        RunBlur(_scratchRT,   _bounceRT,  { 0.f, 1.f / (float)_h });
-
-        // ── Pass 3: re-run lighting with bounce contribution, to backbuffer
-        useBounce = 1;
-        SetShaderValue(_lightShader, _locUseBounce, &useBounce, SHADER_UNIFORM_INT);
-        BeginShaderMode(_lightShader);
-        SetShaderValueTexture(_lightShader, _locOccluderTex, _occluderRT.texture);
-        SetShaderValueTexture(_lightShader, _locBounceTex,   _bounceRT.texture);
-        // Use the ORIGINAL scene as input so we don't double-light surfaces.
-        DrawTextureRec(_sceneRT.texture,
-                       { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
-                       { 0, 0 }, WHITE);
-        EndShaderMode();
-    } else {
-        // No bounces — blit the direct-lit result to the backbuffer.
-        DrawTextureRec(_directLitRT.texture,
-                       { 0, 0, (float)_directLitRT.texture.width, -(float)_directLitRT.texture.height },
-                       { 0, 0 }, WHITE);
+        DoLightingPass(cam, _directLitRT, /*useBounce=*/false);
+        RunBlur(_directLitRT, _scratchRT, { 1.f / (float)_liW, 0.f });
+        RunBlur(_scratchRT, _bounceRT, { 0.f, 1.f / (float)_liH });
+        DoLightingPass(cam, _finalLightRT, /*useBounce=*/true);
     }
+    else {
+        DoLightingPass(cam, _finalLightRT, /*useBounce=*/false);
+    }
+
+    Rectangle blitDst = dst;
+    if (blitDst.width <= 0.f || blitDst.height <= 0.f)
+        blitDst = { 0.f, 0.f, (float)_rtW, (float)_rtH };
+
+    // ── Step A: draw the scene to dst region (full res). ──────────────
+    DrawTexturePro(_sceneRT.texture,
+        { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
+        blitDst, { 0, 0 }, 0.f, WHITE);
+
+    // ── Step B: multiply the lighting term on top with BLEND_MULTIPLIED.
+    //           This produces:  output = scene * lighting
+    //           Lighting RT already has the ambient floor baked into it,
+    //           so scene * lighting >= scene * floor (always darker than scene
+    //           when no lights, and brighter than floor when lights illuminate).
+    BeginBlendMode(BLEND_MULTIPLIED);
+    DrawTexturePro(_finalLightRT.texture,
+        { 0, 0, (float)_finalLightRT.texture.width, -(float)_finalLightRT.texture.height },
+        blitDst, { 0, 0 }, 0.f, WHITE);
+    EndBlendMode();
 }
 
 // ── Debug ────────────────────────────────────────────────────────────────────
 void LightingSystem::DebugDrawOccluder(Rectangle dst)
 {
     DrawTexturePro(_occluderRT.texture,
-                   { 0, 0, (float)_occluderRT.texture.width, -(float)_occluderRT.texture.height },
-                   dst, { 0,0 }, 0.f, WHITE);
+        { 0, 0, (float)_occluderRT.texture.width, -(float)_occluderRT.texture.height },
+        dst, { 0,0 }, 0.f, WHITE);
     DrawRectangleLinesEx(dst, 2, GREEN);
     DrawText("OCCLUDER", (int)dst.x + 4, (int)dst.y + 4, 12, GREEN);
 }
 void LightingSystem::DebugDrawScene(Rectangle dst)
 {
     DrawTexturePro(_sceneRT.texture,
-                   { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
-                   dst, { 0,0 }, 0.f, WHITE);
+        { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
+        dst, { 0,0 }, 0.f, WHITE);
     DrawRectangleLinesEx(dst, 2, ORANGE);
     DrawText("SCENE", (int)dst.x + 4, (int)dst.y + 4, 12, ORANGE);
 }

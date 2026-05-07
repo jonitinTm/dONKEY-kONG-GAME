@@ -24,6 +24,9 @@ const char* LevelEditor::ToolName(EditorTool t) {
     case EditorTool::WIN_ZONE:return"WIN ZONE";
     case EditorTool::KILL_ZONE:return"KILL ZONE";
     case EditorTool::CONVEYOR:return"CONVEYOR";
+    case EditorTool::POINT_LIGHT:return"POINT LIGHT";
+    case EditorTool::SPOT_LIGHT:return"SPOT LIGHT";
+    case EditorTool::SKY_LIGHT:return"SKY LIGHT";
     default:return"???";
     }
 }
@@ -39,6 +42,9 @@ Color LevelEditor::ToolColor(EditorTool t) {
     case EditorTool::WIN_ZONE:return{ 80,255,140,255 };
     case EditorTool::KILL_ZONE:return{ 255,60,60,255 };
     case EditorTool::CONVEYOR:return{ 255,200,60,255 };
+    case EditorTool::POINT_LIGHT:return{ 255,235,120,255 };
+    case EditorTool::SPOT_LIGHT:return{ 200,255,180,255 };
+    case EditorTool::SKY_LIGHT:return{ 130,200,255,255 };
     default:return GRAY;
     }
 }
@@ -55,6 +61,16 @@ void LevelEditor::Init(int sw, int sh) {
     _cam.target = { 0.f,0.f };
     _cam.rotation = 0.f;
     _cam.zoom = _zoom;
+
+    // Lighting system sized to canvas region
+    _lighting.Init(_canvasW, (int)_canvasH, LightingSystem::Quality::MEDIUM);
+    _lighting.SetGlobalAmbient(0.06f);    // very dim ambient floor
+    _lighting.SetGlobalDarkness(1.00f);   // 1.0 = use ambient as full floor
+    _lighting.SetAmbientColor({ 25, 30, 50, 255 });
+
+    // Preview ON by default — tap F8 (or F8:LIGHT button) to toggle off
+    _lightingPreview = true;
+
     LoadLevel(1);
 }
 
@@ -128,6 +144,12 @@ Vector2 LevelEditor::EntityCenter(const SelectedEnt& e) const {
     case EditorTool::WIN_ZONE: { auto r = WinZoneRect(_level.winZone);       return { r.x + r.width * .5f, r.y + r.height * .5f }; }
     case EditorTool::KILL_ZONE: { auto r = KillZoneRect(_level.killZones[i]); return { r.x + r.width * .5f, r.y + r.height * .5f }; }
     case EditorTool::CONVEYOR: { auto r = ConveyorRect(_level.conveyors[i]);  return { r.x + r.width * .5f, r.y + r.height * .5f }; }
+    case EditorTool::POINT_LIGHT:
+    case EditorTool::SPOT_LIGHT:
+    case EditorTool::SKY_LIGHT:
+        if (i < (int)_level.lights.size())
+            return { _level.lights[i].x, _level.lights[i].y };
+        return {};
     default: return GetEntPos(e);
     }
 }
@@ -153,6 +175,12 @@ Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const {
     case EditorTool::WIN_ZONE:       return { _level.winZone.x, _level.winZone.y };
     case EditorTool::KILL_ZONE:      return { _level.killZones[i].x, _level.killZones[i].y };
     case EditorTool::CONVEYOR:       return { _level.conveyors[i].x, _level.conveyors[i].y };
+    case EditorTool::POINT_LIGHT:
+    case EditorTool::SPOT_LIGHT:
+    case EditorTool::SKY_LIGHT:
+        if (i < (int)_level.lights.size())
+            return { _level.lights[i].x, _level.lights[i].y };
+        return {};
     default: return {};
     }
 }
@@ -174,6 +202,13 @@ void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p) {
     case EditorTool::WIN_ZONE:       _level.winZone.x = p.x; _level.winZone.y = p.y; break;
     case EditorTool::KILL_ZONE:      _level.killZones[i].x = p.x; _level.killZones[i].y = p.y; break;
     case EditorTool::CONVEYOR:       _level.conveyors[i].x = p.x; _level.conveyors[i].y = p.y; break;
+    case EditorTool::POINT_LIGHT:
+    case EditorTool::SPOT_LIGHT:
+    case EditorTool::SKY_LIGHT:
+        if (i < (int)_level.lights.size()) {
+            _level.lights[i].x = p.x; _level.lights[i].y = p.y;
+        }
+        break;
     default: break;
     }
 }
@@ -203,6 +238,17 @@ bool LevelEditor::PickEntity(Vector2 p) {
     if (_level.hasWinZone && CheckCollisionPointRec(p, WinZoneRect(_level.winZone))) { _sel = { (int)EditorTool::WIN_ZONE,0 }; return true; }
     for (int i = 0; i < (int)_level.conveyors.size(); i++)
         if (CheckCollisionPointRec(p, ConveyorRect(_level.conveyors[i]))) { _sel = { (int)EditorTool::CONVEYOR,i }; return true; }
+    for (int i = 0; i < (int)_level.lights.size(); i++) {
+        Vector2 lp = { _level.lights[i].x, _level.lights[i].y };
+        float dx = p.x - lp.x, dy = p.y - lp.y;
+        if (dx * dx + dy * dy < 14.f * 14.f) {
+            EditorTool t = (_level.lights[i].type == LightType::POINT) ? EditorTool::POINT_LIGHT
+                : (_level.lights[i].type == LightType::SPOT) ? EditorTool::SPOT_LIGHT
+                : EditorTool::SKY_LIGHT;
+            _sel = { (int)t, i };
+            return true;
+        }
+    }
     if (_level.hasCave) {
         float cw = (_caveTex && _caveTex->id > 0) ? 64.f * 3.5f : 50.f;
         float ch = (_caveTex && _caveTex->id > 0) ? 32.f * 3.5f : 50.f;
@@ -241,6 +287,15 @@ void LevelEditor::BoxSelectEntities(Rectangle box) {
     if (_level.hasPlayerSpawn && CheckCollisionPointRec(_level.playerSpawn, box)) _multiSel.push_back({ (int)EditorTool::PLAYER_SPAWN,0 });
     if (_level.hasRegulus && CheckCollisionPointRec(_level.regulusPos, box))      _multiSel.push_back({ (int)EditorTool::REGULUS,0 });
     if (_level.hasCave && CheckCollisionPointRec(_level.cavePos, box))            _multiSel.push_back({ (int)EditorTool::CAVE,0 });
+    for (int i = 0; i < (int)_level.lights.size(); i++) {
+        Vector2 lp = { _level.lights[i].x, _level.lights[i].y };
+        if (CheckCollisionPointRec(lp, box)) {
+            EditorTool t = (_level.lights[i].type == LightType::POINT) ? EditorTool::POINT_LIGHT
+                : (_level.lights[i].type == LightType::SPOT) ? EditorTool::SPOT_LIGHT
+                : EditorTool::SKY_LIGHT;
+            _multiSel.push_back({ (int)t, i });
+        }
+    }
     if (!_multiSel.empty()) _sel = _multiSel[0];
     SetStatus(TextFormat("%d selected.", (int)_multiSel.size()));
 }
@@ -285,6 +340,9 @@ void LevelEditor::DeleteSelected() {
     case EditorTool::WIN_ZONE:       _level.hasWinZone = false; break;
     case EditorTool::KILL_ZONE:      Er(_level.killZones, i); break;
     case EditorTool::CONVEYOR:       Er(_level.conveyors, i); break;
+    case EditorTool::POINT_LIGHT:
+    case EditorTool::SPOT_LIGHT:
+    case EditorTool::SKY_LIGHT:      Er(_level.lights, i); break;
     default: break;
     }
     _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
@@ -305,6 +363,23 @@ void LevelEditor::DeleteMultiSelected() {
     DT(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns); DT(EditorTool::ENEMY_SPAWN, _level.enemySpawns);
     DT(EditorTool::ELEVATOR, _level.elevators); DT(EditorTool::KILL_ZONE, _level.killZones);
     DT(EditorTool::CONVEYOR, _level.conveyors);
+    // All three light tool types share _level.lights — collect all indices
+    {
+        std::vector<int> li;
+        for (const auto& e : _multiSel) {
+            if (e.type == (int)EditorTool::POINT_LIGHT ||
+                e.type == (int)EditorTool::SPOT_LIGHT ||
+                e.type == (int)EditorTool::SKY_LIGHT) li.push_back(e.index);
+        }
+        if (_sel.valid() &&
+            (_sel.type == (int)EditorTool::POINT_LIGHT ||
+                _sel.type == (int)EditorTool::SPOT_LIGHT ||
+                _sel.type == (int)EditorTool::SKY_LIGHT) &&
+            std::find(li.begin(), li.end(), _sel.index) == li.end())
+            li.push_back(_sel.index);
+        std::sort(li.rbegin(), li.rend());
+        for (int x : li) Er(_level.lights, x);
+    }
     std::vector<int> pi;
     for (const auto& e : _multiSel) if (e.type == (int)EditorTool::PATH_NODE) pi.push_back(e.index);
     if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && std::find(pi.begin(), pi.end(), _sel.index) == pi.end()) pi.push_back(_sel.index);
@@ -667,6 +742,12 @@ void LevelEditor::BuildOutline() {
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)  EmitRoot({ (int)EditorTool::ENEMY_SPAWN,i });
     for (int i = 0; i < (int)_level.killZones.size(); i++)    EmitRoot({ (int)EditorTool::KILL_ZONE,i });
     for (int i = 0; i < (int)_level.conveyors.size(); i++)    EmitRoot({ (int)EditorTool::CONVEYOR,i });
+    for (int i = 0; i < (int)_level.lights.size(); i++) {
+        EditorTool t = (_level.lights[i].type == LightType::POINT) ? EditorTool::POINT_LIGHT
+            : (_level.lights[i].type == LightType::SPOT) ? EditorTool::SPOT_LIGHT
+            : EditorTool::SKY_LIGHT;
+        EmitRoot({ (int)t, i });
+    }
 
     int vis = (int)(OutlinerRect().height - 20) / OUTLINE_ROW;
     int maxScroll = (int)_outline.size() - vis;
@@ -856,7 +937,7 @@ void LevelEditor::UpdateBrowser() {
     if (mouse.x >= _canvasW) return;
     const int r0[] = { 0,1,2,3,4,5 };
     const int r1[] = { 6,7,8,9,10,11 };
-    const int r2[] = { 12,13,14,-1,-1,-1 };
+    const int r2[] = { 12,13,14,15,16,17 };  // ...,POINT_LIGHT,SPOT_LIGHT,SKY_LIGHT
     for (int c = 0; c < 6; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6)))
     {
         _tool = (EditorTool)r0[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
@@ -865,7 +946,7 @@ void LevelEditor::UpdateBrowser() {
     {
         _tool = (EditorTool)r1[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
-    for (int c = 0; c < 3; c++) if (r2[c] >= 0 && CheckCollisionPointRec(mouse, BrowserBtn(2, c, 6)))
+    for (int c = 0; c < 6; c++) if (r2[c] >= 0 && CheckCollisionPointRec(mouse, BrowserBtn(2, c, 6)))
     {
         _tool = (EditorTool)r2[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
@@ -1092,6 +1173,34 @@ void LevelEditor::UpdateCanvas() {
         }
         return;
     }
+    if (_tool == EditorTool::POINT_LIGHT || _tool == EditorTool::SPOT_LIGHT ||
+        _tool == EditorTool::SKY_LIGHT) {
+        if (lP) {
+            PushUndo();
+            LightData L;
+            L.x = swm.x; L.y = swm.y;
+            if (_tool == EditorTool::SPOT_LIGHT) {
+                L.type = LightType::SPOT;
+                L.angle = 60.f;
+                L.direction = 90.f;
+                L.radius = 320.f;
+            }
+            else if (_tool == EditorTool::SKY_LIGHT) {
+                L.type = LightType::SKY;
+                L.direction = 270.f;
+                L.radius = 1000.f;
+                L.intensity = 0.6f;
+                L.r = 0.7f; L.g = 0.85f; L.b = 1.0f;
+            }
+            else {
+                L.type = LightType::POINT;
+            }
+            _level.lights.push_back(L);
+            _sel = { (int)_tool, (int)_level.lights.size() - 1 };
+            SetStatus("Light placed.");
+        }
+        return;
+    }
     if (_tool == EditorTool::PATH_NODE) {
         if (lP) {
             PushUndo(); PathNodeData n; n.x = swm.x; n.y = swm.y;
@@ -1136,6 +1245,11 @@ void LevelEditor::Update(float dt) {
     if (_seqOpen) UpdateSequencer();
     if (_wantsMenu || _wantsPlay || _wantsEmote) return;
     if (_directOp != DirectOp::NONE) { UpdateDirectOp(); return; }
+
+    if (IsKeyPressed(KEY_F8)) {
+        _lightingPreview = !_lightingPreview;
+        SetStatus(_lightingPreview ? "Lighting preview ON (F8)" : "Lighting preview OFF (F8)");
+    }
 
     UpdateToolbar();
     if (_wantsMenu || _wantsPlay || _wantsEmote) return;
@@ -1326,29 +1440,40 @@ void LevelEditor::DrawGrid() const {
     for (float y = 0; y <= (float)_sh; y += gs) { bool maj = (fmodf(y, (float)GRID_SZ) < .5f); DrawLine(0, (int)y, _sw, (int)y, maj ? Color{ 55,60,80,255 } : Color{ 35,38,52,255 }); }
 }
 void LevelEditor::DrawLevelEntities() {
+    // Backwards-compat — calls both halves (used when lighting preview off).
+    DrawLevelLitContent();
+    DrawLevelOverlays();
+}
+
+void LevelEditor::DrawLevelLitContent() {
     auto IS = [&](EditorTool t, int i) { return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
     auto IMS = [&](EditorTool t, int i) { return IsInMultiSel({ (int)t, i }); };
 
-    // Draw elevators and conveyors first (always underneath everything)
+    // Elevators and conveyors first (always underneath everything)
     for (int i = 0; i < (int)_level.elevators.size(); i++)  DrawElevatorEnt(_level.elevators[i], IS(EditorTool::ELEVATOR, i), IMS(EditorTool::ELEVATOR, i));
     for (int i = 0; i < (int)_level.conveyors.size(); i++)  DrawConveyorEnt(_level.conveyors[i], IS(EditorTool::CONVEYOR, i), IMS(EditorTool::CONVEYOR, i));
-    if (_level.hasWinZone) DrawWinZoneEnt(_level.winZone, IS(EditorTool::WIN_ZONE, 0), IMS(EditorTool::WIN_ZONE, 0));
     for (int i = 0; i < (int)_level.platforms.size(); i++)  DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
     for (int i = 0; i < (int)_level.ladders.size(); i++)    DrawLadEnt(_level.ladders[i], IS(EditorTool::LADDER, i), IMS(EditorTool::LADDER, i));
 
     // ── Layer-sorted beam + kill-zone drawing ────────────────────────────────
-    // Collect (layer, kind, index): kind 0=beam, kind 1=killzone
     struct LayerItem { int layer; int kind; int idx; };
     std::vector<LayerItem> items;
     items.reserve(_level.beams.size() + _level.killZones.size());
     for (int i = 0; i < (int)_level.beams.size(); i++) items.push_back({ _level.beams[i].renderLayer,     0, i });
     for (int i = 0; i < (int)_level.killZones.size(); i++) items.push_back({ _level.killZones[i].renderLayer, 1, i });
-    // Stable sort by layer so equal layers keep insertion order (beams before kill zones)
     std::stable_sort(items.begin(), items.end(), [](const LayerItem& a, const LayerItem& b) { return a.layer < b.layer; });
     for (const auto& it : items) {
         if (it.kind == 0) DrawBeamEnt(_level.beams[it.idx], IS(EditorTool::BEAM, it.idx), IMS(EditorTool::BEAM, it.idx));
         else              DrawKillZoneEnt(_level.killZones[it.idx], IS(EditorTool::KILL_ZONE, it.idx), IMS(EditorTool::KILL_ZONE, it.idx));
     }
+}
+
+void LevelEditor::DrawLevelOverlays() {
+    auto IS = [&](EditorTool t, int i) { return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
+    auto IMS = [&](EditorTool t, int i) { return IsInMultiSel({ (int)t, i }); };
+
+    // Win zone outline (just an editor marker, not a real visible object)
+    if (_level.hasWinZone) DrawWinZoneEnt(_level.winZone, IS(EditorTool::WIN_ZONE, 0), IMS(EditorTool::WIN_ZONE, 0));
 
     DrawPathNodes();
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++) DrawCircEnt(_level.nukeSpawns[i], 10.f, SKYBLUE, IS(EditorTool::NUKE_SPAWN, i), IMS(EditorTool::NUKE_SPAWN, i), "N");
@@ -1357,7 +1482,70 @@ void LevelEditor::DrawLevelEntities() {
     if (_level.hasPlayerSpawn) DrawPlayerSpawn(_level.playerSpawn, IS(EditorTool::PLAYER_SPAWN, 0), IMS(EditorTool::PLAYER_SPAWN, 0));
     if (_level.hasRegulus)     DrawRegulusEnt(_level.regulusPos, IS(EditorTool::REGULUS, 0), IMS(EditorTool::REGULUS, 0));
     if (_level.hasCave)        DrawCaveEnt(_level.cavePos, IS(EditorTool::CAVE, 0), IMS(EditorTool::CAVE, 0));
+
+    // Light icons / gizmos
+    for (int i = 0; i < (int)_level.lights.size(); i++) {
+        EditorTool t = (_level.lights[i].type == LightType::POINT) ? EditorTool::POINT_LIGHT
+            : (_level.lights[i].type == LightType::SPOT) ? EditorTool::SPOT_LIGHT
+            : EditorTool::SKY_LIGHT;
+        DrawLightEnt(_level.lights[i], i, IS(t, i), IMS(t, i));
+    }
+
     if (_tool == EditorTool::SELECT) DrawGizmo();
+}
+
+void LevelEditor::DrawLightEnt(const LightData& L, int idx, bool sel, bool msel) const
+{
+    (void)idx;
+    Color outline = { 255, 235, 120, 255 };
+    if (L.type == LightType::SPOT) outline = { 200, 255, 180, 255 };
+    if (L.type == LightType::SKY)  outline = { 130, 200, 255, 255 };
+
+    Vector2 c = { L.x, L.y };
+    Color body = { (unsigned char)(L.r * 255),
+                   (unsigned char)(L.g * 255),
+                   (unsigned char)(L.b * 255), 255 };
+
+    // Reach circle (faint)
+    DrawCircleLines((int)c.x, (int)c.y, L.radius, { outline.r, outline.g, outline.b, 60 });
+
+    if (L.type == LightType::SPOT) {
+        float dir = L.direction * (PI / 180.f);
+        float half = (L.angle * 0.5f) * (PI / 180.f);
+        Vector2 a = { c.x + cosf(dir - half) * L.radius,
+                      c.y + sinf(dir - half) * L.radius };
+        Vector2 b = { c.x + cosf(dir + half) * L.radius,
+                      c.y + sinf(dir + half) * L.radius };
+        DrawLineEx(c, a, 1.5f, { outline.r, outline.g, outline.b, 140 });
+        DrawLineEx(c, b, 1.5f, { outline.r, outline.g, outline.b, 140 });
+    }
+    if (L.type == LightType::SKY) {
+        float dir = L.direction * (PI / 180.f);
+        Vector2 tip = { c.x - cosf(dir) * 30.f, c.y - sinf(dir) * 30.f };
+        DrawLineEx(c, tip, 2.f, outline);
+        DrawCircleV(tip, 3.f, outline);
+    }
+
+    DrawCircleV(c, 8.f, body);
+    DrawCircleLines((int)c.x, (int)c.y, 8.f, outline);
+
+    if (L.intensity > 0.1f) {
+        unsigned char a = (unsigned char)fminf(120.f, L.intensity * 80.f);
+        DrawCircleV(c, 14.f, { body.r, body.g, body.b, a });
+    }
+
+    if (sel)  DrawCircleLines((int)c.x, (int)c.y, 12.f, WHITE);
+    if (msel) DrawCircleLines((int)c.x, (int)c.y, 11.f, ORANGE);
+
+    const char* lbl = (L.type == LightType::POINT) ? "P"
+        : (L.type == LightType::SPOT) ? "S" : "Y";
+    DrawText(lbl, (int)c.x - 3, (int)c.y - 5, 10, BLACK);
+
+    // Disabled cross
+    if (!L.enabled) {
+        DrawLineEx({ c.x - 10, c.y - 10 }, { c.x + 10, c.y + 10 }, 2.f, { 200, 60, 60, 220 });
+        DrawLineEx({ c.x - 10, c.y + 10 }, { c.x + 10, c.y - 10 }, 2.f, { 200, 60, 60, 220 });
+    }
 }
 void LevelEditor::DrawPlacementPreview() const {
     Vector2 wm = WorldMouse(), swm = Snap(wm);
@@ -1431,7 +1619,8 @@ void LevelEditor::DrawBrowserUI() {
     DrawLine(0, by0, _canvasW, by0, { 70,80,110,255 });
     const EditorTool r0[] = { EditorTool::SELECT,EditorTool::PLAYER_SPAWN,EditorTool::REGULUS,EditorTool::CAVE,EditorTool::PLATFORM,EditorTool::LADDER };
     const EditorTool r1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN,EditorTool::ELEVATOR };
-    const EditorTool r2[] = { EditorTool::WIN_ZONE,EditorTool::KILL_ZONE,EditorTool::CONVEYOR };
+    const EditorTool r2[] = { EditorTool::WIN_ZONE, EditorTool::KILL_ZONE, EditorTool::CONVEYOR,
+                              EditorTool::POINT_LIGHT, EditorTool::SPOT_LIGHT, EditorTool::SKY_LIGHT };
     auto DT = [&](int row, int col, int cols, EditorTool t) {
         Rectangle r = BrowserBtn(row, col, cols); bool act = (_tool == t); Color tc = ToolColor(t);
         DrawRectangleRec(r, act ? Color{ (unsigned char)(tc.r / 3),(unsigned char)(tc.g / 3),(unsigned char)(tc.b / 3),255 } : Color{ 30,32,44,255 });
@@ -1441,7 +1630,7 @@ void LevelEditor::DrawBrowserUI() {
         };
     for (int c = 0; c < 6; c++) DT(0, c, 6, r0[c]);
     for (int c = 0; c < 6; c++) DT(1, c, 6, r1[c]);
-    for (int c = 0; c < 3; c++) DT(2, c, 6, r2[c]);
+    for (int c = 0; c < 6; c++) DT(2, c, 6, r2[c]);
     float sy = (float)(_sh - 18);
     DrawRectangle(0, (int)sy - 2, _canvasW, 20, { 18,20,28,255 });
     const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Emote N=Menu Tab=Seq";
@@ -1607,6 +1796,10 @@ void LevelEditor::DrawDataPanel() {
         : (_sel.type == (int)EditorTool::KILL_ZONE) ? _level.killZones[_sel.index].x
         : (_sel.type == (int)EditorTool::PLAYER_SPAWN) ? _level.playerSpawn.x
         : (_sel.type == (int)EditorTool::REGULUS) ? _level.regulusPos.x
+        : (_sel.type == (int)EditorTool::CAVE) ? _level.cavePos.x
+        : (_sel.type == (int)EditorTool::POINT_LIGHT) ? _level.lights[_sel.index].x
+        : (_sel.type == (int)EditorTool::SPOT_LIGHT) ? _level.lights[_sel.index].x
+        : (_sel.type == (int)EditorTool::SKY_LIGHT) ? _level.lights[_sel.index].x
         : _level.cavePos.x;
     float& refY = (_sel.type == (int)EditorTool::PLATFORM) ? _level.platforms[_sel.index].y
         : (_sel.type == (int)EditorTool::LADDER) ? _level.ladders[_sel.index].y
@@ -1620,6 +1813,10 @@ void LevelEditor::DrawDataPanel() {
         : (_sel.type == (int)EditorTool::KILL_ZONE) ? _level.killZones[_sel.index].y
         : (_sel.type == (int)EditorTool::PLAYER_SPAWN) ? _level.playerSpawn.y
         : (_sel.type == (int)EditorTool::REGULUS) ? _level.regulusPos.y
+        : (_sel.type == (int)EditorTool::CAVE) ? _level.cavePos.y
+        : (_sel.type == (int)EditorTool::POINT_LIGHT) ? _level.lights[_sel.index].y
+        : (_sel.type == (int)EditorTool::SPOT_LIGHT) ? _level.lights[_sel.index].y
+        : (_sel.type == (int)EditorTool::SKY_LIGHT) ? _level.lights[_sel.index].y
         : _level.cavePos.y;
     if (NumField("X ", refX, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
     if (NumField("Y ", refY, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
@@ -1859,6 +2056,103 @@ void LevelEditor::DrawDataPanel() {
         if (hR && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = 1; }
         cy += 22;
     }
+    if ((_sel.type == (int)EditorTool::POINT_LIGHT ||
+        _sel.type == (int)EditorTool::SPOT_LIGHT ||
+        _sel.type == (int)EditorTool::SKY_LIGHT) && _sel.index < (int)_level.lights.size())
+    {
+        auto& L = _level.lights[_sel.index];
+        SectionHeader("── Light ──────────────────");
+
+        // Type selector — three buttons
+        const char* tyNames[] = { "Point", "Spot", "Sky" };
+        float tw = (fw - 4) / 3.f;
+        for (int ti = 0; ti < 3; ti++) {
+            Rectangle br = { px + ti * (tw + 2), cy, tw, 16 };
+            bool act = ((int)L.type == ti);
+            bool hov = CheckCollisionPointRec(GetMousePosition(), br);
+            DrawRectangleRec(br, act ? Color{ 60,40,10,255 } : (hov ? Color{ 45,48,68,255 } : Color{ 28,32,48,255 }));
+            DrawRectangleLinesEx(br, act ? 2.f : 1.f, act ? Color{ 255,200,80,255 } : Color{ 60,65,90,255 });
+            int twn = MeasureText(tyNames[ti], 9);
+            DrawText(tyNames[ti], (int)(br.x + br.width / 2 - twn / 2), (int)br.y + 3, 9,
+                act ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && (int)L.type != ti) {
+                PushUndo(); L.type = (LightType)ti;
+                _sel.type = (ti == 0) ? (int)EditorTool::POINT_LIGHT
+                    : (ti == 1) ? (int)EditorTool::SPOT_LIGHT
+                    : (int)EditorTool::SKY_LIGHT;
+            }
+        }
+        cy += 20;
+
+        SectionHeader("── Color ──────────────────");
+        if (NumField("R  ", L.r, 0.005f, 0.f, 1.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("G  ", L.g, 0.005f, 0.f, 1.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("B  ", L.b, 0.005f, 0.f, 1.f, px, cy, fw)) {} cy += rowH;
+        // Color preview swatch
+        Color prv = { (unsigned char)(L.r * 255), (unsigned char)(L.g * 255), (unsigned char)(L.b * 255), 255 };
+        Rectangle sw2 = { px, cy, fw, 14 };
+        DrawRectangleRec(sw2, prv);
+        DrawRectangleLinesEx(sw2, 1, { 60,65,90,255 });
+        cy += 18;
+
+        SectionHeader("── Emission ───────────────");
+        if (NumField("Int", L.intensity, 0.02f, 0.f, 8.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("Rad", L.radius, 1.0f, 8.f, 4000.f, px, cy, fw)) {} cy += rowH;
+
+        if (L.type == LightType::SPOT) {
+            SectionHeader("── Spot ───────────────────");
+            if (NumField("Ang", L.angle, 0.5f, 1.f, 175.f, px, cy, fw)) {} cy += rowH;
+            if (NumField("Dir", L.direction, 0.5f, 0.f, 360.f, px, cy, fw)) {} cy += rowH;
+        }
+        if (L.type == LightType::SKY) {
+            SectionHeader("── Sky ────────────────────");
+            if (NumField("Dir", L.direction, 0.5f, 0.f, 360.f, px, cy, fw)) {} cy += rowH;
+            DrawText("270 = light from above", (int)px, (int)cy, 9, { 110,150,200,255 }); cy += 12;
+        }
+
+        SectionHeader("── Advanced ───────────────");
+        {
+            float bF = (float)L.bounces;
+            if (NumField("Bnc", bF, 1.f, 0.f, 4.f, px, cy, fw)) { L.bounces = (int)bF; }
+            cy += rowH;
+        }
+        if (NumField("Fog", L.fogStrength, 0.01f, 0.f, 2.f, px, cy, fw)) {} cy += rowH;
+
+        // Enabled toggle
+        {
+            Rectangle eb = { px, cy, fw, 16 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), eb);
+            Color c1 = L.enabled ? Color{ 30,80,30,255 } : Color{ 60,30,30,255 };
+            Color c2 = L.enabled ? Color{ 100,220,100,255 } : Color{ 220,100,100,255 };
+            DrawRectangleRec(eb, hov ? Color{ (unsigned char)(c1.r + 20), (unsigned char)(c1.g + 20), (unsigned char)(c1.b + 20), 255 } : c1);
+            DrawRectangleLinesEx(eb, 1, c2);
+            const char* ts = L.enabled ? "ENABLED (click to disable)" : "DISABLED (click to enable)";
+            int tww = MeasureText(ts, 9);
+            DrawText(ts, (int)(eb.x + eb.width / 2 - tww / 2), (int)eb.y + 4, 9, c2);
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); L.enabled = !L.enabled; }
+            cy += 20;
+        }
+
+        // Copy / Paste props
+        {
+            float hw = (fw - 3) * 0.5f;
+            Rectangle cpR = { px, cy, hw, 15 }, ppR = { px + hw + 3, cy, hw, 15 };
+            bool cpH = CheckCollisionPointRec(GetMousePosition(), cpR);
+            bool ppH = CheckCollisionPointRec(GetMousePosition(), ppR);
+            bool canPaste = (_propClip.type == (int)EditorTool::POINT_LIGHT ||
+                _propClip.type == (int)EditorTool::SPOT_LIGHT ||
+                _propClip.type == (int)EditorTool::SKY_LIGHT);
+            DrawRectangleRec(cpR, cpH ? Color{ 50,80,50,255 } : Color{ 30,50,30,255 });
+            DrawRectangleLinesEx(cpR, 1, { 60,160,60,255 });
+            DrawText("Cpy Props", (int)(cpR.x + 2), (int)(cpR.y + 2), 9, { 120,220,120,255 });
+            DrawRectangleRec(ppR, canPaste ? (ppH ? Color{ 60,50,20,255 } : Color{ 40,35,15,255 }) : Color{ 25,28,38,255 });
+            DrawRectangleLinesEx(ppR, 1, canPaste ? Color{ 220,180,60,255 } : Color{ 50,55,70,255 });
+            DrawText("Pst Props", (int)(ppR.x + 2), (int)(ppR.y + 2), 9, canPaste ? Color{ 220,180,60,255 } : Color{ 80,85,100,255 });
+            if (cpH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) CopyProps();
+            if (ppH && canPaste && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); PasteProps(); }
+            cy += 18;
+        }
+    }
     if (_sel.type == (int)EditorTool::PATH_NODE) {
         SectionHeader("── Node Settings ──────────");
         auto& n = _level.pathNodes[_sel.index];
@@ -1894,12 +2188,40 @@ void LevelEditor::DrawDataPanel() {
 //  Master Draw
 // ─────────────────────────────────────────────────────────────────────────────
 void LevelEditor::Draw() {
-    BeginMode2D(_cam);
-    DrawBackground(); DrawGrid(); DrawLevelEntities(); DrawPlacementPreview();
-    EndMode2D();
-
     int canvasBottom = _seqOpen ? (_sh - SEQ_H) : (_sh - BROWSER_H);
-    DrawRectangleLinesEx({ 0,(float)TOOLBAR_H,(float)_canvasW,(float)(canvasBottom - TOOLBAR_H) }, 1, { 60,70,100,200 });
+    Rectangle canvasRect = { 0, (float)TOOLBAR_H,
+                             (float)_canvasW, (float)(canvasBottom - TOOLBAR_H) };
+
+    if (_lightingPreview) {
+        // The editor camera has offset.y = TOOLBAR_H so world content draws
+        // beneath the toolbar on screen. Inside the lighting scene RT we want
+        // the canvas region only, so build a canvas-local camera with no
+        // toolbar offset, then composite into canvasRect on screen.
+        Camera2D lcam = _cam;
+        lcam.offset.y = 0.f;
+
+        _lighting.BeginScene(lcam);
+        DrawBackground();
+        DrawGrid();
+        DrawLevelLitContent();
+        _lighting.EndScene();
+
+        _lighting.BakeOccludersFromLevel(_level, lcam);
+        _lighting.Composite(_level, lcam, canvasRect);
+
+        // Editor overlays drawn unlit, in the editor's normal camera space.
+        BeginMode2D(_cam);
+        DrawLevelOverlays();
+        DrawPlacementPreview();
+        EndMode2D();
+    }
+    else {
+        BeginMode2D(_cam);
+        DrawBackground(); DrawGrid(); DrawLevelEntities(); DrawPlacementPreview();
+        EndMode2D();
+    }
+
+    DrawRectangleLinesEx(canvasRect, 1, { 60,70,100,200 });
 
     DrawToolbarUI();
 
@@ -1920,6 +2242,36 @@ void LevelEditor::Draw() {
             _seqOpen = !_seqOpen;
             if (!_seqOpen) SeqPreviewStop();
             SeqLoad();
+        }
+    }
+
+    // Lighting preview toggle button (next to TAB:SEQ)
+    {
+        Rectangle r = { (float)(_sw - RIGHT_W - 108),(float)(TOOLBAR_H + 1),52,12 };
+        bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+        DrawRectangleRec(r, _lightingPreview ? Color{ 100,80,20,255 } : Color{ 20,22,32,255 });
+        DrawRectangleLinesEx(r, 1, _lightingPreview ? Color{ 255,200,80,255 } : Color{ 55,60,85,255 });
+        int tw = MeasureText("F8:LIGHT", 9);
+        DrawText("F8:LIGHT", (int)(r.x + r.width / 2 - tw / 2), (int)(r.y + 2), 9,
+            _lightingPreview ? Color{ 255,220,120,255 } : Color{ 100,105,130,255 });
+        if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) _lightingPreview = !_lightingPreview;
+    }
+
+    // Diagnostics overlay: counts and on/off state — top-left of canvas
+    if (_lightingPreview) {
+        int total = (int)_level.lights.size();
+        int enabled = 0;
+        for (const auto& L : _level.lights) if (L.enabled) enabled++;
+        const char* msg = TextFormat("LIGHTING ON  |  %d lights (%d enabled)",
+            total, enabled);
+        int tw = MeasureText(msg, 10);
+        DrawRectangle(2, TOOLBAR_H + 2, tw + 10, 16, { 0, 0, 0, 180 });
+        DrawText(msg, 6, TOOLBAR_H + 5, 10, { 255, 220, 120, 255 });
+        if (total == 0) {
+            const char* hint = "Place a POINT/SPOT/SKY light from the bottom toolbar.";
+            int tw2 = MeasureText(hint, 11);
+            DrawRectangle(_canvasW / 2 - tw2 / 2 - 8, TOOLBAR_H + 26, tw2 + 16, 20, { 0, 0, 0, 180 });
+            DrawText(hint, _canvasW / 2 - tw2 / 2, TOOLBAR_H + 31, 11, { 200, 200, 220, 255 });
         }
     }
 
@@ -2415,10 +2767,31 @@ void LevelEditor::CopyProps() {
         _propClip.wz = _level.winZone;
     else if (_sel.type == (int)EditorTool::ELEVATOR && _sel.index < (int)_level.elevators.size())
         _propClip.elev = _level.elevators[_sel.index];
+    else if ((_sel.type == (int)EditorTool::POINT_LIGHT ||
+        _sel.type == (int)EditorTool::SPOT_LIGHT ||
+        _sel.type == (int)EditorTool::SKY_LIGHT) &&
+        _sel.index < (int)_level.lights.size())
+        _propClip.light = _level.lights[_sel.index];
     SetStatus("Properties copied.");
 }
 void LevelEditor::PasteProps() {
-    if (!_sel.valid() || _propClip.type != _sel.type) return;
+    if (!_sel.valid()) return;
+    // Lights: allow paste between any of the three light tools (they all share _level.lights)
+    bool selIsLight = (_sel.type == (int)EditorTool::POINT_LIGHT ||
+        _sel.type == (int)EditorTool::SPOT_LIGHT ||
+        _sel.type == (int)EditorTool::SKY_LIGHT);
+    bool clipIsLight = (_propClip.type == (int)EditorTool::POINT_LIGHT ||
+        _propClip.type == (int)EditorTool::SPOT_LIGHT ||
+        _propClip.type == (int)EditorTool::SKY_LIGHT);
+    if (selIsLight && clipIsLight && _sel.index < (int)_level.lights.size()) {
+        float ox = _level.lights[_sel.index].x, oy = _level.lights[_sel.index].y;
+        _level.lights[_sel.index] = _propClip.light;
+        _level.lights[_sel.index].x = ox; _level.lights[_sel.index].y = oy;
+        SetStatus("Light properties pasted.");
+        return;
+    }
+
+    if (_propClip.type != _sel.type) return;
     if (_sel.type == (int)EditorTool::PLATFORM && _sel.index < (int)_level.platforms.size()) {
         // Preserve position, copy everything else
         float ox = _level.platforms[_sel.index].x, oy = _level.platforms[_sel.index].y;

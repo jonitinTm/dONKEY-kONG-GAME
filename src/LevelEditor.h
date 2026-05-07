@@ -6,6 +6,7 @@
 // ============================================================
 #include "raylib.h"
 #include "LevelData.h"
+#include "Lighting.h"
 #include "CinematicData.h"
 #include <vector>
 #include <string>
@@ -18,6 +19,9 @@ enum class EditorTool : int {
     WIN_ZONE,
     KILL_ZONE,
     CONVEYOR,
+    POINT_LIGHT,
+    SPOT_LIGHT,
+    SKY_LIGHT,
     TOOL_COUNT
 };
 enum class GizmoMode { SELECT = 0, MOVE, ROTATE, SCALE };
@@ -108,6 +112,10 @@ private:
     // ── Level ─────────────────────────────────────────────────────────────────
     int       _levelId = 1;
     LevelData _level;
+
+    // ── Lighting preview ─────────────────────────────────────────────────────
+    LightingSystem _lighting;
+    bool           _lightingPreview = false;
 
     std::vector<LevelData> _undoStack, _redoStack;
     static constexpr int MAX_UNDO = 60;
@@ -216,6 +224,7 @@ private:
         KillZoneData kz = {};
         WinZoneData  wz = {};
         ElevatorData elev = {};
+        LightData    light = {};
     } _propClip;
     void CopyProps();
     void PasteProps();
@@ -345,6 +354,8 @@ private:
     void DrawBackground()        const;
     void DrawGrid()              const;
     void DrawLevelEntities();
+    void DrawLevelLitContent();   // world geometry (lit by lighting RT in preview)
+    void DrawLevelOverlays();     // markers + gizmos + light icons (always unlit)
     void DrawPlacementPreview()  const;
     void DrawToolbarUI()         const;
     void DrawBrowserUI();
@@ -384,6 +395,8 @@ private:
 
     void DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) const;
     Rectangle ConveyorRect(const ConveyorData& cv) const;
+
+    void DrawLightEnt(const LightData& L, int idx, bool sel, bool msel) const;
 
     Rectangle  BrowserBtn(int row, int col, int cols) const;
     static const char* ToolName(EditorTool t);
