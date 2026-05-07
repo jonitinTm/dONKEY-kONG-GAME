@@ -43,6 +43,7 @@ struct WinZoneData {
 };
 
 // ── Beam ──────────────────────────────────────────────────────────────────────
+
 struct BeamData {
     float x = 0.f;
     float y = 0.f;
@@ -59,13 +60,13 @@ enum class KillZoneTexture : int {
 };
 
 struct KillZoneData {
-    float          x = 0.f;
-    float          y = 0.f;
-    float          w = 64.f;
-    float          h = 64.f;
-    float          rotation = 0.f;
+    float           x = 0.f;
+    float           y = 0.f;
+    float           w = 64.f;
+    float           h = 64.f;
+    float           rotation = 0.f;
     KillZoneTexture texId = KillZoneTexture::NONE;
-    int            renderLayer = 1;
+    int             renderLayer = 1;
 };
 
 // ── Conveyor belt ─────────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ struct ConveyorData {
     float beltH = 24.f;
 };
 
-// ── Elevator ─────────────────────────────────────────────────────────────────
+// ── Elevator ──────────────────────────────────────────────────────────────────
 
 struct ElevatorData {
     float x = 0.f;
@@ -117,19 +118,29 @@ struct LightData {
     float g = 0.92f;
     float b = 0.78f;
 
-    float intensity = 1.0f;     // emissiveness multiplier
-    float radius = 220.f;    // POINT/SPOT falloff; SKY: max trace dist
+    float intensity = 1.0f;   // emissiveness multiplier
+    float radius = 220.f;  // POINT/SPOT falloff radius; SKY: max trace dist
+    float innerRadius = 0.f;    // inside this dist light is FULL intensity,
+    // then fades to 0 at radius. 0 = pure quadratic.
 
     float angle = 60.f;     // SPOT: cone full-angle in degrees
-    float direction = 270.f;    // SPOT: aim dir; SKY: incoming dir (270 = from above)
+    float direction = 270.f;    // SPOT: aim dir (deg); SKY: incoming dir (270=above)
 
-    int   bounces = 0;        // 0 = direct only; 1 = enable GI bounce pass
-    float fogStrength = 0.f;      // 0 = no volumetric fog; ~0.5 = nice god rays
+    int   bounces = 0;       // 0 = direct only; 1 = enable GI bounce pass
+    float fogStrength = 0.f;    // 0 = no volumetric fog; ~0.5 = nice god rays
 
     bool  enabled = true;
+
+    // ── Per-light animation (GPU-driven via uTime, zero CPU cost) ─────────────
+    // Authored in the editor and serialised to disk.
+    // Set to 0 to disable — existing lights are unaffected by default.
+    float flickerFreq = 0.f;  // Hz: random flicker steps per second  (0 = off)
+    float flickerAmp = 0.f;  // 0..1: fraction of intensity to randomly jitter
+    float pulseFreq = 0.f;  // Hz: smooth sine-wave breath frequency  (0 = off)
+    float pulseAmp = 0.f;  // 0..1: fraction of intensity to pulse ± around base
 };
 
-// ── Generic entity reference ─────────────────────────────────────────────────
+// ── Generic entity reference ──────────────────────────────────────────────────
 
 struct EntityRef {
     int type = -1;
@@ -159,33 +170,32 @@ struct LevelData {
     Vector2 playerSpawn = { 269.f, 817.f };
 
     bool    hasRegulus = false;
-    Vector2 regulusPos = { 22.f,  225.f };
+    Vector2 regulusPos = { 22.f, 225.f };
 
     bool    hasCave = false;
-    Vector2 cavePos = { 35.f,  768.f };
+    Vector2 cavePos = { 35.f, 768.f };
 
-    std::vector<PlatformData> platforms;
-    std::vector<LadderData>   ladders;
-    std::vector<BeamData>     beams;
-    std::vector<PathNodeData> pathNodes;
-    std::vector<Vector2>            nukeSpawns;
-    std::vector<Vector2>            beatriceSpawns;
-    std::vector<Vector2>            enemySpawns;
+    std::vector<PlatformData>        platforms;
+    std::vector<LadderData>          ladders;
+    std::vector<BeamData>            beams;
+    std::vector<PathNodeData>        pathNodes;
+    std::vector<Vector2>             nukeSpawns;
+    std::vector<Vector2>             beatriceSpawns;
+    std::vector<Vector2>             enemySpawns;
     std::vector<ElevatorData>        elevators;
     std::vector<ConveyorData>        conveyors;
     std::vector<ParentChildRelation> relations;
 
-    bool         hasWinZone = false;
-    WinZoneData  winZone;
+    bool                      hasWinZone = false;
+    WinZoneData               winZone;
     std::vector<KillZoneData> killZones;
 
-    // ── NEW: Lights ─────────────────────────────────────────────────────────
     std::vector<LightData> lights;
 };
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
-bool SaveLevel(const LevelData& lv, const char* folder = "Levels");
-bool LoadLevel(LevelData& out, int id, const char* folder = "Levels");
+bool      SaveLevel(const LevelData& lv, const char* folder = "Levels");
+bool      LoadLevel(LevelData& out, int id, const char* folder = "Levels");
 LevelData GetDefaultLevel1();
-void ExportLevelAsCpp(const LevelData& lv, const char* outFile = "LevelExport.cpp");
+void      ExportLevelAsCpp(const LevelData& lv, const char* outFile = "LevelExport.cpp");

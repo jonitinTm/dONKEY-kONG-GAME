@@ -3,26 +3,20 @@
 //  Lighting.h
 //  2D raytraced lighting system for raylib (optimised).
 //
-//  Architecture
-//  ────────────
-//  • Scene is rendered at FULL resolution into _sceneRT.
-//  • Lighting math runs at HALF resolution into _directLitRT
-//    (4× fewer pixel-shader invocations than full-res).
-//  • Optional bounce: blur(_directLitRT) → _bounceRT, then a
-//    second lighting pass adds bounce.  Result: _finalLightRT.
-//  • Compose pass runs at FULL res: scene * lighting (bilinear
-//    upsampled) + ambient floor.
-//
-//  This is software per-pixel raytracing in a fragment shader,
-//  not GPU hardware RT (raylib has no DXR/RTX path). Visually:
-//  crisp shadows, spot cones, god rays, 1-bounce GI.
-//
-//  Two-instance pattern: instantiate one LightingSystem for
-//  gameplay (sized to screen) and another for the editor canvas
-//  (sized to the editor's canvas region) — they're independent.
+//  v7 changes vs v6:
+//    • Per-light flicker + pulse animation now fully GPU-driven via uTime.
+//      flickerFreq/Amp and pulseFreq/Amp in LightData are uploaded every
+//      frame and applied inside the shader — zero CPU cost.
+//    • AddRuntimeLight() / ClearRuntimeLights() API lets game code inject
+//      ephemeral lights (player torch, explosion flash, etc.) each frame
+//      without touching the serialised LevelData.
+//    • Wider GI bounce blur (4× vs old 1-pixel) for real indirect bleed.
+//    • Removed dead _composeShader / _locCM_* declarations that were never
+//      loaded.  _locCM_darkness renamed _locLP_darkness (same shader, clearer).
 // ============================================================
 #include "raylib.h"
 #include "LevelData.h"
+#include <vector>
 
 class LightingSystem
 {
@@ -34,19 +28,22 @@ public:
     LightingSystem(const LightingSystem&) = delete;
     LightingSystem& operator=(const LightingSystem&) = delete;
 
-    // rtW/rtH: dimensions of the area to be lit (full resolution of scene).
-    // For gameplay: pass screenWidth/screenHeight.
-    // For editor:   pass _canvasW / (int)_canvasH.
     void Init(int rtW, int rtH, Quality q = Quality::MEDIUM);
     void Shutdown();
 
-    // Tweakables — safe to call any time.
-    void  SetGlobalAmbient(float a) { _globalAmbient = a; }
-    void  SetGlobalDarkness(float d) { _globalDarkness = d; }
-    void  SetAmbientColor(Color c) { _ambientColor = c; }
+    void    SetGlobalAmbient(float a) { _globalAmbient = a; }
+    void    SetGlobalDarkness(float d) { _globalDarkness = d; }
+    void    SetAmbientColor(Color c) { _ambientColor = c; }
     Quality GetQuality() const { return _quality; }
 
-    // ── Frame flow ──────────────────────────────────────────────────────────
+    // ── Runtime (per-frame) light API ─────────────────────────────────────────
+    // Call AddRuntimeLight() for each ephemeral light (player torch, projectile
+    // flash, explosion, etc.) every frame BEFORE Composite().
+    // Composite() automatically clears the list after rendering so stale entries
+    // never accumulate across frames.
+    void AddRuntimeLight(const LightData& L) { _runtimeLights.push_back(L); }
+    void ClearRuntimeLights() { _runtimeLights.clear(); }
+
     void BeginScene(Camera2D cam);
     void EndScene();
 
@@ -54,10 +51,11 @@ public:
     void EndOccluders();
     void BakeOccludersFromLevel(const LevelData& lv, Camera2D cam);
 
-    // dst.width <= 0 means "full RT size at (0,0)"
-    void Composite(const LevelData& lv, Camera2D cam, Rectangle dst = { -1.f, -1.f, 0.f, 0.f });
+    // Composite() reads lv.lights (level-authored) PLUS any runtime lights added
+    // this frame via AddRuntimeLight().  Runtime list is cleared automatically.
+    void Composite(const LevelData& lv, Camera2D cam,
+        Rectangle dst = { -1.f, -1.f, 0.f, 0.f });
 
-    // Debug
     void DebugDrawOccluder(Rectangle dst);
     void DebugDrawScene(Rectangle dst);
 
@@ -65,10 +63,9 @@ private:
     bool    _ready = false;
     Quality _quality = Quality::MEDIUM;
 
-    int _rtW = 0, _rtH = 0;     // scene RT dims (full canvas/screen)
-    int _liW = 0, _liH = 0;     // lighting RT dims (half-res by default)
+    int _rtW = 0, _rtH = 0;
+    int _liW = 0, _liH = 0;
 
-    // Render targets
     RenderTexture2D _sceneRT = {};
     RenderTexture2D _occluderRT = {};
     RenderTexture2D _directLitRT = {};
@@ -76,28 +73,45 @@ private:
     RenderTexture2D _bounceRT = {};
     RenderTexture2D _finalLightRT = {};
 
-    // Shaders
     Shader _lightShader = {};
     Shader _blurShader = {};
-    Shader _composeShader = {};
 
-    // Cached uniform locations
-    int _locLP_count = -1, _locLP_pos = -1, _locLP_col = -1, _locLP_extra = -1;
-    int _locLP_resolution = -1, _locLP_worldOrigin = -1, _locLP_worldPerPx = -1;
-    int _locLP_ambient = -1, _locLP_ambientCol = -1;
-    int _locLP_time = -1, _locLP_useBounce = -1;
-    int _locLP_occTex = -1, _locLP_bounceTex = -1;
+    // Light-pass uniform locations
+    int _locLP_count = -1;
+    int _locLP_pos = -1;
+    int _locLP_col = -1;
+    int _locLP_extra = -1;
+    int _locLP_anim = -1;  // NEW: (flickerFreq, flickerAmp, pulseFreq, pulseAmp)
+    int _locLP_resolution = -1;
+    int _locLP_worldOrigin = -1;
+    int _locLP_worldPerPx = -1;
+    int _locLP_ambient = -1;
+    int _locLP_ambientCol = -1;
+    int _locLP_time = -1;
+    int _locLP_useBounce = -1;
+    int _locLP_occTex = -1;
+    int _locLP_bounceTex = -1;
+    int _locLP_falloff = -1;
+    int _locLP_applyFloor = -1;
+    int _locLP_darkness = -1;  // was _locCM_darkness — same shader, clearer name
 
+    // Blur-pass uniform location
     int _locBL_dir = -1;
-
-    int _locCM_lightTex = -1, _locCM_ambient = -1, _locCM_ambientCol = -1, _locCM_darkness = -1;
 
     float _globalAmbient = 0.08f;
     float _globalDarkness = 0.85f;
     Color _ambientColor = { 40, 50, 80, 255 };
     float _time = 0.f;
 
+    // Per-frame ephemeral lights (auto-cleared after each Composite call)
+    std::vector<LightData> _runtimeLights;
+
     void RunBlur(RenderTexture2D src, RenderTexture2D dst, Vector2 dir);
+    // Merges lv.lights + _runtimeLights and uploads them to the light shader.
     void UploadLights(const LevelData& lv);
-    void DoLightingPass(Camera2D cam, RenderTexture2D dst, bool useBounce);
+
+    // isFinalPass=false  raw direct light only, no ambient/floor (used as bounce source)
+    // isFinalPass=true   full output: direct + bounce + ambient + floor clamp
+    void DoLightingPass(Camera2D cam, RenderTexture2D dst,
+        bool useBounce, bool isFinalPass);
 };

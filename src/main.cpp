@@ -5,6 +5,7 @@
 #include "LevelData.h"
 #include "LevelEditor.h"
 #include "CinematicPlayer.h"
+#include "Lighting.h"
 #include <ctime>
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR };
@@ -407,6 +408,10 @@ int main(void)
     unsigned int score = 0;
     int currentLevelId = 1;   // which level is currently loaded / playing
 
+    // ── Lighting ──────────────────────────────────────────────────────────────
+    LightingSystem gameLighting;
+    LevelData      currentLevelData;   // kept in sync with ApplyLevelData calls
+
     Rectangle wincondition = { 400, 150, 40, 40 };
 
     // ── Dynamic player spawn (updated by level data) ──────────────────────────
@@ -748,6 +753,10 @@ int main(void)
     // ── Window / audio / textures ─────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
     editor.Init(screenWidth, screenHeight);
+    gameLighting.Init(screenWidth, screenHeight, LightingSystem::Quality::MEDIUM);
+    gameLighting.SetGlobalAmbient(0.06f);
+    gameLighting.SetGlobalDarkness(1.00f);
+    gameLighting.SetAmbientColor({ 25, 30, 50, 255 });
     Cinematic::Global.LoadAll();   // load all saved sequences from Cinematics/
     SetRandomSeed((unsigned int)time(NULL));   // truly random each run
     InitAudioDevice();
@@ -1055,6 +1064,7 @@ int main(void)
     // ── ApplyLevelData: push a LevelData into all live game vectors ───────────
     auto ApplyLevelData = [&](const LevelData& lv)
         {
+            currentLevelData = lv;   // keep a copy for lighting
             // Platforms
             platforms.clear();
             for (const auto& pd : lv.platforms)
@@ -2617,7 +2627,9 @@ int main(void)
             Camera2D cam = { 0 };
             cam.zoom = 1.0f;
             cam.offset = { nukeShakeOffset.x + deathShakeOffset.x, nukeShakeOffset.y + deathShakeOffset.y };
-            BeginMode2D(cam);
+
+            // ── Lighting: capture scene ───────────────────────────────────────
+            gameLighting.BeginScene(cam);
 
             // 1. Background
             DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
@@ -3025,9 +3037,12 @@ int main(void)
                     { nukeExplosionPos.x - exW * 0.5f, nukeExplosionPos.y - exH * 0.5f, exW, exH }, {}, 0.f, WHITE);
             }
 
-            EndMode2D();
+            // ── Lighting: end scene, bake occluders, composite ─────────────
+            gameLighting.EndScene();
+            gameLighting.BakeOccludersFromLevel(currentLevelData, cam);
+            gameLighting.Composite(currentLevelData, cam);
 
-            // 9. Rain overlay
+            // 9. Rain overlay (drawn after lighting so it's unaffected)
             {
                 float scaleX = (float)screenWidth / Rain.width;
                 float scaleY = (float)screenHeight / Rain.height;

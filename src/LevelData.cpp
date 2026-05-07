@@ -54,7 +54,8 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "LADDER %.2f %.2f %.2f %.2f\n", l.x, l.y, l.w, l.h);
 
     for (const auto& b : lv.beams)
-        fprintf(f, "BEAM %.2f %.2f %d %d %d\n", b.x, b.y, b.texVariant, b.renderLayer, (int)b.flipX);
+        fprintf(f, "BEAM %.2f %.2f %d %d %d\n",
+            b.x, b.y, b.texVariant, b.renderLayer, b.flipX ? 1 : 0);
 
     for (const auto& n : lv.pathNodes)
         fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d\n",
@@ -75,11 +76,13 @@ bool SaveLevel(const LevelData& lv, const char* folder)
 
     for (const auto& cv : lv.conveyors)
         fprintf(f, "CONVEYOR %.2f %.2f %.2f %.2f %d %.2f %.2f %.2f\n",
-            cv.x, cv.y, cv.length, cv.speed, cv.direction, cv.rotation, cv.endCapW, cv.beltH);
+            cv.x, cv.y, cv.length, cv.speed, cv.direction,
+            cv.rotation, cv.endCapW, cv.beltH);
 
     for (const auto& r : lv.relations)
         fprintf(f, "RELATION %d %d %d %d %.2f %.2f\n",
-            r.parent.type, r.parent.index, r.child.type, r.child.index,
+            r.parent.type, r.parent.index,
+            r.child.type, r.child.index,
             r.offsetX, r.offsetY);
 
     if (lv.hasWinZone)
@@ -88,15 +91,18 @@ bool SaveLevel(const LevelData& lv, const char* folder)
 
     for (const auto& kz : lv.killZones)
         fprintf(f, "KILL_ZONE %.2f %.2f %.2f %.2f %d %.2f %d\n",
-            kz.x, kz.y, kz.w, kz.h, (int)kz.texId, kz.rotation, kz.renderLayer);
+            kz.x, kz.y, kz.w, kz.h,
+            static_cast<int>(kz.texId), kz.rotation, kz.renderLayer);
 
-    // ── NEW: Lights ────────────────────────────────────────────────────────
-    // type x y r g b intensity radius angle direction bounces fog enabled
+    // LIGHT format (18 tokens):
+    // type x y r g b intensity radius innerRadius angle direction
+    // bounces fogStrength enabled flickerFreq flickerAmp pulseFreq pulseAmp
     for (const auto& L : lv.lights)
-        fprintf(f, "LIGHT %d %.2f %.2f %.4f %.4f %.4f %.3f %.2f %.2f %.2f %d %.3f %d\n",
-            (int)L.type, L.x, L.y, L.r, L.g, L.b,
-            L.intensity, L.radius, L.angle, L.direction,
-            L.bounces, L.fogStrength, L.enabled ? 1 : 0);
+        fprintf(f, "LIGHT %d %.2f %.2f %.4f %.4f %.4f %.3f %.2f %.2f %.2f %.2f %d %.3f %d %.3f %.3f %.3f %.3f\n",
+            static_cast<int>(L.type), L.x, L.y, L.r, L.g, L.b,
+            L.intensity, L.radius, L.innerRadius, L.angle, L.direction,
+            L.bounces, L.fogStrength, L.enabled ? 1 : 0,
+            L.flickerFreq, L.flickerAmp, L.pulseFreq, L.pulseAmp);
 
     fclose(f);
     return true;
@@ -118,6 +124,7 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
     {
         if (strcmp(tag, "LEVEL_ID") == 0)
             (void)fscanf(f, "%d", &out.id);
+
         else if (strcmp(tag, "PLAYER_SPAWN") == 0) {
             (void)fscanf(f, "%f %f", &out.playerSpawn.x, &out.playerSpawn.y);
             out.hasPlayerSpawn = true;
@@ -143,14 +150,15 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         else if (strcmp(tag, "BEAM") == 0) {
             BeamData b;
             int flipXi = 0;
-            int parsed = fscanf(f, "%f %f %d %d %d", &b.x, &b.y, &b.texVariant, &b.renderLayer, &flipXi);
+            int parsed = fscanf(f, "%f %f %d %d %d",
+                &b.x, &b.y, &b.texVariant, &b.renderLayer, &flipXi);
             if (parsed < 3) b.texVariant = 0;
             if (parsed < 4) b.renderLayer = 0;
             b.flipX = (parsed >= 5 && flipXi != 0);
             out.beams.push_back(b);
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
-            PathNodeData n; int split;
+            PathNodeData n; int split = 0;
             (void)fscanf(f, "%f %f %d %d %d %d",
                 &n.x, &n.y, &n.next[0], &n.next[1], &n.rollThreshold, &split);
             n.isSplitNode = (split != 0);
@@ -170,7 +178,8 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         }
         else if (strcmp(tag, "ELEVATOR") == 0) {
             ElevatorData e;
-            (void)fscanf(f, "%f %f %f %f %f %d", &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
+            (void)fscanf(f, "%f %f %f %f %f %d",
+                &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
             out.elevators.push_back(e);
         }
         else if (strcmp(tag, "CONVEYOR") == 0) {
@@ -196,26 +205,39 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         }
         else if (strcmp(tag, "KILL_ZONE") == 0) {
             KillZoneData kz; int texId = 0, rl = 1;
-            int parsed = fscanf(f, "%f %f %f %f %d %f %d", &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.rotation, &rl);
+            int parsed = fscanf(f, "%f %f %f %f %d %f %d",
+                &kz.x, &kz.y, &kz.w, &kz.h, &texId, &kz.rotation, &rl);
             if (parsed < 6) kz.rotation = 0.f;
             if (parsed < 7) rl = 1;
-            kz.texId = (KillZoneTexture)texId;
+            kz.texId = static_cast<KillZoneTexture>(texId);
             kz.renderLayer = rl;
             out.killZones.push_back(kz);
         }
-        // ── NEW: Light ─────────────────────────────────────────────────────
         else if (strcmp(tag, "LIGHT") == 0) {
             LightData L;
             int t = 0, en = 1;
-            int parsed = fscanf(f, "%d %f %f %f %f %f %f %f %f %f %d %f %d",
+            // Read the 14-token base (compatible with old files)
+            int parsed = fscanf(f, "%d %f %f %f %f %f %f %f %f %f %f %d %f %d",
                 &t, &L.x, &L.y, &L.r, &L.g, &L.b,
-                &L.intensity, &L.radius, &L.angle, &L.direction,
+                &L.intensity, &L.radius, &L.innerRadius,
+                &L.angle, &L.direction,
                 &L.bounces, &L.fogStrength, &en);
-            L.type = (LightType)t;
+            if (parsed < 14) L.innerRadius = 0.f;
+            L.type = static_cast<LightType>(t);
             L.enabled = (parsed < 13) ? true : (en != 0);
+            // Try to read 4 animation tokens (18-token format).
+            // Missing in old files — fields stay at 0 (no animation), safe default.
+            if (parsed >= 14) {
+                (void)fscanf(f, " %f %f %f %f",
+                    &L.flickerFreq, &L.flickerAmp,
+                    &L.pulseFreq, &L.pulseAmp);
+            }
             out.lights.push_back(L);
         }
-        else { char buf[512]; fgets(buf, sizeof(buf), f); }
+        else {
+            char buf[512];
+            fgets(buf, sizeof(buf), f);
+        }
     }
 
     fclose(f);
@@ -223,7 +245,8 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
     return true;
 }
 
-// ── Default level 1 (verbatim from main_patch.cpp) ───────────────────────────
+// ── Default level 1 ───────────────────────────────────────────────────────────
+// All literals are explicit floats (f suffix) to avoid C4244 int→float warnings.
 
 LevelData GetDefaultLevel1()
 {
@@ -241,91 +264,91 @@ LevelData GetDefaultLevel1()
     lv.cavePos = { 35.0f, 768.0f };
 
     lv.platforms = {
-        { 27,  880, 412, 0,  0.0f },
-        { 430, 870, 420, 0, -3.0f },
-        { 60,  750, 720, 0,  3.0f },
-        { 110, 620, 720, 0, -3.0f },
-        { 60,  490, 720, 0,  3.0f },
-        { 110, 360, 720, 0, -3.0f },
-        { 460, 246, 320, 0,  3.0f },
-        { 60,  240, 400, 0,  0.0f },
+        {  27.f,  880.f, 412.f, 0.f,  0.0f },
+        { 430.f,  870.f, 420.f, 0.f, -3.0f },
+        {  60.f,  750.f, 720.f, 0.f,  3.0f },
+        { 110.f,  620.f, 720.f, 0.f, -3.0f },
+        {  60.f,  490.f, 720.f, 0.f,  3.0f },
+        { 110.f,  360.f, 720.f, 0.f, -3.0f },
+        { 460.f,  246.f, 320.f, 0.f,  3.0f },
+        {  60.f,  240.f, 400.f, 0.f,  0.0f },
     };
 
     lv.ladders = {
-        { 675, 245, 40, 104 },
-        { 160, 375, 40, 102 },
-        { 300, 365, 40, 117 },
-        { 680, 495, 40, 110 },
-        { 430, 489, 40, 128 },
-        { 380, 621, 40, 124 },
-        { 160, 632, 40, 101 },
-        { 670, 760, 40, 105 },
+        { 675.f, 245.f, 40.f, 104.f },
+        { 160.f, 375.f, 40.f, 102.f },
+        { 300.f, 365.f, 40.f, 117.f },
+        { 680.f, 495.f, 40.f, 110.f },
+        { 430.f, 489.f, 40.f, 128.f },
+        { 380.f, 621.f, 40.f, 124.f },
+        { 160.f, 632.f, 40.f, 101.f },
+        { 670.f, 760.f, 40.f, 105.f },
     };
 
     lv.pathNodes = {
-        { 125, 210, { 1,-1},  9, false },
-        { 438, 210, { 2,-1},  5, false },
-        { 680, 219, { 3, 4},  5, true  },
-        { 680, 319, { 6,-1},  5, false },
-        { 780, 224, { 5,-1}, 10, true  },
-        { 800, 313, { 6,-1},  5, false },
-        { 550, 326, { 7,-1},  5, false },
-        { 305, 339, { 8, 9},  5, true  },
-        { 305, 454, {11,-1},  5, false },
-        { 110, 349, {10,-1}, 10, true  },
-        {  70, 442, {11,-1},  5, false },
-        { 430, 461, {12,-1},  5, false },
-        { 685, 474, {13,14},  5, true  },
-        { 685, 579, {16,-1},  5, false },
-        { 780, 479, {15,-1}, 10, true  },
-        { 800, 573, {16,-1},  5, false },
-        { 550, 586, {17,-1},  5, false },
-        { 165, 606, {18,19},  5, true  },
-        { 165, 707, {21,-1},  5, false },
-        { 110, 609, {20,-1}, 10, true  },
-        {  70, 702, {21,-1},  5, false },
-        { 430, 721, {22,-1},  5, false },
-        { 675, 733, {23,24},  5, true  },
-        { 675, 838, {26,-1},  5, false },
-        { 780, 739, {25,-1}, 10, true  },
-        { 800, 832, {26,-1},  5, false },
-        { 400, 850, {27,-1},  5, false },
-        { 148, 850, {-1,-1},  5, false },
+        { 125.f, 210.f, { 1,-1},  9, false },
+        { 438.f, 210.f, { 2,-1},  5, false },
+        { 680.f, 219.f, { 3, 4},  5, true  },
+        { 680.f, 319.f, { 6,-1},  5, false },
+        { 780.f, 224.f, { 5,-1}, 10, true  },
+        { 800.f, 313.f, { 6,-1},  5, false },
+        { 550.f, 326.f, { 7,-1},  5, false },
+        { 305.f, 339.f, { 8, 9},  5, true  },
+        { 305.f, 454.f, {11,-1},  5, false },
+        { 110.f, 349.f, {10,-1}, 10, true  },
+        {  70.f, 442.f, {11,-1},  5, false },
+        { 430.f, 461.f, {12,-1},  5, false },
+        { 685.f, 474.f, {13,14},  5, true  },
+        { 685.f, 579.f, {16,-1},  5, false },
+        { 780.f, 479.f, {15,-1}, 10, true  },
+        { 800.f, 573.f, {16,-1},  5, false },
+        { 550.f, 586.f, {17,-1},  5, false },
+        { 165.f, 606.f, {18,19},  5, true  },
+        { 165.f, 707.f, {21,-1},  5, false },
+        { 110.f, 609.f, {20,-1}, 10, true  },
+        {  70.f, 702.f, {21,-1},  5, false },
+        { 430.f, 721.f, {22,-1},  5, false },
+        { 675.f, 733.f, {23,24},  5, true  },
+        { 675.f, 838.f, {26,-1},  5, false },
+        { 780.f, 739.f, {25,-1}, 10, true  },
+        { 800.f, 832.f, {26,-1},  5, false },
+        { 400.f, 850.f, {27,-1},  5, false },
+        { 148.f, 850.f, {-1,-1},  5, false },
     };
 
     lv.beams = {
-        {  50,225},{114,225},{178,225},{212,225},{276,225},{340,225},
-        {372,225},{436,230},{468,230},{532,235},{564,235},{628,240},
-        {660,240},{724,245},
-        {110,365},{142,365},{206,360},{238,360},{302,355},{334,355},
-        {398,350},{430,350},{494,345},{526,345},{590,340},{622,340},
-        {686,335},{718,335},{782,330},
-        { 54,460},{ 86,460},{150,465},{182,465},{246,470},{278,470},
-        {342,475},{374,475},{438,480},{470,480},{534,485},{566,485},
-        {630,490},{662,490},{726,495},
-        {110,625},{142,625},{206,620},{238,620},{302,615},{334,615},
-        {398,605},{430,605},{494,600},{526,600},{590,595},{622,595},
-        {686,590},{718,590},{782,585},
-        { 54,715},{ 86,715},{150,720},{182,720},{246,725},{278,725},
-        {342,730},{374,730},{438,735},{470,735},{534,740},{566,740},
-        {630,745},{662,745},{726,750},
-        { 30,865},{ 94,865},{158,865},{192,865},{256,865},{320,865},
-        {352,865},{416,860},{448,860},{512,855},{544,855},{608,850},
-        {640,850},{704,845},{768,845},
-        {360,120},{424,120},{456,120},{296,150},{264,150},
+        {  50.f,225.f},{114.f,225.f},{178.f,225.f},{212.f,225.f},{276.f,225.f},{340.f,225.f},
+        {372.f,225.f},{436.f,230.f},{468.f,230.f},{532.f,235.f},{564.f,235.f},{628.f,240.f},
+        {660.f,240.f},{724.f,245.f},
+        {110.f,365.f},{142.f,365.f},{206.f,360.f},{238.f,360.f},{302.f,355.f},{334.f,355.f},
+        {398.f,350.f},{430.f,350.f},{494.f,345.f},{526.f,345.f},{590.f,340.f},{622.f,340.f},
+        {686.f,335.f},{718.f,335.f},{782.f,330.f},
+        { 54.f,460.f},{ 86.f,460.f},{150.f,465.f},{182.f,465.f},{246.f,470.f},{278.f,470.f},
+        {342.f,475.f},{374.f,475.f},{438.f,480.f},{470.f,480.f},{534.f,485.f},{566.f,485.f},
+        {630.f,490.f},{662.f,490.f},{726.f,495.f},
+        {110.f,625.f},{142.f,625.f},{206.f,620.f},{238.f,620.f},{302.f,615.f},{334.f,615.f},
+        {398.f,605.f},{430.f,605.f},{494.f,600.f},{526.f,600.f},{590.f,595.f},{622.f,595.f},
+        {686.f,590.f},{718.f,590.f},{782.f,585.f},
+        { 54.f,715.f},{ 86.f,715.f},{150.f,720.f},{182.f,720.f},{246.f,725.f},{278.f,725.f},
+        {342.f,730.f},{374.f,730.f},{438.f,735.f},{470.f,735.f},{534.f,740.f},{566.f,740.f},
+        {630.f,745.f},{662.f,745.f},{726.f,750.f},
+        { 30.f,865.f},{ 94.f,865.f},{158.f,865.f},{192.f,865.f},{256.f,865.f},{320.f,865.f},
+        {352.f,865.f},{416.f,860.f},{448.f,860.f},{512.f,855.f},{544.f,855.f},{608.f,850.f},
+        {640.f,850.f},{704.f,845.f},{768.f,845.f},
+        {360.f,120.f},{424.f,120.f},{456.f,120.f},{296.f,150.f},{264.f,150.f},
     };
 
     lv.nukeSpawns = {
-        {150,845},{330,845},{180,693},{480,693},{650,693},
-        {250,563},{570,563},{150,433},{500,433},{300,303},
+        {150.f,845.f},{330.f,845.f},{180.f,693.f},{480.f,693.f},{650.f,693.f},
+        {250.f,563.f},{570.f,563.f},{150.f,433.f},{500.f,433.f},{300.f,303.f},
     };
     lv.beatriceSpawns = {
-        {250,750},{500,750},{150,620},{420,620},{660,620},
-        {200,490},{480,490},{310,360},{560,360},
+        {250.f,750.f},{500.f,750.f},{150.f,620.f},{420.f,620.f},{660.f,620.f},
+        {200.f,490.f},{480.f,490.f},{310.f,360.f},{560.f,360.f},
     };
     lv.enemySpawns = {
-        {180,706},{620,706},{200,576},{550,576},
-        {160,446},{520,446},{200,316},{500,316},
+        {180.f,706.f},{620.f,706.f},{200.f,576.f},{550.f,576.f},
+        {160.f,446.f},{520.f,446.f},{200.f,316.f},{500.f,316.f},
     };
 
     lv.hasWinZone = true;
@@ -360,7 +383,7 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
     fprintf(f, "};\n\n");
 
     fprintf(f, "// Barrel path\nvector<PathNode> barrelPath = {\n");
-    for (int i = 0; i < (int)lv.pathNodes.size(); i++) {
+    for (int i = 0; i < static_cast<int>(lv.pathNodes.size()); i++) {
         const auto& n = lv.pathNodes[i];
         fprintf(f, "    /* %2d */ { {%.0f,%.0f}, {%2d,%2d}, %2d, %s },\n",
             i, n.x, n.y, n.next[0], n.next[1], n.rollThreshold,
@@ -369,8 +392,11 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
     fprintf(f, "};\n\n");
 
     fprintf(f, "// Beam positions\nvector<BeamData> beamPositions = {\n");
-    for (int i = 0; i < (int)lv.beams.size(); i++) {
-        fprintf(f, "    { %.0f, %.0f, %d, %d, %s },", lv.beams[i].x, lv.beams[i].y, lv.beams[i].texVariant, lv.beams[i].renderLayer, lv.beams[i].flipX ? "true" : "false");
+    for (int i = 0; i < static_cast<int>(lv.beams.size()); i++) {
+        fprintf(f, "    { %.0f, %.0f, %d, %d, %s },",
+            lv.beams[i].x, lv.beams[i].y,
+            lv.beams[i].texVariant, lv.beams[i].renderLayer,
+            lv.beams[i].flipX ? "true" : "false");
         if ((i + 1) % 6 == 0) fprintf(f, "\n");
     }
     fprintf(f, "\n};\n\n");

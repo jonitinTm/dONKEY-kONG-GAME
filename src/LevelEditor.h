@@ -128,6 +128,7 @@ private:
         PathNodeData node = {};
         BeamData     beam = {};   // used for BEAM clipboard entries
         Vector2      pos = {};    // used for spawn-point entries
+        LightData    light = {};  // used for POINT/SPOT/SKY_LIGHT entries
     };
     std::vector<ClipboardEntry> _clipboard;
     void CopySelected();

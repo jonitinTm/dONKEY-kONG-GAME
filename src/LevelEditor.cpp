@@ -417,6 +417,12 @@ void LevelEditor::CopySelected() {
         case EditorTool::PLAYER_SPAWN:   ce.pos = _level.playerSpawn; break;
         case EditorTool::REGULUS:        ce.pos = _level.regulusPos; break;
         case EditorTool::CAVE:           ce.pos = _level.cavePos; break;
+        case EditorTool::POINT_LIGHT:
+        case EditorTool::SPOT_LIGHT:
+        case EditorTool::SKY_LIGHT:
+            if (i < (int)_level.lights.size()) ce.light = _level.lights[i];
+            else return;
+            break;
         default: return;
         }
         _clipboard.push_back(ce);
@@ -480,6 +486,19 @@ void LevelEditor::PasteClipboard(bool grabAfter) {
             _level.hasCave = true;
             _level.cavePos = { ce.pos.x + OFF,ce.pos.y + OFF };
             ne.index = 0; break;
+        case EditorTool::POINT_LIGHT:
+        case EditorTool::SPOT_LIGHT:
+        case EditorTool::SKY_LIGHT: {
+            LightData L = ce.light;
+            L.x += OFF; L.y += OFF;
+            ne.index = (int)_level.lights.size();
+            // Keep the tool-type in sync with the stored LightType
+            ne.type = (L.type == LightType::POINT) ? (int)EditorTool::POINT_LIGHT
+                : (L.type == LightType::SPOT) ? (int)EditorTool::SPOT_LIGHT
+                : (int)EditorTool::SKY_LIGHT;
+            _level.lights.push_back(L);
+            break;
+        }
         default: continue;
         }
         pasted.push_back(ne);
@@ -1506,8 +1525,11 @@ void LevelEditor::DrawLightEnt(const LightData& L, int idx, bool sel, bool msel)
                    (unsigned char)(L.g * 255),
                    (unsigned char)(L.b * 255), 255 };
 
-    // Reach circle (faint)
+    // Outer reach circle (faint)
     DrawCircleLines((int)c.x, (int)c.y, L.radius, { outline.r, outline.g, outline.b, 60 });
+    // Inner radius circle — shows flat-intensity zone
+    if (L.innerRadius > 2.f)
+        DrawCircleLines((int)c.x, (int)c.y, L.innerRadius, { outline.r, outline.g, outline.b, 130 });
 
     if (L.type == LightType::SPOT) {
         float dir = L.direction * (PI / 180.f);
@@ -2098,6 +2120,10 @@ void LevelEditor::DrawDataPanel() {
         SectionHeader("── Emission ───────────────");
         if (NumField("Int", L.intensity, 0.02f, 0.f, 8.f, px, cy, fw)) {} cy += rowH;
         if (NumField("Rad", L.radius, 1.0f, 8.f, 4000.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("Inn", L.innerRadius, 1.0f, 0.f, L.radius * 0.99f, px, cy, fw)) {
+            L.innerRadius = fminf(L.innerRadius, L.radius * 0.99f);
+        } cy += rowH;
+        DrawText("Inn = flat center; 0 = pure falloff", (int)px, (int)cy, 9, { 110, 150, 200, 255 }); cy += 12;
 
         if (L.type == LightType::SPOT) {
             SectionHeader("── Spot ───────────────────");
@@ -2646,6 +2672,9 @@ void LevelEditor::DrawElevatorEnt(const ElevatorData& el, bool sel, bool msel) c
             DrawTexturePro(*_ropeTex, { 0, srcYOff, (float)_ropeTex->width, srcH }, { drawX, dy, tw, dyEnd - dy }, {}, 0.f, WHITE);
         }
     }
+    // Solid opaque base (scene RT must capture a visible surface for lighting)
+    DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, Color{ 80, 55, 30, 255 });
+    // Semi-transparent stylised overlay on top
     DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, sel ? Color{ 255,160,50,35 } : Color{ 255,120,30,20 });
     DrawRectangleLinesEx({ el.x, el.y, el.w, el.h }, sel ? 2.f : 1.5f, bc);
     float cx = el.x + el.w * 0.5f, cy = el.y + el.h * 0.5f, ay = (el.direction == 1) ? -14.f : 14.f;
@@ -2787,6 +2816,11 @@ void LevelEditor::PasteProps() {
         float ox = _level.lights[_sel.index].x, oy = _level.lights[_sel.index].y;
         _level.lights[_sel.index] = _propClip.light;
         _level.lights[_sel.index].x = ox; _level.lights[_sel.index].y = oy;
+        // FIX: keep _sel.type in sync with the new LightType so the properties
+        // panel type-selector buttons and the outliner show the correct icon.
+        _sel.type = (_level.lights[_sel.index].type == LightType::POINT) ? (int)EditorTool::POINT_LIGHT
+            : (_level.lights[_sel.index].type == LightType::SPOT) ? (int)EditorTool::SPOT_LIGHT
+            : (int)EditorTool::SKY_LIGHT;
         SetStatus("Light properties pasted.");
         return;
     }
