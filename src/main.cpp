@@ -3039,22 +3039,6 @@ int main(void)
 
             // ── Lighting: end scene, bake occluders, composite ─────────────
             gameLighting.EndScene();
-
-            // Sync live positions back into currentLevelData so the occluder
-            // bake reflects geometry that has moved (elevator children).
-            // beamPositions and platforms are the live copies updated each frame;
-            // currentLevelData holds the static snapshot taken at level load.
-            for (int _si = 0; _si < (int)beamPositions.size() &&
-                _si < (int)currentLevelData.beams.size(); _si++) {
-                currentLevelData.beams[_si].x = beamPositions[_si].x;
-                currentLevelData.beams[_si].y = beamPositions[_si].y;
-            }
-            for (int _si = 0; _si < (int)platforms.size() &&
-                _si < (int)currentLevelData.platforms.size(); _si++) {
-                currentLevelData.platforms[_si].x = platforms[_si].x;
-                currentLevelData.platforms[_si].y = platforms[_si].y;
-            }
-
             gameLighting.BakeOccludersFromLevel(currentLevelData, cam);
             gameLighting.Composite(currentLevelData, cam);
 
