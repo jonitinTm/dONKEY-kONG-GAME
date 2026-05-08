@@ -129,11 +129,17 @@ float visibilitySoft(vec2 from, vec2 to) {
     return (v0 * 0.5 + v1 * 0.25 + v2 * 0.25);
 }
 
+// UE4-style smooth falloff: max(0, 1 - t^4)^2
+// Stays near full intensity through the inner zone, smooth curve to 0 at radius.
+// No harsh cutoff, preserves light color at the center rather than saturating white.
 float dualRadiusAtten(float dist, float innerR, float outerR) {
     if (dist >= outerR) return 0.0;
-    if (dist <= innerR) return 1.0;
-    float t = 1.0 - (dist - innerR) / max(outerR - innerR, 0.0001);
-    return t * t;
+    if (innerR > 0.001 && dist <= innerR) return 1.0;
+    float effectiveDist   = max(dist - innerR, 0.0);
+    float effectiveRadius = max(outerR - innerR, 0.0001);
+    float t = effectiveDist / effectiveRadius;
+    float f = clamp(1.0 - t * t * t * t, 0.0, 1.0);
+    return f * f;
 }
 
 // ── Per-light animation multiplier (GPU-driven, zero CPU cost) ────────────────
@@ -262,18 +268,20 @@ void main() {
 
     if (useBounce == 1) {
         vec3 b = texture(bounceTex, vec2(fragTexCoord.x, 1.0 - fragTexCoord.y)).rgb;
-        // Reinhard-compress the bounce term so overbright GI doesn't wash out.
-        b = b / (b + vec3(0.5));
-        lighting += b * 0.6;
+        // Add bounce at half weight — no Reinhard here either, it desaturates the GI tint.
+        lighting += b * 0.5;
     }
 
     if (applyFloor == 1) {
+        // Dark floor: ensures unlit areas are never completely black,
+        // tinted by the ambient color. Controlled by globalDarkness (0=bright,1=dark).
         float floorVal = mix(1.0, globalAmbient, globalDarkness);
-        lighting = max(lighting, vec3(floorVal));
-        // Reinhard tone-map rather than hard-clip — keeps overbright lights
-        // looking warm rather than blowing to white.
-        lighting = lighting / (lighting + vec3(0.5)) * 1.5;
-        lighting = clamp(lighting, 0.0, 1.6);
+        lighting = max(lighting, ambientColor * floorVal);
+
+        // Simple clamp — no tone-map.  A Reinhard curve here desaturates colors
+        // toward white at the center of bright lights (the "whitewash" bug).
+        // Lights that sum above 1.0 just saturate cleanly at white via the RT.
+        lighting = clamp(lighting, 0.0, 1.0);
     }
 
     finalColor = vec4(lighting, 1.0);
