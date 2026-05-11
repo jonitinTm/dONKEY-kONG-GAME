@@ -93,6 +93,32 @@ struct ElevatorData {
     int   direction = 1;
 };
 
+// ── Prop ──────────────────────────────────────────────────────────────────────
+// A static decorative / collision object placed in the level.
+//
+//  texVariant  : which prop texture to use (0 = Assets/Textures/Lighting/Light.png)
+//  hasCollision: if true a thin Platform is added at draw time so entities land on it
+//  lightAffect : 0 = always fully bright (drawn after lighting composite),
+//                1 = normal (drawn inside scene, lit like everything else),
+//               >1 = overbright / glow (normal draw + additive glow pass scaled
+//                    by (lightAffect-1)/2 after composite)
+//  renderLayer : 0 = behind all entities (before House draw),
+//                1 = in front of entities (after Enemies draw),
+//                2 = above the lighting composite (use with lightAffect 0 or for
+//                    screen-space overlays)
+
+struct PropData {
+    float x = 0.f;
+    float y = 0.f;
+    float width = 64.f;
+    float height = 64.f;
+    float rotation = 0.f;
+    bool  hasCollision = false;
+    float lightAffect = 1.f;
+    int   renderLayer = 0;
+    int   texVariant = 0;
+};
+
 // ── Light ─────────────────────────────────────────────────────────────────────
 // One struct covers all three light types. Set `type` to choose semantics:
 //   POINT : omnidirectional, falloff by `radius`.
@@ -132,12 +158,10 @@ struct LightData {
     bool  enabled = true;
 
     // ── Per-light animation (GPU-driven via uTime, zero CPU cost) ─────────────
-    // Authored in the editor and serialised to disk.
-    // Set to 0 to disable — existing lights are unaffected by default.
-    float flickerFreq = 0.f;  // Hz: random flicker steps per second  (0 = off)
-    float flickerAmp = 0.f;  // 0..1: fraction of intensity to randomly jitter
-    float pulseFreq = 0.f;  // Hz: smooth sine-wave breath frequency  (0 = off)
-    float pulseAmp = 0.f;  // 0..1: fraction of intensity to pulse ± around base
+    float flickerFreq = 0.f;
+    float flickerAmp = 0.f;
+    float pulseFreq = 0.f;
+    float pulseAmp = 0.f;
 };
 
 // ── Generic entity reference ──────────────────────────────────────────────────
@@ -184,6 +208,7 @@ struct LevelData {
     std::vector<Vector2>             enemySpawns;
     std::vector<ElevatorData>        elevators;
     std::vector<ConveyorData>        conveyors;
+    std::vector<PropData>            props;      // ← NEW
     std::vector<ParentChildRelation> relations;
 
     bool                      hasWinZone = false;

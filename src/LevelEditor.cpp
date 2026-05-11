@@ -45,6 +45,7 @@ Color LevelEditor::ToolColor(EditorTool t) {
     case EditorTool::POINT_LIGHT:return{ 255,235,120,255 };
     case EditorTool::SPOT_LIGHT:return{ 200,255,180,255 };
     case EditorTool::SKY_LIGHT:return{ 130,200,255,255 };
+    case EditorTool::PROP:       return{ 180,100,220,255 };
     default:return GRAY;
     }
 }
@@ -144,6 +145,7 @@ Vector2 LevelEditor::EntityCenter(const SelectedEnt& e) const {
     case EditorTool::WIN_ZONE: { auto r = WinZoneRect(_level.winZone);       return { r.x + r.width * .5f, r.y + r.height * .5f }; }
     case EditorTool::KILL_ZONE: { auto r = KillZoneRect(_level.killZones[i]); return { r.x + r.width * .5f, r.y + r.height * .5f }; }
     case EditorTool::CONVEYOR: { auto r = ConveyorRect(_level.conveyors[i]);  return { r.x + r.width * .5f, r.y + r.height * .5f }; }
+    case EditorTool::PROP: { if (i < (int)_level.props.size()) return { _level.props[i].x, _level.props[i].y }; break; }
     case EditorTool::POINT_LIGHT:
     case EditorTool::SPOT_LIGHT:
     case EditorTool::SKY_LIGHT:
@@ -175,6 +177,7 @@ Vector2 LevelEditor::GetEntPos(const SelectedEnt& e) const {
     case EditorTool::WIN_ZONE:       return { _level.winZone.x, _level.winZone.y };
     case EditorTool::KILL_ZONE:      return { _level.killZones[i].x, _level.killZones[i].y };
     case EditorTool::CONVEYOR:       return { _level.conveyors[i].x, _level.conveyors[i].y };
+    case EditorTool::PROP:           if (i < (int)_level.props.size()) return { _level.props[i].x, _level.props[i].y }; break;
     case EditorTool::POINT_LIGHT:
     case EditorTool::SPOT_LIGHT:
     case EditorTool::SKY_LIGHT:
@@ -202,6 +205,7 @@ void LevelEditor::SetEntPos(const SelectedEnt& e, Vector2 p) {
     case EditorTool::WIN_ZONE:       _level.winZone.x = p.x; _level.winZone.y = p.y; break;
     case EditorTool::KILL_ZONE:      _level.killZones[i].x = p.x; _level.killZones[i].y = p.y; break;
     case EditorTool::CONVEYOR:       _level.conveyors[i].x = p.x; _level.conveyors[i].y = p.y; break;
+    case EditorTool::PROP:           if (i < (int)_level.props.size()) { _level.props[i].x = p.x; _level.props[i].y = p.y; } break;
     case EditorTool::POINT_LIGHT:
     case EditorTool::SPOT_LIGHT:
     case EditorTool::SKY_LIGHT:
@@ -260,6 +264,8 @@ bool LevelEditor::PickEntity(Vector2 p) {
         if (CheckCollisionPointRec(p, LadRect(_level.ladders[i]))) { _sel = { (int)EditorTool::LADDER,i }; return true; }
     for (int i = 0; i < (int)_level.platforms.size(); i++)
         if (PointInPlatform(p, _level.platforms[i])) { _sel = { (int)EditorTool::PLATFORM,i }; return true; }
+    for (int i = (int)_level.props.size() - 1; i >= 0; i--)
+        if (PointInProp(p, _level.props[i])) { _sel = { (int)EditorTool::PROP,i }; return true; }
     return false;
 }
 
@@ -279,6 +285,7 @@ void LevelEditor::BoxSelectEntities(Rectangle box) {
     for (int i = 0; i < (int)_level.killZones.size(); i++) if (CheckCollisionRecs(KillZoneRect(_level.killZones[i]), box)) _multiSel.push_back({ (int)EditorTool::KILL_ZONE,i });
     if (_level.hasWinZone && CheckCollisionRecs(WinZoneRect(_level.winZone), box)) _multiSel.push_back({ (int)EditorTool::WIN_ZONE,0 });
     for (int i = 0; i < (int)_level.conveyors.size(); i++) if (CheckCollisionRecs(ConveyorRect(_level.conveyors[i]), box)) _multiSel.push_back({ (int)EditorTool::CONVEYOR,i });
+    for (int i = 0; i < (int)_level.props.size(); i++)     if (CheckCollisionRecs(PropRect(_level.props[i]), box))          _multiSel.push_back({ (int)EditorTool::PROP,i });
     for (int i = 0; i < (int)_level.beams.size(); i++)     if (CheckCollisionRecs(BeamRect(_level.beams[i]), box))    _multiSel.push_back({ (int)EditorTool::BEAM,i });
     for (int i = 0; i < (int)_level.pathNodes.size(); i++)     AC(EditorTool::PATH_NODE, { _level.pathNodes[i].x,_level.pathNodes[i].y }, i);
     for (int i = 0; i < (int)_level.nukeSpawns.size(); i++)    AC(EditorTool::NUKE_SPAWN, _level.nukeSpawns[i], i);
@@ -340,6 +347,7 @@ void LevelEditor::DeleteSelected() {
     case EditorTool::WIN_ZONE:       _level.hasWinZone = false; break;
     case EditorTool::KILL_ZONE:      Er(_level.killZones, i); break;
     case EditorTool::CONVEYOR:       Er(_level.conveyors, i); break;
+    case EditorTool::PROP:           Er(_level.props, i); break;
     case EditorTool::POINT_LIGHT:
     case EditorTool::SPOT_LIGHT:
     case EditorTool::SKY_LIGHT:      Er(_level.lights, i); break;
@@ -362,7 +370,7 @@ void LevelEditor::DeleteMultiSelected() {
     DT(EditorTool::BEAM, _level.beams); DT(EditorTool::NUKE_SPAWN, _level.nukeSpawns);
     DT(EditorTool::BEATRICE_SPAWN, _level.beatriceSpawns); DT(EditorTool::ENEMY_SPAWN, _level.enemySpawns);
     DT(EditorTool::ELEVATOR, _level.elevators); DT(EditorTool::KILL_ZONE, _level.killZones);
-    DT(EditorTool::CONVEYOR, _level.conveyors);
+    DT(EditorTool::CONVEYOR, _level.conveyors); DT(EditorTool::PROP, _level.props);
     // All three light tool types share _level.lights — collect all indices
     {
         std::vector<int> li;
@@ -392,6 +400,7 @@ void LevelEditor::DeleteMultiSelected() {
         if (e.type == (int)EditorTool::WIN_ZONE)     _level.hasWinZone = false;
         if (e.type == (int)EditorTool::KILL_ZONE && e.index < (int)_level.killZones.size())  Er(_level.killZones, e.index);
         if (e.type == (int)EditorTool::CONVEYOR && e.index < (int)_level.conveyors.size())  Er(_level.conveyors, e.index);
+        if (e.type == (int)EditorTool::PROP && e.index < (int)_level.props.size())          Er(_level.props, e.index);
     }
     _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
     SetStatus("Deleted selection.");
@@ -421,6 +430,10 @@ void LevelEditor::CopySelected() {
         case EditorTool::SPOT_LIGHT:
         case EditorTool::SKY_LIGHT:
             if (i < (int)_level.lights.size()) ce.light = _level.lights[i];
+            else return;
+            break;
+        case EditorTool::PROP:
+            if (i < (int)_level.props.size()) ce.prop = _level.props[i];
             else return;
             break;
         default: return;
@@ -498,6 +511,11 @@ void LevelEditor::PasteClipboard(bool grabAfter) {
                 : (int)EditorTool::SKY_LIGHT;
             _level.lights.push_back(L);
             break;
+        }
+        case EditorTool::PROP: {
+            PropData pr = ce.prop; pr.x += OFF; pr.y += OFF;
+            ne.index = (int)_level.props.size();
+            _level.props.push_back(pr); break;
         }
         default: continue;
         }
@@ -761,6 +779,7 @@ void LevelEditor::BuildOutline() {
     for (int i = 0; i < (int)_level.enemySpawns.size(); i++)  EmitRoot({ (int)EditorTool::ENEMY_SPAWN,i });
     for (int i = 0; i < (int)_level.killZones.size(); i++)    EmitRoot({ (int)EditorTool::KILL_ZONE,i });
     for (int i = 0; i < (int)_level.conveyors.size(); i++)    EmitRoot({ (int)EditorTool::CONVEYOR,i });
+    for (int i = 0; i < (int)_level.props.size(); i++)        EmitRoot({ (int)EditorTool::PROP,i });
     for (int i = 0; i < (int)_level.lights.size(); i++) {
         EditorTool t = (_level.lights[i].type == LightType::POINT) ? EditorTool::POINT_LIGHT
             : (_level.lights[i].type == LightType::SPOT) ? EditorTool::SPOT_LIGHT
@@ -956,7 +975,7 @@ void LevelEditor::UpdateBrowser() {
     if (mouse.x >= _canvasW) return;
     const int r0[] = { 0,1,2,3,4,5 };
     const int r1[] = { 6,7,8,9,10,11 };
-    const int r2[] = { 12,13,14,15,16,17 };  // ...,POINT_LIGHT,SPOT_LIGHT,SKY_LIGHT
+    const int r2[] = { 12,13,14,15,16,17,18 };  // ...,POINT_LIGHT,SPOT_LIGHT,SKY_LIGHT,PROP
     for (int c = 0; c < 6; c++) if (CheckCollisionPointRec(mouse, BrowserBtn(0, c, 6)))
     {
         _tool = (EditorTool)r0[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
@@ -965,7 +984,7 @@ void LevelEditor::UpdateBrowser() {
     {
         _tool = (EditorTool)r1[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
-    for (int c = 0; c < 6; c++) if (r2[c] >= 0 && CheckCollisionPointRec(mouse, BrowserBtn(2, c, 6)))
+    for (int c = 0; c < 7; c++) if (r2[c] >= 0 && CheckCollisionPointRec(mouse, BrowserBtn(2, c, 7)))
     {
         _tool = (EditorTool)r2[c]; _sel.clear(); _multiSel.clear(); _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Tool: %s", ToolName(_tool))); return;
     }
@@ -1229,6 +1248,16 @@ void LevelEditor::UpdateCanvas() {
         }
         return;
     }
+    if (_tool == EditorTool::PROP) {
+        if (lP) {
+            PushUndo();
+            PropData pr; pr.x = swm.x; pr.y = swm.y;
+            _level.props.push_back(pr);
+            _sel = { (int)EditorTool::PROP, (int)_level.props.size() - 1 };
+            SetStatus("Prop placed. Adjust in Properties panel.");
+        }
+        return;
+    }
     if (lP) {
         PushUndo();
         switch (_tool) {
@@ -1474,6 +1503,10 @@ void LevelEditor::DrawLevelLitContent() {
     for (int i = 0; i < (int)_level.platforms.size(); i++)  DrawPlatEnt(_level.platforms[i], IS(EditorTool::PLATFORM, i), IMS(EditorTool::PLATFORM, i));
     for (int i = 0; i < (int)_level.ladders.size(); i++)    DrawLadEnt(_level.ladders[i], IS(EditorTool::LADDER, i), IMS(EditorTool::LADDER, i));
 
+    // Props (drawn before beams so they can be behind them at layer 0)
+    for (int i = 0; i < (int)_level.props.size(); i++)
+        DrawPropEnt(_level.props[i], IS(EditorTool::PROP, i), IMS(EditorTool::PROP, i));
+
     // ── Layer-sorted beam + kill-zone drawing ────────────────────────────────
     struct LayerItem { int layer; int kind; int idx; };
     std::vector<LayerItem> items;
@@ -1642,7 +1675,8 @@ void LevelEditor::DrawBrowserUI() {
     const EditorTool r0[] = { EditorTool::SELECT,EditorTool::PLAYER_SPAWN,EditorTool::REGULUS,EditorTool::CAVE,EditorTool::PLATFORM,EditorTool::LADDER };
     const EditorTool r1[] = { EditorTool::BEAM,EditorTool::PATH_NODE,EditorTool::NUKE_SPAWN,EditorTool::BEATRICE_SPAWN,EditorTool::ENEMY_SPAWN,EditorTool::ELEVATOR };
     const EditorTool r2[] = { EditorTool::WIN_ZONE, EditorTool::KILL_ZONE, EditorTool::CONVEYOR,
-                              EditorTool::POINT_LIGHT, EditorTool::SPOT_LIGHT, EditorTool::SKY_LIGHT };
+                              EditorTool::POINT_LIGHT, EditorTool::SPOT_LIGHT, EditorTool::SKY_LIGHT,
+                              EditorTool::PROP };
     auto DT = [&](int row, int col, int cols, EditorTool t) {
         Rectangle r = BrowserBtn(row, col, cols); bool act = (_tool == t); Color tc = ToolColor(t);
         DrawRectangleRec(r, act ? Color{ (unsigned char)(tc.r / 3),(unsigned char)(tc.g / 3),(unsigned char)(tc.b / 3),255 } : Color{ 30,32,44,255 });
@@ -1652,7 +1686,7 @@ void LevelEditor::DrawBrowserUI() {
         };
     for (int c = 0; c < 6; c++) DT(0, c, 6, r0[c]);
     for (int c = 0; c < 6; c++) DT(1, c, 6, r1[c]);
-    for (int c = 0; c < 6; c++) DT(2, c, 6, r2[c]);
+    for (int c = 0; c < 7; c++) DT(2, c, 7, r2[c]);
     float sy = (float)(_sh - 18);
     DrawRectangle(0, (int)sy - 2, _canvasW, 20, { 18,20,28,255 });
     const char* smsg = _statusTimer > 0.f ? _status : "1=Sel 2=Mov 3=Rot 4=Scl | G=Grab R=Rot S=Scale | ^C=Copy ^V=Paste ^D=Dup | H=Grid [/]=Grid÷ ^Z/Y DEL ^S B=Emote N=Menu Tab=Seq";
@@ -1822,6 +1856,7 @@ void LevelEditor::DrawDataPanel() {
         : (_sel.type == (int)EditorTool::POINT_LIGHT) ? _level.lights[_sel.index].x
         : (_sel.type == (int)EditorTool::SPOT_LIGHT) ? _level.lights[_sel.index].x
         : (_sel.type == (int)EditorTool::SKY_LIGHT) ? _level.lights[_sel.index].x
+        : (_sel.type == (int)EditorTool::PROP) ? _level.props[_sel.index].x
         : _level.cavePos.x;
     float& refY = (_sel.type == (int)EditorTool::PLATFORM) ? _level.platforms[_sel.index].y
         : (_sel.type == (int)EditorTool::LADDER) ? _level.ladders[_sel.index].y
@@ -1839,6 +1874,7 @@ void LevelEditor::DrawDataPanel() {
         : (_sel.type == (int)EditorTool::POINT_LIGHT) ? _level.lights[_sel.index].y
         : (_sel.type == (int)EditorTool::SPOT_LIGHT) ? _level.lights[_sel.index].y
         : (_sel.type == (int)EditorTool::SKY_LIGHT) ? _level.lights[_sel.index].y
+        : (_sel.type == (int)EditorTool::PROP) ? _level.props[_sel.index].y
         : _level.cavePos.y;
     if (NumField("X ", refX, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
     if (NumField("Y ", refY, 1.f, -2000, 2000, px, cy, fw)) {} cy += rowH;
@@ -2077,6 +2113,58 @@ void LevelEditor::DrawDataPanel() {
         if (hL && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = -1; }
         if (hR && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = 1; }
         cy += 22;
+    }
+    if (_sel.type == (int)EditorTool::PROP && _sel.index < (int)_level.props.size()) {
+        auto& pr = _level.props[_sel.index];
+        SectionHeader("── Prop ────────────────────");
+        if (NumField("W  ", pr.width, 1.f, 4, 2000, px, cy, fw)) {} cy += rowH;
+        if (NumField("H  ", pr.height, 1.f, 4, 2000, px, cy, fw)) {} cy += rowH;
+        if (NumField("Rot", pr.rotation, 0.3f, -360, 360, px, cy, fw)) {} cy += rowH;
+        SectionHeader("── Lighting ────────────────");
+        if (NumField("Aff", pr.lightAffect, 0.05f, 0.f, 3.f, px, cy, fw)) {} cy += rowH;
+        DrawText("0=unlit 1=lit 2+=glow", (int)px, (int)cy, 9, { 110,150,200,255 }); cy += 12;
+        SectionHeader("── Render Layer ────────────");
+        {
+            float rlF = (float)pr.renderLayer;
+            if (NumField("Layer", rlF, 1.f, 0, 2, px, cy, fw)) { PushUndo(); pr.renderLayer = (int)rlF; }
+            cy += rowH;
+        }
+        DrawText("0=behind  1=front  2=overlay", (int)px, (int)cy, 9, { 110,150,200,255 }); cy += 12;
+        SectionHeader("── Collision ───────────────");
+        {
+            Rectangle colR = { px, cy, fw, 18 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), colR);
+            DrawRectangleRec(colR, pr.hasCollision ? Color{ 30,80,30,255 } : (hov ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+            DrawRectangleLinesEx(colR, pr.hasCollision ? 2.f : 1.f, pr.hasCollision ? Color{ 100,220,100,255 } : Color{ 70,75,100,255 });
+            const char* ts = pr.hasCollision ? "Collision: ON  (click off)" : "Collision: OFF (click on)";
+            int tww = MeasureText(ts, 9);
+            DrawText(ts, (int)(colR.x + colR.width / 2 - tww / 2), (int)colR.y + 5, 9,
+                pr.hasCollision ? Color{ 180,255,180,255 } : Color{ 170,175,200,255 });
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); pr.hasCollision = !pr.hasCollision; }
+            cy += 22;
+        }
+        SectionHeader("── Tex Variant ─────────────");
+        {
+            float tvF = (float)pr.texVariant;
+            if (NumField("Var", tvF, 1.f, 0, 15, px, cy, fw)) { PushUndo(); pr.texVariant = (int)tvF; }
+            cy += rowH;
+        }
+        // Copy / Paste props
+        {
+            float hw = (fw - 3) * 0.5f;
+            Rectangle cpR = { px, cy, hw, 15 }, ppR = { px + hw + 3, cy, hw, 15 };
+            bool cpH = CheckCollisionPointRec(GetMousePosition(), cpR);
+            bool ppH = CheckCollisionPointRec(GetMousePosition(), ppR);
+            bool canPaste = (_propClip.type == (int)EditorTool::PROP);
+            DrawRectangleRec(cpR, cpH ? Color{ 50,80,50,255 } : Color{ 30,50,30,255 }); DrawRectangleLinesEx(cpR, 1, { 60,160,60,255 });
+            DrawText("Cpy Props", (int)(cpR.x + 2), (int)(cpR.y + 2), 9, { 120,220,120,255 });
+            DrawRectangleRec(ppR, canPaste ? (ppH ? Color{ 60,50,20,255 } : Color{ 40,35,15,255 }) : Color{ 25,28,38,255 });
+            DrawRectangleLinesEx(ppR, 1, canPaste ? Color{ 220,180,60,255 } : Color{ 50,55,70,255 });
+            DrawText("Pst Props", (int)(ppR.x + 2), (int)(ppR.y + 2), 9, canPaste ? Color{ 220,180,60,255 } : Color{ 80,85,100,255 });
+            if (cpH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) CopyProps();
+            if (ppH && canPaste && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); PasteProps(); }
+            cy += 18;
+        }
     }
     if ((_sel.type == (int)EditorTool::POINT_LIGHT ||
         _sel.type == (int)EditorTool::SPOT_LIGHT ||
@@ -2801,6 +2889,8 @@ void LevelEditor::CopyProps() {
         _sel.type == (int)EditorTool::SKY_LIGHT) &&
         _sel.index < (int)_level.lights.size())
         _propClip.light = _level.lights[_sel.index];
+    else if (_sel.type == (int)EditorTool::PROP && _sel.index < (int)_level.props.size())
+        _propClip.prop = _level.props[_sel.index];
     SetStatus("Properties copied.");
 }
 void LevelEditor::PasteProps() {
@@ -2852,6 +2942,11 @@ void LevelEditor::PasteProps() {
         _level.elevators[_sel.index] = _propClip.elev;
         _level.elevators[_sel.index].x = ox; _level.elevators[_sel.index].y = oy;
     }
+    else if (_sel.type == (int)EditorTool::PROP && _sel.index < (int)_level.props.size()) {
+        float ox = _level.props[_sel.index].x, oy = _level.props[_sel.index].y;
+        _level.props[_sel.index] = _propClip.prop;
+        _level.props[_sel.index].x = ox; _level.props[_sel.index].y = oy;
+    }
     SetStatus("Properties pasted.");
 }
 
@@ -2896,8 +2991,8 @@ void LevelEditor::DeleteRelationsFor(SelectedEnt e) {
 
 void LevelEditor::BuildOutlineTree(SelectedEnt e, int depth) {
     EditorTool t = (EditorTool)e.type;
-    const char* icons[] = { "[S]","[P]","[R]","[C]","[=]","[|]","[-]","[o]","[N]","[B]","[E]","[^]","[W]","[X]" };
-    const char* icon = (e.type >= 0 && e.type < 14) ? icons[e.type] : "[?]";
+    const char* icons[] = { "[S]","[P]","[R]","[C]","[=]","[|]","[-]","[o]","[N]","[B]","[E]","[^]","[W]","[X]","[~]","[*]","[+]","[#]","[Pr]" };
+    const char* icon = (e.type >= 0 && e.type < 19) ? icons[e.type] : "[?]";
     OutlineRow row;
     row.ent = e; row.icon = icon; row.color = ToolColor(t); row.depth = depth;
     if (e.index >= 0) snprintf(row.name, sizeof(row.name), "%s %d", ToolName(t), e.index);
@@ -2966,7 +3061,9 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
 
     // 3-frame animation: right-moving plays frames 0→1→2, left-moving plays 2→1→0
     int rawFrame = (int)(GetTime() * 9.f) % 3;   // 0,1,2 cycling at 9fps (3fps per frame)
-    int frame = (cv.direction == 1) ? rawFrame : (2 - rawFrame);  // right=1,2,3 | left=3,2,1
+    int frameL = (cv.direction == 1) ? rawFrame : (2 - rawFrame);  // left cap
+    int frameR = 2 - frameL;                                       // right cap (inverted)
+    int frame = frameL;  // used for middle section
 
     float rad = cv.rotation * DEG2RAD;
     float ca = cosf(rad), sa = sinf(rad);
@@ -2986,7 +3083,7 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
         }
         };
 
-    DrawSec(_convSide[frame], 0.f, ecW, false);   // left cap
+    DrawSec(_convSide[frameL], 0.f, ecW, false);  // left cap
     if (midW > 0.f) {
         if (_convM[frame] && _convM[frame]->id > 0) {
             // Tile the middle at ecW world-pixels per tile.
@@ -3006,7 +3103,7 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
             DrawRectanglePro({ wx, wy, midW, bH }, {}, cv.rotation, Color{ 80,70,40,180 });
         }
     }
-    DrawSec(_convSide[frame], cv.length - ecW, ecW, true); // right cap — flipped
+    DrawSec(_convSide[frameR], cv.length - ecW, ecW, true); // right cap — inverted frame + flipped
 
     // Overlay: selection tint + direction arrow
     DrawRectanglePro({ cv.x, cv.y, cv.length, bH }, {}, cv.rotation,
@@ -3017,4 +3114,62 @@ void LevelEditor::DrawConveyorEnt(const ConveyorData& cv, bool sel, bool msel) c
     DrawLineEx({ ax - dx, ay - dy }, { ax + dx, ay + dy }, 2.f, bc);
     DrawText(TextFormat("%.0fpx/s %s", cv.speed, cv.direction == 1 ? "▶" : "◀"),
         (int)cv.x + 2, (int)(cv.y + bH + 2), 9, bc);
+}
+
+// =============================================================================
+//  PROP ENTITY
+// =============================================================================
+
+Rectangle LevelEditor::PropRect(const PropData& pr) const {
+    return { pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height };
+}
+
+bool LevelEditor::PointInProp(Vector2 pt, const PropData& pr) const {
+    float rad = -pr.rotation * DEG2RAD;
+    float ca = cosf(rad), sa = sinf(rad);
+    float dx = pt.x - pr.x, dy = pt.y - pr.y;
+    float lx = dx * ca - dy * sa;
+    float ly = dx * sa + dy * ca;
+    return fabsf(lx) <= pr.width * 0.5f && fabsf(ly) <= pr.height * 0.5f;
+}
+
+void LevelEditor::DrawPropEnt(const PropData& pr, bool sel, bool msel) const {
+    Color outline = sel ? YELLOW : (msel ? SKYBLUE : Color{ 180,100,220,200 });
+
+    // Draw texture or placeholder
+    Texture2D* tex = (pr.texVariant < _propTexCount && _propTex[pr.texVariant])
+        ? _propTex[pr.texVariant] : nullptr;
+    if (tex && tex->id > 0) {
+        DrawTexturePro(*tex,
+            { 0, 0, (float)tex->width, (float)tex->height },
+            { pr.x, pr.y, pr.width, pr.height },
+            { pr.width * 0.5f, pr.height * 0.5f },
+            pr.rotation, WHITE);
+    }
+    else {
+        DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
+            {}, pr.rotation, Color{ 180,100,220,100 });
+    }
+
+    // Rotated outline
+    float rad = pr.rotation * DEG2RAD;
+    float ca = cosf(rad), sa = sinf(rad);
+    float hw = pr.width * 0.5f, hh = pr.height * 0.5f;
+    Vector2 corners[4] = {
+        { pr.x + (-hw) * ca - (-hh) * sa, pr.y + (-hw) * sa + (-hh) * ca },
+        { pr.x + (hw)*ca - (-hh) * sa, pr.y + (hw)*sa + (-hh) * ca },
+        { pr.x + (hw)*ca - (hh)*sa, pr.y + (hw)*sa + (hh)*ca },
+        { pr.x + (-hw) * ca - (hh)*sa, pr.y + (-hw) * sa + (hh)*ca },
+    };
+    for (int k = 0; k < 4; k++)
+        DrawLineEx(corners[k], corners[(k + 1) % 4], sel ? 2.f : 1.f, outline);
+
+    // Label
+    DrawText(TextFormat("Pr aff=%.1f col=%s", pr.lightAffect, pr.hasCollision ? "Y" : "N"),
+        (int)(corners[0].x), (int)(corners[0].y - 14), 9, outline);
+}
+
+void LevelEditor::SetPropTextures(Texture2D** ptrs, int count) {
+    _propTex = ptrs;
+    _propTexCount = count;
 }

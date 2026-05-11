@@ -22,6 +22,7 @@ enum class EditorTool : int {
     POINT_LIGHT,
     SPOT_LIGHT,
     SKY_LIGHT,
+    PROP,           // ← NEW: decorative/collision prop object
     TOOL_COUNT
 };
 enum class GizmoMode { SELECT = 0, MOVE, ROTATE, SCALE };
@@ -29,8 +30,6 @@ enum class GizmoAxis { NONE, X, Y, FREE, RING };
 enum class ConnectMode { NONE, NEXT0, NEXT1 };
 
 // SelectedEnt is identical to EntityRef (defined in LevelData.h).
-// Using an alias keeps ParentChildRelation and the editor working with the same type,
-// eliminating all EntityRef/SelectedEnt conversion and == operator errors.
 using SelectedEnt = EntityRef;
 
 struct OutlineRow {
@@ -74,12 +73,22 @@ public:
         _playerTex = player; _regulusTex = regulus; _caveTex = cave;
         _ropeTex = rope; _goldenPistonTex = goldenPiston;
     }
+
     // Pass the 10 variant beam textures (Dk_FloorPart1 .. Dk_FloorPart10)
-    // Indices 0..9 correspond to texVariant 1..10. Pass nullptr for unused slots.
     void SetBeamVariantTextures(Texture2D* variants[10])
     {
         for (int i = 0; i < 10; i++) _beamVariantTex[i] = variants[i];
     }
+
+    // Pass prop textures (variant 0 = Light.png, extend the array for more)
+    // Call once after loading the textures in main.cpp.
+    void SetPropTextures(Texture2D** textures, int count)
+    {
+        for (int i = 0; i < count && i < PROP_TEX_MAX; i++)
+            _propTex[i] = textures[i];
+        _propTexCount = count < PROP_TEX_MAX ? count : PROP_TEX_MAX;
+    }
+
     void SetTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder)
     {
         _bgTex = bg; _beamTex = beam; _ladderTex = ladder;
@@ -95,13 +104,12 @@ private:
     static constexpr int OUTLINE_ROW = 18;
 
     // ── Cinematic Sequencer panel ─────────────────────────────────────────────
-    static constexpr int   SEQ_H = 300;   // total panel height
-    static constexpr int   SEQ_BW = 160;   // content browser column width
-    static constexpr int   SEQ_HDR = 110;   // track name column in timeline
-    static constexpr int   SEQ_CTRL_H = 32;    // controls bar height
-    static constexpr float SEQ_RH = 22.f;  // ruler height (px)
-    static constexpr float SEQ_TH = 22.f;  // track row height (px)
-    // Audio track row height
+    static constexpr int   SEQ_H = 300;
+    static constexpr int   SEQ_BW = 160;
+    static constexpr int   SEQ_HDR = 110;
+    static constexpr int   SEQ_CTRL_H = 32;
+    static constexpr float SEQ_RH = 22.f;
+    static constexpr float SEQ_TH = 22.f;
     static constexpr float SEQ_AUDIO_H = 24.f;
 
     float _canvasH = 0.f;
@@ -126,9 +134,10 @@ private:
         PlatformData plat = {};
         LadderData   lad = {};
         PathNodeData node = {};
-        BeamData     beam = {};   // used for BEAM clipboard entries
-        Vector2      pos = {};    // used for spawn-point entries
-        LightData    light = {};  // used for POINT/SPOT/SKY_LIGHT entries
+        BeamData     beam = {};
+        Vector2      pos = {};
+        LightData    light = {};
+        PropData     prop = {};   // ← NEW
     };
     std::vector<ClipboardEntry> _clipboard;
     void CopySelected();
@@ -137,16 +146,21 @@ private:
 
     // ── Textures ──────────────────────────────────────────────────────────────
     Texture2D* _bgTex = nullptr;
-    Texture2D* _beamTex = nullptr;         // Dk_FloorPart (default, texVariant=0)
-    Texture2D* _beamVariantTex[10] = {};   // Dk_FloorPart1..10 (texVariant=1..10)
+    Texture2D* _beamTex = nullptr;
+    Texture2D* _beamVariantTex[10] = {};
     Texture2D* _ladderTex = nullptr;
     Texture2D* _playerTex = nullptr;
     Texture2D* _regulusTex = nullptr;
     Texture2D* _caveTex = nullptr;
     Texture2D* _ropeTex = nullptr;
-    Texture2D* _goldenPistonTex = nullptr;  // Kill zone: DK_GOLDEN_PISTON
-    Texture2D* _convSide[3] = {};  // ConveyorSide_1/2/3 (left-facing; right end is flipped)
-    Texture2D* _convM[3] = {};     // ConveyorMid_1/2/3
+    Texture2D* _goldenPistonTex = nullptr;
+    Texture2D* _convSide[3] = {};
+    Texture2D* _convM[3] = {};
+
+    // Prop textures — variant 0 = Assets/Textures/Lighting/Light.png
+    static constexpr int PROP_TEX_MAX = 16;
+    Texture2D* _propTex[PROP_TEX_MAX] = {};
+    int        _propTexCount = 0;
 
     // ── Tool / gizmo state ────────────────────────────────────────────────────
     EditorTool  _tool = EditorTool::SELECT;
@@ -193,11 +207,11 @@ private:
     int _outlineScroll = 0;
 
     // Outliner parent-child interaction
-    bool _outlCtxMenu = false;   // context menu visible
-    int  _outlCtxRow = -1;      // which row was right-clicked
-    bool _outlParentPick = false;   // "pick a parent" mode active
-    SelectedEnt _outlPickTarget = {};  // child waiting for a parent
-    bool _outlDragging = false;   // row being dragged
+    bool _outlCtxMenu = false;
+    int  _outlCtxRow = -1;
+    bool _outlParentPick = false;
+    SelectedEnt _outlPickTarget = {};
+    bool _outlDragging = false;
     int  _outlDragRow = -1;
     int  _outlDropRow = -1;
 
@@ -208,24 +222,24 @@ private:
     float   _fieldDragSens = 1.f;
     float   _fieldMin = 0.f, _fieldMax = 0.f;
 
-    // Direct text-input for NumField (double-click to activate)
     bool    _fieldTyping = false;
     float* _fieldTypingPtr = nullptr;
     char    _fieldTypeBuf[32] = {};
-    double  _fieldLastClick = -999.0;   // for double-click detection
+    double  _fieldLastClick = -999.0;
 
     char  _status[256] = {};
     float _statusTimer = 0.f;
 
-    // ── Properties clipboard (UE-style copy/paste) ────────────────────────────
+    // ── Properties clipboard ─────────────────────────────────────────────────
     struct PropClipboard {
-        int          type = -1;   // EditorTool int, -1 = empty
+        int          type = -1;
         PlatformData plat = {};
         LadderData   lad = {};
         KillZoneData kz = {};
         WinZoneData  wz = {};
         ElevatorData elev = {};
         LightData    light = {};
+        PropData     prop = {};   // ← NEW
     } _propClip;
     void CopyProps();
     void PasteProps();
@@ -240,42 +254,33 @@ private:
 
     float  _seqTime = 0.f;
     bool   _seqPlaying = false;
-    float  _seqZoom = 80.f;   // px / second
-    float  _seqScrollX = 0.f;   // time offset (seconds)
+    float  _seqZoom = 80.f;
+    float  _seqScrollX = 0.f;
     int    _seqTrackScroll = 0;
     int    _selTrack = -1;
     int    _selKey = -1;
 
-    // Playhead drag
     bool   _seqDragPlayhead = false;
-
-    // Keyframe drag
     bool   _seqDragKey = false;
     float  _seqKeyDragOrig = 0.f;
 
-    // Timeline pan (RMB drag)
     bool    _seqPanning = false;
-    float   _seqPanStartX = 0.f;  // mouse x when pan started
-    float   _seqPanStartSX = 0.f;  // _seqScrollX when pan started
+    float   _seqPanStartX = 0.f;
+    float   _seqPanStartSX = 0.f;
 
-    // In/Out point markers (green = in, red = out)
     float  _seqInPoint = 0.f;
-    float  _seqOutPoint = -1.f;  // -1 = use seq.duration
+    float  _seqOutPoint = -1.f;
     bool   _seqDragIn = false;
     bool   _seqDragOut = false;
 
-    // Audio clip per sequence (filename only, played via raylib Music)
-    // Stored as a string alongside sequence data (not serialised to .cin yet,
-    // so we keep a parallel vector matching _seqList indices)
     struct SeqAudio {
-        char  path[256] = {};  // full/relative path to audio file
+        char  path[256] = {};
         bool  loaded = false;
         Music music = {};
     };
-    std::vector<SeqAudio> _seqAudio;   // parallel to _seqList
+    std::vector<SeqAudio> _seqAudio;
 
-    // Audio section UI state
-    bool _seqAudioDrop = false;  // drag-over highlight
+    bool _seqAudioDrop = false;
 
     int    _seqNameCounter = 1;
 
@@ -288,7 +293,7 @@ private:
     void SeqDeleteKeyframe();
     void SeqPreviewUpdate(float dt);
     void SeqPreviewStop();
-    void SeqEnsureAudio(int idx);   // grow _seqAudio to match _seqList
+    void SeqEnsureAudio(int idx);
     void SeqUnloadAudio(int idx);
     void SeqLoadAudioFile(int idx, const char* path);
 
@@ -297,7 +302,7 @@ private:
     void DrawSeqBrowser();
     void DrawSeqTimeline();
     void DrawSeqControls();
-    void DrawSeqAudioBar();   // NEW: audio track strip
+    void DrawSeqAudioBar();
 
     float     SeqTimeToX(float t)  const;
     float     SeqXToTime(float px) const;
@@ -305,7 +310,7 @@ private:
     Rectangle SeqBrowserRect()  const;
     Rectangle SeqControlsRect() const;
     Rectangle SeqTrackRowRect(int row) const;
-    Rectangle SeqAudioRowRect() const;   // below track rows
+    Rectangle SeqAudioRowRect() const;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     Vector2   WorldMouse() const;
@@ -320,7 +325,7 @@ private:
 
     Rectangle PlatRect(const PlatformData& p)                const;
     Rectangle LadRect(const LadderData& l)                   const;
-    Rectangle BeamRect(const BeamData& b)                        const;
+    Rectangle BeamRect(const BeamData& b)                    const;
     bool      PointInPlatform(Vector2 pt, const PlatformData& p) const;
     Vector2   PlatformCenter(const PlatformData& p)          const;
     Vector2   EntityCenter(const SelectedEnt& e)             const;
@@ -355,8 +360,8 @@ private:
     void DrawBackground()        const;
     void DrawGrid()              const;
     void DrawLevelEntities();
-    void DrawLevelLitContent();   // world geometry (lit by lighting RT in preview)
-    void DrawLevelOverlays();     // markers + gizmos + light icons (always unlit)
+    void DrawLevelLitContent();
+    void DrawLevelOverlays();
     void DrawPlacementPreview()  const;
     void DrawToolbarUI()         const;
     void DrawBrowserUI();
@@ -372,6 +377,17 @@ private:
     void DrawRegulusEnt(Vector2 pos, bool sel, bool msel)  const;
     void DrawCaveEnt(Vector2 pos, bool sel, bool msel)  const;
 
+    // ── Prop draw/pick helpers ─────────────────────────────────────────────
+    // DrawPropEnt  — draws the prop in the editor canvas (textured rect or
+    //                a tinted placeholder if texture isn't loaded yet).
+    // PropRect     — returns an axis-aligned bounding box for hit-testing
+    //                (NOTE: for rotated props this is approximate; exact pick
+    //                 uses PointInProp instead).
+    // PointInProp  — precise OBB point-in-rect test accounting for rotation.
+    void DrawPropEnt(const PropData& pr, bool sel, bool msel) const;
+    Rectangle PropRect(const PropData& pr) const;
+    bool      PointInProp(Vector2 pt, const PropData& pr) const;
+
     bool NumField(const char* label, float& val, float sens,
         float minV, float maxV, float x, float y, float fw);
 
@@ -380,15 +396,13 @@ private:
     std::vector<SelectedEnt> GetChildren(SelectedEnt e) const;
     void SetRelationParent(SelectedEnt child, SelectedEnt parent);
     void RemoveRelation(SelectedEnt child);
-    void DeleteRelationsFor(SelectedEnt e);   // on entity delete
-    bool IsAncestor(SelectedEnt anc, SelectedEnt e) const;  // cycle guard
-    void BuildOutlineTree(SelectedEnt e, int depth);         // recursive
+    void DeleteRelationsFor(SelectedEnt e);
+    bool IsAncestor(SelectedEnt anc, SelectedEnt e) const;
+    void BuildOutlineTree(SelectedEnt e, int depth);
 
-    // Elevator draw helper
     void DrawElevatorEnt(const ElevatorData& el, bool sel, bool msel) const;
     Rectangle ElevRect(const ElevatorData& el) const;
 
-    // Win zone / Kill zone draw helpers
     void DrawWinZoneEnt(const WinZoneData& wz, bool sel, bool msel) const;
     Rectangle WinZoneRect(const WinZoneData& wz) const;
     void DrawKillZoneEnt(const KillZoneData& kz, bool sel, bool msel) const;

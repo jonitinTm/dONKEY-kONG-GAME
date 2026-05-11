@@ -918,6 +918,18 @@ int main(void)
 
     Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
 
+    // ── Prop textures ──────────────────────────────────────────────────────────
+    static constexpr int PROP_TEX_COUNT = 1;
+    Texture2D propTextures[PROP_TEX_COUNT] = {
+        LoadTexture("Assets/Textures/Lighting/Light.png"),
+    };
+    // Wire prop textures into the editor for canvas preview
+    {
+        Texture2D* ptrs[PROP_TEX_COUNT];
+        for (int i = 0; i < PROP_TEX_COUNT; i++) ptrs[i] = &propTextures[i];
+        editor.SetPropTextures(ptrs, PROP_TEX_COUNT);
+    }
+
     // Array for easy indexed access
     Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = {
         &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5
@@ -1142,6 +1154,10 @@ int main(void)
             conveyorPlatStart = (int)platforms.size();
             for (const auto& cv : lv.conveyors)
                 platforms.push_back(Platform::Make(cv.x, cv.y, cv.length, 0.f, cv.rotation));
+            // Props: invisible collision platforms for props with hasCollision == true
+            for (const auto& pr : lv.props)
+                if (pr.hasCollision)
+                    platforms.push_back(Platform::Make(pr.x, pr.y, pr.width, 0.f, pr.rotation));
         };
 
     Texture2D* image = &imgMarioIdle;
@@ -2785,9 +2801,11 @@ int main(void)
             {
                 int rawFrame = (int)(GetTime() * 9.0) % 3;
                 for (const auto& cv : liveConveyors) {
-                    int frame = (cv.direction == 1) ? rawFrame : (2 - rawFrame);
-                    Texture2D& side = ConvSide[frame];
-                    Texture2D& mid = ConvM[frame];
+                    int frameL = (cv.direction == 1) ? rawFrame : (2 - rawFrame);
+                    int frameR = 2 - frameL;   // inverted for right end-cap
+                    Texture2D& sideL = ConvSide[frameL];
+                    Texture2D& sideR = ConvSide[frameR];
+                    Texture2D& mid = ConvM[frameL];
                     float rad = cv.rotation * DEG2RAD;
                     float ca = cosf(rad), sa = sinf(rad);
                     float ecW = cv.endCapW, bH = cv.beltH;
@@ -2801,7 +2819,7 @@ int main(void)
                         DrawTexturePro(tex, { srcX, 0, srcW, (float)tex.height },
                             { wx, wy, w, bH }, {}, cv.rotation, WHITE);
                         };
-                    DrawSec(side, 0.f, ecW, false);         // left cap (faces left, as-is)
+                    DrawSec(sideL, 0.f, ecW, false);         // left cap — forward frame
                     if (mid.id > 0 && midW > 0.f) {
                         // Each middle tile is displayed at ecW world-pixels wide
                         // (same as a side cap) so all three sections have identical
@@ -2816,7 +2834,25 @@ int main(void)
                                 {}, cv.rotation, WHITE);
                         }
                     }
-                    DrawSec(side, cv.length - ecW, ecW, true); // right cap (flipped)
+                    DrawSec(sideR, cv.length - ecW, ecW, true); // right cap — reversed frame
+                }
+            }
+
+            // 3.07 Props — renderLayer 0, affected by lighting
+            for (const auto& pr : currentLevelData.props) {
+                if (pr.renderLayer != 0 || pr.lightAffect <= 0.f) continue;
+                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0)
+                    ? &propTextures[0] : nullptr;
+                if (!tex) {
+                    DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
+                        {}, pr.rotation, { 180, 100, 220, 140 });
+                }
+                else {
+                    DrawTexturePro(*tex,
+                        { 0, 0, (float)tex->width, (float)tex->height },
+                        { pr.x, pr.y, pr.width, pr.height },
+                        { pr.width * 0.5f, pr.height * 0.5f },
+                        pr.rotation, WHITE);
                 }
             }
 
@@ -2993,6 +3029,24 @@ int main(void)
                 DrawEnemy(en, rabbitWalkBlack, rabbitJumpBlack, rabbitWalkWhite, rabbitJumpWhite);
 
 
+            // 6.2 Props — renderLayer 1, affected by lighting
+            for (const auto& pr : currentLevelData.props) {
+                if (pr.renderLayer != 1 || pr.lightAffect <= 0.f) continue;
+                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0)
+                    ? &propTextures[0] : nullptr;
+                if (!tex) {
+                    DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
+                        {}, pr.rotation, { 180, 100, 220, 140 });
+                }
+                else {
+                    DrawTexturePro(*tex,
+                        { 0, 0, (float)tex->width, (float)tex->height },
+                        { pr.x, pr.y, pr.width, pr.height },
+                        { pr.width * 0.5f, pr.height * 0.5f },
+                        pr.rotation, WHITE);
+                }
+            }
+
             // 6.5 Beatrice bullets
             {
                 float bbScale = 2.0f;
@@ -3041,6 +3095,46 @@ int main(void)
             gameLighting.EndScene();
             gameLighting.BakeOccludersFromLevel(currentLevelData, cam);
             gameLighting.Composite(currentLevelData, cam);
+
+            // 8.5 Props — unlit (lightAffect 0) or overlay (renderLayer 2)
+            for (const auto& pr : currentLevelData.props) {
+                bool isUnlit = (pr.lightAffect <= 0.f);
+                bool isOverlay = (pr.renderLayer == 2);
+                if (!isUnlit && !isOverlay) continue;
+                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0)
+                    ? &propTextures[0] : nullptr;
+                if (!tex) {
+                    DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
+                        {}, pr.rotation, { 180, 100, 220, 140 });
+                }
+                else {
+                    DrawTexturePro(*tex,
+                        { 0, 0, (float)tex->width, (float)tex->height },
+                        { pr.x, pr.y, pr.width, pr.height },
+                        { pr.width * 0.5f, pr.height * 0.5f },
+                        pr.rotation, WHITE);
+                }
+            }
+            // 8.6 Glow pass — additive for props with lightAffect > 1
+            {
+                bool anyGlow = false;
+                for (const auto& pr : currentLevelData.props)
+                    if (pr.lightAffect > 1.f) { anyGlow = true; break; }
+                if (anyGlow) {
+                    BeginBlendMode(BLEND_ADDITIVE);
+                    for (const auto& pr : currentLevelData.props) {
+                        if (pr.lightAffect <= 1.f) continue;
+                        if (propTextures[0].id == 0) continue;
+                        unsigned char glowA = (unsigned char)Clamp((pr.lightAffect - 1.f) / 2.f * 255.f, 0.f, 255.f);
+                        DrawTexturePro(propTextures[0],
+                            { 0, 0, (float)propTextures[0].width, (float)propTextures[0].height },
+                            { pr.x, pr.y, pr.width, pr.height },
+                            { pr.width * 0.5f, pr.height * 0.5f },
+                            pr.rotation, { 255, 255, 255, glowA });
+                    }
+                    EndBlendMode();
+                }
+            }
 
             // 9. Rain overlay (drawn after lighting so it's unaffected)
             {
@@ -3264,6 +3358,9 @@ int main(void)
 
     UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
     UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
+
+    for (int i = 0; i < PROP_TEX_COUNT; i++)
+        if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);

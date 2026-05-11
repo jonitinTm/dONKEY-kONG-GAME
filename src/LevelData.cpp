@@ -79,6 +79,14 @@ bool SaveLevel(const LevelData& lv, const char* folder)
             cv.x, cv.y, cv.length, cv.speed, cv.direction,
             cv.rotation, cv.endCapW, cv.beltH);
 
+    // PROP format (9 tokens):
+    // x y width height rotation hasCollision lightAffect renderLayer texVariant
+    for (const auto& pr : lv.props)
+        fprintf(f, "PROP %.2f %.2f %.2f %.2f %.2f %d %.3f %d %d\n",
+            pr.x, pr.y, pr.width, pr.height, pr.rotation,
+            pr.hasCollision ? 1 : 0,
+            pr.lightAffect, pr.renderLayer, pr.texVariant);
+
     for (const auto& r : lv.relations)
         fprintf(f, "RELATION %d %d %d %d %.2f %.2f\n",
             r.parent.type, r.parent.index,
@@ -189,6 +197,16 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
                 &cv.rotation, &cv.endCapW, &cv.beltH);
             out.conveyors.push_back(cv);
         }
+        else if (strcmp(tag, "PROP") == 0) {
+            PropData pr;
+            int colFlag = 0;
+            // All 9 fields; older files without PROP just skip (no such tag)
+            (void)fscanf(f, "%f %f %f %f %f %d %f %d %d",
+                &pr.x, &pr.y, &pr.width, &pr.height, &pr.rotation,
+                &colFlag, &pr.lightAffect, &pr.renderLayer, &pr.texVariant);
+            pr.hasCollision = (colFlag != 0);
+            out.props.push_back(pr);
+        }
         else if (strcmp(tag, "RELATION") == 0) {
             ParentChildRelation r;
             (void)fscanf(f, "%d %d %d %d %f %f",
@@ -216,7 +234,6 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         else if (strcmp(tag, "LIGHT") == 0) {
             LightData L;
             int t = 0, en = 1;
-            // Read the 14-token base (compatible with old files)
             int parsed = fscanf(f, "%d %f %f %f %f %f %f %f %f %f %f %d %f %d",
                 &t, &L.x, &L.y, &L.r, &L.g, &L.b,
                 &L.intensity, &L.radius, &L.innerRadius,
@@ -225,13 +242,10 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             if (parsed < 14) L.innerRadius = 0.f;
             L.type = static_cast<LightType>(t);
             L.enabled = (parsed < 13) ? true : (en != 0);
-            // Try to read 4 animation tokens (18-token format).
-            // Missing in old files — fields stay at 0 (no animation), safe default.
-            if (parsed >= 14) {
+            if (parsed >= 14)
                 (void)fscanf(f, " %f %f %f %f",
                     &L.flickerFreq, &L.flickerAmp,
                     &L.pulseFreq, &L.pulseAmp);
-            }
             out.lights.push_back(L);
         }
         else {
@@ -246,7 +260,6 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
 }
 
 // ── Default level 1 ───────────────────────────────────────────────────────────
-// All literals are explicit floats (f suffix) to avoid C4244 int→float warnings.
 
 LevelData GetDefaultLevel1()
 {
@@ -354,6 +367,9 @@ LevelData GetDefaultLevel1()
     lv.hasWinZone = true;
     lv.winZone = { 22.f, 180.f, 160.f, 60.f };
 
+    // No props in default level 1 — add them via editor
+    lv.props = {};
+
     return lv;
 }
 
@@ -400,6 +416,14 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
         if ((i + 1) % 6 == 0) fprintf(f, "\n");
     }
     fprintf(f, "\n};\n\n");
+
+    fprintf(f, "// Props\nvector<PropData> propDefs = {\n");
+    for (const auto& pr : lv.props)
+        fprintf(f, "    { %.2ff, %.2ff, %.2ff, %.2ff, %.2ff, %s, %.3ff, %d, %d },\n",
+            pr.x, pr.y, pr.width, pr.height, pr.rotation,
+            pr.hasCollision ? "true" : "false",
+            pr.lightAffect, pr.renderLayer, pr.texVariant);
+    fprintf(f, "};\n\n");
 
     fprintf(f, "// Nuke spawns\nvector<Vector2> nukeSpawnNodes = {\n");
     for (const auto& v : lv.nukeSpawns)
