@@ -16,10 +16,8 @@ static constexpr float DEATH_TOTAL_FALL = DEATH_FLASH_DURATION + DEATH_FADE_DURA
 static constexpr float DEATH_BLACK_HOLD = 0.50f;
 static constexpr float DEATH_FALL_GRAVITY = 0.50f;
 static constexpr float DEATH_FALL_INITIAL_VY = -5.0f;
-
 static constexpr float DEATH_SHAKE_DURATION = 0.80f;
 static constexpr float DEATH_SHAKE_AMOUNT = 9.0f;
-
 static constexpr float ACTIVE_SPAWN_INTERVAL = 1.2f;
 
 struct PathNode
@@ -42,27 +40,12 @@ struct Barrel
     float     animTimer = 0.0f;
     int       animFrame = 0;
     bool      jumpScored = false;
-    bool      reachedEnd = false;   // true when barrel dies at terminal node
+    bool      reachedEnd = false;
 };
 
-struct NukeItem
-{
-    Vector2 pos;
-    bool    active = true;
-};
-
-struct FlyingNuke
-{
-    Rectangle rect = { 0, 0, 0, 0 };
-    Vector2   vel = { 0, 0 };
-    bool      active = false;
-};
-
-struct BeatriceItem
-{
-    Vector2 pos;
-    bool    active = false;
-};
+struct NukeItem { Vector2 pos; bool active = true; };
+struct FlyingNuke { Rectangle rect = { 0,0,0,0 }; Vector2 vel = { 0,0 }; bool active = false; };
+struct BeatriceItem { Vector2 pos; bool active = false; };
 
 struct BeaBullet
 {
@@ -72,13 +55,11 @@ struct BeaBullet
     bool    active = false;
 };
 
-
-//Struct enemies
-// ── Enemy types ───────────────────────────────────────────────────────────────
 enum EnemyType { GRUNT = 0, SPECTER };
 enum EnemyState { ES_IDLE, ES_JUMP_TOWARD, ES_LAND_PAUSE, ES_JUMP_BACK };
 
-struct Enemy {
+struct Enemy
+{
     Rectangle  hitbox = { 0, 0, 44, 44 };
     Vector2    velocity = { 0.0f, 0.0f };
     EnemyType  type = GRUNT;
@@ -91,14 +72,13 @@ struct Enemy {
     float      animTimer = 0.0f;
 };
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
+
 static Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
     float spd = 4.0f, float w = 26.25f, float h = 26.25f)
 {
     Barrel b;
-    if (path.empty()) { b.active = false; return b; }   // no path → dead barrel
+    if (path.empty()) { b.active = false; return b; }
     b.currentNode = startNode;
     b.speed = spd;
     b.isBlue = (GetRandomValue(0, 9) == 0);
@@ -113,10 +93,9 @@ static Barrel SpawnBarrel(const vector<PathNode>& path, int startNode = 0,
 }
 
 static bool SpawnBarrelFromPool(vector<Barrel>& barrels, const vector<PathNode>& path,
-    float spd = 4.0f, float w = 26.25f, float h = 26.25f,
-    bool forceBlue = false)
+    float spd = 4.0f, float w = 26.25f, float h = 26.25f, bool forceBlue = false)
 {
-    if (path.empty()) return false;   // no path defined for this level
+    if (path.empty()) return false;
     for (auto& b : barrels)
     {
         if (!b.active)
@@ -176,17 +155,13 @@ static void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
     if (b.animTimer >= frameTime) { b.animFrame = (b.animFrame + 1) % frameCount; b.animTimer = 0.0f; }
 }
 
-//Funcion para updatear los enemigos
-
-
 static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     vector<Platform>& platforms, float delta)
 {
     if (!e.active) return;
 
-    // Parámetros por tipo
-    float jumpForce = (e.type == GRUNT) ? -5.5f : -5.0f;//cambio altura de salto//cambio altura de salto
-    float speedToward = (e.type == GRUNT) ? 4.0f : 4.0f; //cambio tiempo en el aire
+    float jumpForce = (e.type == GRUNT) ? -5.5f : -5.0f;
+    float speedToward = 4.0f;
     float speedBack = (e.type == GRUNT) ? 1.8f : 2.5f;
     float idleTime = (e.type == GRUNT) ? 2.0f : 1.65f;
     float pauseTime = (e.type == GRUNT) ? 1.45f : 0.28f;
@@ -196,7 +171,6 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     float enemyCX = e.hitbox.x + e.hitbox.width * 0.5f;
     bool  playerRight = (playerCX > enemyCX);
 
-    // ── Máquina de estados ────────────────────────────────────────────────
     e.stateTimer += delta;
 
     switch (e.state)
@@ -229,7 +203,7 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
         {
             e.state = ES_JUMP_BACK;
             e.stateTimer = 0.0f;
-            e.velocity.y = jumpForce * 0.55f;         // salto pequeño atrás
+            e.velocity.y = jumpForce * 0.55f;
             e.velocity.x = playerRight ? -speedBack : speedBack;
             e.facingRight = !playerRight;
             e.grounded = false;
@@ -246,7 +220,6 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
         break;
     }
 
-    // ── Física ───────────────────────────────────────────────────────────
     float prevX = e.hitbox.x, prevY = e.hitbox.y;
     if (!e.grounded) e.velocity.y += 0.4f;
     e.hitbox.x += e.velocity.x;
@@ -260,9 +233,8 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     e.grounded = col.grounded;
     if (col.grounded) e.velocity.y = 0.0f;
 
-    if (e.hitbox.y > 1050.0f) e.active = false;   // cayó fuera de pantalla
+    if (e.hitbox.y > 1050.0f) e.active = false;
 
-    // ── Animación ─────────────────────────────────────────────────────────
     e.animTimer += delta;
     if (e.animTimer >= animSpeed)
     {
@@ -271,72 +243,29 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     }
 }
 
-
-
-
-
-//Dibujarlo en la pantallla
-
 static void DrawEnemy(const Enemy& e,
-    Texture2D& walkGrunt,   // textura andar  del conejo negro (GRUNT)
-    Texture2D& jumpGrunt,   // textura saltar del conejo negro (GRUNT)
-    Texture2D& walkSpecter, // textura andar  del conejo blanco (SPECTER)
-    Texture2D& jumpSpecter) // textura saltar del conejo blanco (SPECTER)
+    Texture2D& walkGrunt, Texture2D& jumpGrunt,
+    Texture2D& walkSpecter, Texture2D& jumpSpecter)
 {
-    // Si el enemigo no está activo no dibujamos nada
     if (!e.active) return;
 
-    // ── Elegir qué textura usar ───────────────────────────────────────────
     Texture2D* tex = nullptr;
-
     if (e.type == GRUNT)
-    {
-        // Conejo negro: si está en el aire usa la de salto, si no la de andar
-        if (!e.grounded)
-            tex = &jumpGrunt;
-        else
-            tex = &walkGrunt;
-    }
-    else // SPECTER
-    {
-        // Conejo blanco: igual pero con sus propias texturas
-        if (!e.grounded)
-            tex = &jumpSpecter;
-        else
-            tex = &walkSpecter;
-    }
+        tex = e.grounded ? &walkGrunt : &jumpGrunt;
+    else
+        tex = e.grounded ? &walkSpecter : &jumpSpecter;
 
-    // ── Tamaño en pantalla ────────────────────────────────────────────────
-    float scale = 2.5f;                    // cuánto agrandar la textura (3x su tamaño original)
-    float drawW = tex->width * scale;     // ancho  final en pantalla
-    float drawH = tex->height * scale;     // altura final en pantalla
-
-    // ── Posición: centrado horizontalmente, pies tocando el suelo del hitbox
+    float scale = 2.5f;
+    float drawW = tex->width * scale;
+    float drawH = tex->height * scale;
     float drawX = e.hitbox.x + e.hitbox.width * 0.5f - drawW * 0.5f;
     float drawY = e.hitbox.y + e.hitbox.height - drawH;
 
-    // ── Voltear la imagen si mira a la izquierda ──────────────────────────
-    // src es el "recorte" de la textura original que vamos a dibujar
     Rectangle src = { 0, 0, (float)tex->width, (float)tex->height };
+    if (!e.facingRight) src.width *= -1;
 
-    if (!e.facingRight)
-        src.width *= -1; // ancho negativo = raylib espeja la imagen horizontalmente
-
-    // ── Dibujar ───────────────────────────────────────────────────────────
-    // DrawTexturePro(textura, recorte_origen, rectangulo_destino, origen_rotacion, angulo, color)
     DrawTexturePro(*tex, src, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
 }
-
-
-
-
-
-
-
-
-
-
-
 
 static void DrawBarrelPathDebug(const vector<PathNode>& path, const vector<Barrel>& barrels, int screenHeight)
 {
@@ -403,24 +332,21 @@ int main(void)
     Rectangle btnCtrl = { 340, 550, 200, 40 };
     Rectangle btnEditor = { 340, 600, 200, 40 };
 
-    bool      debugPath = false;
+    bool debugPath = false;
 
     unsigned int score = 0;
-    int currentLevelId = 1;   // which level is currently loaded / playing
+    int          currentLevelId = 1;
 
-    // ── Lighting ──────────────────────────────────────────────────────────────
     LightingSystem gameLighting;
-    LevelData      currentLevelData;   // kept in sync with ApplyLevelData calls
+    LevelData      currentLevelData;
 
     Rectangle wincondition = { 400, 150, 40, 40 };
 
-    // ── Dynamic player spawn (updated by level data) ──────────────────────────
     float playerSpawnX = 35.0f + 64.0f * 3.5f + 10.0f;
     float playerSpawnY = 817.0f;
 
     LevelEditor editor;
 
-    // ── Subaru animation state ────────────────────────────────────────────────
     const float SUBARU_ANIM_FPS = 5.0f;
     const int   SUBARU_FRAME_COUNT = 5;
     int         subaruFrame = 0;
@@ -438,7 +364,6 @@ int main(void)
     bool      isGrounded = false;
 
     int         lives = 3;
-    bool        death = false;
     bool        invincible = false;
     float       invincibleTimer = 0.0f;
     const float invincibleDuration = 1.5f;
@@ -460,14 +385,14 @@ int main(void)
     float ladderEntryClampTimer = 0.0f;
     float ladderEntryClampStart = 0.0f;
 
-    // ── Death sequence state ──────────────────────────────────────────────────
-    bool  isDying = false;
-    float deathTimer = 0.0f;
-    bool  hitPlayed = false;
-    bool  deathPlayed = false;
-    float deathFallVelY = 0.0f;
-    bool  deathReachedBlack = false;
-    float deathBlackTimer = 0.0f;
+    // ── Death sequence ────────────────────────────────────────────────────────
+    bool    isDying = false;
+    float   deathTimer = 0.0f;
+    bool    hitPlayed = false;
+    bool    deathPlayed = false;
+    float   deathFallVelY = 0.0f;
+    bool    deathReachedBlack = false;
+    float   deathBlackTimer = 0.0f;
     float   deathShakeTimer = 0.0f;
     Vector2 deathShakeOffset = { 0, 0 };
 
@@ -494,7 +419,7 @@ int main(void)
     float     houseAnimTimer = 0.0f;
     bool      houseIsSnowed = false;
 
-    // ── Nuke state ────────────────────────────────────────────────────────────
+    // ── Nuke ──────────────────────────────────────────────────────────────────
     const float NUKE_SCALE = 1.5f;
     const float NUKE_NATIVE_W = 74.0f;
     const float NUKE_NATIVE_H = 35.0f;
@@ -514,7 +439,7 @@ int main(void)
     float       nukeFlashTimer = 5.0f;
     Vector2     nukeShakeOffset = { 0, 0 };
 
-    // ── Regulus state ─────────────────────────────────────────────────────────
+    // ── Regulus ───────────────────────────────────────────────────────────────
     const float REGULUS_SCALE = 3.5f * 0.7f * 1.2f;
     const float REGULUS_X = 22.0f;
     const float REGULUS_IDLE_FPS = 3.6f;
@@ -547,13 +472,12 @@ int main(void)
     float regulusActiveSpawnTimer = 0.0f;
 
     // ── Platforms & ladders ───────────────────────────────────────────────────
-    // ── Elevators & parent-child relations ─────────────────────────────────
     vector<ElevatorData>        liveElevators;
     vector<ParentChildRelation> liveRelations;
     vector<float>               elevChildPhases;
     vector<KillZoneData>        liveKillZones;
     vector<ConveyorData>        liveConveyors;
-    int                         conveyorPlatStart = 0; // index in platforms[] where conveyor surfaces begin
+    int                         conveyorPlatStart = 0;
 
     vector<Platform> platforms = {
         Platform::Make(27,  880, 412, 0,  0.0f),
@@ -567,67 +491,26 @@ int main(void)
     };
 
     vector<Ladder> ladders = {
-        Ladder::Make(675, 245,  40, 104),
-        Ladder::Make(160, 375,  40, 102),
-        Ladder::Make(300, 365,  40, 117),
-        Ladder::Make(680, 495,  40, 110),
-        Ladder::Make(430, 489,  40, 128),
-        Ladder::Make(380, 621,  40, 124),
-        Ladder::Make(160, 632,  40, 101),
-        Ladder::Make(670, 760,  40, 105),
+        Ladder::Make(675, 245, 40, 104),
+        Ladder::Make(160, 375, 40, 102),
+        Ladder::Make(300, 365, 40, 117),
+        Ladder::Make(680, 495, 40, 110),
+        Ladder::Make(430, 489, 40, 128),
+        Ladder::Make(380, 621, 40, 124),
+        Ladder::Make(160, 632, 40, 101),
+        Ladder::Make(670, 760, 40, 105),
     };
-
-
-
-    //enemies
 
     // ── Enemies ───────────────────────────────────────────────────────────────
     vector<Vector2> enemySpawnPositions = {
-        { 180.0f, 706.0f }, { 620.0f, 706.0f },   // Floor 1  (plataforma y=750)
-        { 200.0f, 576.0f }, { 550.0f, 576.0f },   // Floor 2  (plataforma y=620)
-        { 160.0f, 446.0f }, { 520.0f, 446.0f },   // Floor 3  (plataforma y=490)
-        { 200.0f, 316.0f }, { 500.0f, 316.0f },   // Floor 4  (plataforma y=360)
+        { 180.0f, 706.0f }, { 620.0f, 706.0f },
+        { 200.0f, 576.0f }, { 550.0f, 576.0f },
+        { 160.0f, 446.0f }, { 520.0f, 446.0f },
+        { 200.0f, 316.0f }, { 500.0f, 316.0f },
     };
 
     vector<Enemy> enemies(8);
     for (auto& en : enemies) en.active = false;
-
-    // Lambda que inicializa/respawnea los dos enemigos en posiciones aleatorias
-    auto SpawnRandomEnemies = [&]()
-        {
-            for (auto& en : enemies) en.active = false;
-            if (enemySpawnPositions.size() < 2) return;   // not enough spawn points
-
-            int idx1 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1);
-            int idx2 = 0;
-            do { idx2 = GetRandomValue(0, (int)enemySpawnPositions.size() - 1); } while (idx2 == idx1);
-
-            auto initEnemy = [](Enemy& en, Vector2 pos, EnemyType t, float w, float h, float timerOffset)
-                {
-                    en.hitbox = { pos.x, pos.y, w, h };
-                    en.type = t;
-                    en.state = ES_IDLE;
-                    en.stateTimer = timerOffset;   // desfase para que no se sincronicen
-                    en.velocity = { 0.0f, 0.0f };
-                    en.grounded = true;
-                    en.animFrame = 0;
-                    en.animTimer = 0.0f;
-                    en.facingRight = true;
-                    en.active = true;
-                };
-
-            // hitbox is 70% of original; DrawEnemy stays centred on it automatically
-            initEnemy(enemies[0], enemySpawnPositions[idx1], GRUNT, 30.8f, 30.8f, 0.0f);
-            initEnemy(enemies[1], enemySpawnPositions[idx2], SPECTER, 26.6f, 35.0f, 0.4f);
-        };
-
-    // enemies now spawn only when barrels reach the end node
-
-
-
-
-
-
 
     // ── Barrel path ───────────────────────────────────────────────────────────
     vector<PathNode> barrelPath = {
@@ -692,16 +575,11 @@ int main(void)
         { 200.0f, 490.0f }, { 480.0f, 490.0f },
         { 310.0f, 360.0f }, { 560.0f, 360.0f },
     };
-
     vector<BeatriceItem> beatrices;
     if (!beatriceSpawnNodes.empty()) {
         int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
         beatrices.push_back({ beatriceSpawnNodes[idx], true });
     }
-
-    float spawnTimer = 0.0f;
-    float spawnInterval = 10.0f;
-    float minuteTimer = 0.0f;
 
     // ── Beatrice ability ──────────────────────────────────────────────────────
     const float BEATRICE_DURATION = 7.0f;
@@ -743,22 +621,22 @@ int main(void)
         { 296, 150 }, { 264, 150 },
     };
 
-    // ── Initial Regulus throw ─────────────────────────────────────────────────
+    // Initial Regulus throw on startup
     regulusThrowing = true;
     regulusSpawnPending = true;
     regulusForceBlue = true;
     regulusThrowFrame = 0;
     regulusThrowTimer = 0.0f;
 
-    // ── Window / audio / textures ─────────────────────────────────────────────
+    // ── Window / audio init ───────────────────────────────────────────────────
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
     editor.Init(screenWidth, screenHeight);
     gameLighting.Init(screenWidth, screenHeight, LightingSystem::Quality::MEDIUM);
     gameLighting.SetGlobalAmbient(0.06f);
     gameLighting.SetGlobalDarkness(1.00f);
     gameLighting.SetAmbientColor({ 25, 30, 50, 255 });
-    Cinematic::Global.LoadAll();   // load all saved sequences from Cinematics/
-    SetRandomSeed((unsigned int)time(NULL));   // truly random each run
+    Cinematic::Global.LoadAll();
+    SetRandomSeed((unsigned int)time(NULL));
     InitAudioDevice();
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
@@ -774,6 +652,7 @@ int main(void)
     SetMusicPan(music, 0.0f);
     PlayMusicStream(music);
 
+    // ── Textures ──────────────────────────────────────────────────────────────
     Texture2D imgMarioIdle = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
     Texture2D imgMarioWalk1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk1.png");
     Texture2D imgMarioWalk2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Walk2.png");
@@ -781,21 +660,22 @@ int main(void)
     Texture2D imgMarioFalling = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Falling.png");
     Texture2D background = LoadTexture("Wiki/SubaruStairs.png");
     Texture2D beam = LoadTexture("Assets/Textures/Architecture/Dk_FloorPart.png");
-    // Variant beam textures (Dk_FloorPart1..10); missing files load as id=0 (graceful)
+
     Texture2D beamVariants[10];
     for (int i = 0; i < 10; i++) {
         char path[128];
         snprintf(path, sizeof(path), "Assets/Textures/Architecture/Dk_FloorPart%d.png", i + 1);
         beamVariants[i] = LoadTexture(path);
     }
+
     Texture2D imgMarioClimb1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder1.png");
     Texture2D imgMarioClimb2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder2.png");
     Texture2D imgMarioClimbEnd1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd1.png");
     Texture2D imgMarioClimbEnd2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_LadderEnd2.png");
     Texture2D imgMarioClimbDown = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_IdleBack.png");
 
-    // ── Emote / SubaruDance textures ──────────────────────────────────────────
-    static constexpr int EMOTE_FRAME_COUNT = 5;
+    static constexpr int   EMOTE_FRAME_COUNT = 5;
+    static constexpr float EMOTE_FRAME_SPD = 0.12f;
     Texture2D imgSubaruDance[EMOTE_FRAME_COUNT] = {
         LoadTexture("Assets/Textures/Characters/Mario/SubaruDance1.png"),
         LoadTexture("Assets/Textures/Characters/Mario/SubaruDance2.png"),
@@ -806,7 +686,7 @@ int main(void)
     bool  isEmoting = false;
     int   emoteFrame = 0;
     float emoteTimer = 0.f;
-    static constexpr float EMOTE_FRAME_SPD = 0.12f;  // seconds per dance frame
+
     Texture2D LadderPart = LoadTexture("Assets/Textures/Architecture/Dk_Ladder.png");
     Texture2D RopeTex = LoadTexture("Assets/Textures/Architecture/Rope.png");
     Texture2D GoldenPistonTex = LoadTexture("Assets/Textures/Items/GoldenPiston.png");
@@ -871,15 +751,12 @@ int main(void)
     Texture2D Rain = LoadTexture("Assets/Textures/Architecture/Rain.png");
     Texture2D Rain2 = LoadTexture("Assets/Textures/Architecture/Rain2.png");
 
-    // ── Regulus textures ──────────────────────────────────────────────────────
     Texture2D RegulusGrab1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Grab1.png");
     Texture2D RegulusGrab2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Grab2.png");
     Texture2D RegulusGrab3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Grab3.png");
     Texture2D RegulusIdle1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle1.png");
     Texture2D RegulusIdle2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle2.png");
     Texture2D RegulusIdle3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Idle3.png");
-    Texture2D RegulusStairs1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stairs1.png");
-    Texture2D RegulusStairs2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stairs2.png");
     Texture2D Regulus_Stun1 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stun1.png");
     Texture2D Regulus_Stun2 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stun2.png");
     Texture2D Regulus_Stun3 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_Stun3.png");
@@ -889,7 +766,6 @@ int main(void)
     Texture2D Regulus_StunEnd4 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd4.png");
     Texture2D Regulus_StunEnd5 = LoadTexture("Assets/Textures/Characters/Regulus/Regulus_StunEnd5.png");
 
-    // ── Beatrice / Mario-with-Beatrice textures ───────────────────────────────
     Texture2D Dk_Mario_Idle1_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1_Beatrice.png");
     Texture2D Dk_Mario_Idle2_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle2_Beatrice.png");
     Texture2D Dk_Mario_Jump_Beatrice = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Jump_Beatrice.png");
@@ -899,7 +775,6 @@ int main(void)
     Texture2D Beatrice_Idle2 = LoadTexture("Assets/Textures/Characters/Beatrice/Beatrice_Idle2.png");
     Texture2D texBeaBullet = LoadTexture("Assets/Textures/Characters/Beatrice/BeaBullet.png");
 
-    // ── Subaru textures ───────────────────────────────────────────────────────
     Texture2D Subaru1 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru1.png");
     Texture2D Subaru2 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru2.png");
     Texture2D Subaru3 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru3.png");
@@ -907,44 +782,34 @@ int main(void)
     Texture2D Subaru5 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru5.png");
     Texture2D Subaru_Background = LoadTexture("Assets/Textures/Characters/Subaru/Subaru_Background.png");
 
-    // ──Enemies─────────────────────────────────────────────
-    //black rabbit
     Texture2D rabbitWalkBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Blue1.png");
     Texture2D rabbitJumpBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump_Blue1.png");
-    //White rabbit---------
     Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
     Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
-
     Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
 
-    // ── Prop textures ──────────────────────────────────────────────────────────
     static constexpr int PROP_TEX_COUNT = 1;
     Texture2D propTextures[PROP_TEX_COUNT] = {
         LoadTexture("Assets/Textures/Lighting/Light.png"),
     };
-    // Wire prop textures into the editor for canvas preview
     {
         Texture2D* ptrs[PROP_TEX_COUNT];
         for (int i = 0; i < PROP_TEX_COUNT; i++) ptrs[i] = &propTextures[i];
         editor.SetPropTextures(ptrs, PROP_TEX_COUNT);
     }
 
-    // Array for easy indexed access
-    Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = {
-        &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5
-    };
+    Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = { &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5 };
 
-    Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,  &RegulusIdle2,  &RegulusIdle3 };
-    Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,  &RegulusGrab2,  &RegulusGrab3 };
-    Texture2D* regulusStunFrames[3] = { &Regulus_Stun1, &Regulus_Stun2, &Regulus_Stun3 };
-    Texture2D* regulusStunEndFrames[5] = { &Regulus_StunEnd1, &Regulus_StunEnd2, &Regulus_StunEnd3,
-                                           &Regulus_StunEnd4, &Regulus_StunEnd5 };
+    Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,    &RegulusIdle2,    &RegulusIdle3 };
+    Texture2D* regulusThrowFrames[3] = { &RegulusGrab1,    &RegulusGrab2,    &RegulusGrab3 };
+    Texture2D* regulusStunFrames[3] = { &Regulus_Stun1,   &Regulus_Stun2,   &Regulus_Stun3 };
+    Texture2D* regulusStunEndFrames[5] = { &Regulus_StunEnd1,&Regulus_StunEnd2,&Regulus_StunEnd3,
+                                           &Regulus_StunEnd4,&Regulus_StunEnd5 };
 
     const int NUKE_EXPL_FRAME_COUNT = 6;
     Texture2D* explosionFrames[NUKE_EXPL_FRAME_COUNT] = {
-        &Explosion1,&Explosion2,&Explosion3,
-        &Explosion4,&Explosion5,&Explosion6
+        &Explosion1,&Explosion2,&Explosion3,&Explosion4,&Explosion5,&Explosion6
     };
 
     Texture2D* barrelRoll[4] = { &BarrelMov1,     &BarrelMov2,     &BarrelMov3,     &BarrelMov4 };
@@ -958,7 +823,7 @@ int main(void)
     ClearBackground(BLANK);
     float beamScale = 4.0f;
     for (auto& b : beamPositions) {
-        if (b.renderLayer > 0) continue;  // high-layer beams drawn live after kill zones
+        if (b.renderLayer > 0) continue;
         Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
             ? &beamVariants[b.texVariant - 1] : &beam;
         float bSrcX = b.flipX ? (float)bTex->width : 0.f;
@@ -968,7 +833,6 @@ int main(void)
             { 0, 0 }, 0.f, WHITE);
     }
     EndTextureMode();
-    // NOTE: beam texture is kept alive so RebuildLayers can rebake staticLayer
 
     // ── Bake ladder layer ─────────────────────────────────────────────────────
     float ladderScale = 4.0f;
@@ -990,17 +854,13 @@ int main(void)
         float bottom = lad.y + lad.height - (isLast ? 0.0f : (isLeftSide ? 8.0f : topOff));
         while (y < bottom)
         {
-            DrawTexturePro(LadderPart,
-                { 0, 0, 16.0f, 16.0f },
-                { drawX, y, ladderTileW, ladderTileH },
-                { 0, 0 }, 0.f, WHITE);
+            DrawTexturePro(LadderPart, { 0, 0, 16.0f, 16.0f },
+                { drawX, y, ladderTileW, ladderTileH }, { 0, 0 }, 0.f, WHITE);
             y += ladderTileH;
         }
     }
     EndTextureMode();
-    // NOTE: LadderPart texture is kept alive so RebuildLayers can rebake ladderLayer
 
-    // ── Wire textures into the editor ─────────────────────────────────────────
     editor.SetGameTextures(&background, &beam, &LadderPart,
         &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex, &GoldenPistonTex);
     editor.SetConveyorTextures(&ConvSide[0], &ConvSide[1], &ConvSide[2], &ConvM[0], &ConvM[1], &ConvM[2]);
@@ -1010,18 +870,16 @@ int main(void)
         editor.SetBeamVariantTextures(bvPtrs);
     }
 
-    // ── RebuildLayers: rebakes staticLayer + ladderLayer from current data ────
+    // ── RebuildLayers ─────────────────────────────────────────────────────────
     auto RebuildLayers = [&]()
         {
-            // Beam layer — elevator-child beams and high-layer beams are excluded
-            // and drawn live instead
             float bScale = 4.0f;
             BeginTextureMode(staticLayer);
             ClearBackground(BLANK);
             for (int bi = 0; bi < (int)beamPositions.size(); bi++)
             {
                 const auto& b = beamPositions[bi];
-                if (b.renderLayer > 0) continue;  // drawn live after kill zones
+                if (b.renderLayer > 0) continue;
                 bool isElevChild = false;
                 for (const auto& rel : liveRelations)
                     if (rel.parent.type == 11 && rel.child.type == 6 && rel.child.index == bi)
@@ -1039,9 +897,6 @@ int main(void)
             }
             EndTextureMode();
 
-            // Ladder layer (uniform tiling) — elevator-child ladders are excluded
-            // and drawn live in the gameplay loop instead, since their position
-            // changes every frame.
             float lScale = 4.0f;
             float tileW = 16.f * lScale;
             float tileH = 16.f * lScale;
@@ -1049,7 +904,6 @@ int main(void)
             ClearBackground(BLANK);
             for (int li = 0; li < (int)ladders.size(); li++)
             {
-                // Skip ladders parented to an elevator — drawn live, not baked
                 bool isElevChild = false;
                 for (const auto& rel : liveRelations)
                     if (rel.parent.type == 11 && rel.child.type == 5 && rel.child.index == li)
@@ -1064,30 +918,26 @@ int main(void)
                 {
                     float dh = fminf(tileH, lad.y + lad.height - y);
                     float srh = dh / lScale;
-                    DrawTexturePro(LadderPart,
-                        { 0, 0, 16.f, srh },
-                        { drawX, y, tileW, dh },
-                        { 0, 0 }, 0.f, WHITE);
+                    DrawTexturePro(LadderPart, { 0, 0, 16.f, srh },
+                        { drawX, y, tileW, dh }, { 0, 0 }, 0.f, WHITE);
                 }
             }
             EndTextureMode();
         };
 
-    // ── ApplyLevelData: push a LevelData into all live game vectors ───────────
+    // ── ApplyLevelData ────────────────────────────────────────────────────────
     auto ApplyLevelData = [&](const LevelData& lv)
         {
-            currentLevelData = lv;   // keep a copy for lighting
-            // Platforms
+            currentLevelData = lv;
+
             platforms.clear();
             for (const auto& pd : lv.platforms)
                 platforms.push_back(Platform::Make(pd.x, pd.y, pd.w, pd.h, pd.tilt));
 
-            // Ladders
             ladders.clear();
             for (const auto& ld : lv.ladders)
                 ladders.push_back(Ladder::Make(ld.x, ld.y, ld.w, ld.h));
 
-            // Barrel path
             barrelPath.clear();
             for (const auto& nd : lv.pathNodes) {
                 PathNode n;
@@ -1099,62 +949,46 @@ int main(void)
                 barrelPath.push_back(n);
             }
 
-            // Spawn nodes
             nukeSpawnNodes.clear();
-            for (const auto& v : lv.nukeSpawns)     nukeSpawnNodes.push_back(v);
+            for (const auto& v : lv.nukeSpawns)    nukeSpawnNodes.push_back(v);
             beatriceSpawnNodes.clear();
-            for (const auto& v : lv.beatriceSpawns)  beatriceSpawnNodes.push_back(v);
+            for (const auto& v : lv.beatriceSpawns) beatriceSpawnNodes.push_back(v);
             enemySpawnPositions.clear();
-            for (const auto& v : lv.enemySpawns)     enemySpawnPositions.push_back(v);
+            for (const auto& v : lv.enemySpawns)   enemySpawnPositions.push_back(v);
 
-            // Beam positions + rebuild baked layers
             beamPositions.clear();
             for (const auto& b : lv.beams) beamPositions.push_back(b);
 
-            // Cave / house position
             if (lv.hasCave) {
                 houseX = lv.cavePos.x;
                 houseY = lv.cavePos.y;
                 houseHitbox = { houseX, houseY, houseW, houseH };
             }
 
-            // Player spawn
             if (lv.hasPlayerSpawn) {
                 playerSpawnX = lv.playerSpawn.x;
                 playerSpawnY = lv.playerSpawn.y;
             }
 
-            // Elevators + relations
             liveElevators = lv.elevators;
             liveRelations = lv.relations;
-            // Build phase vector: each relation gets an initial phase from offsetY
             elevChildPhases.resize(liveRelations.size());
             for (int ri = 0; ri < (int)liveRelations.size(); ri++)
                 elevChildPhases[ri] = liveRelations[ri].offsetY;
 
-            // Rebuild render textures with new data
             RebuildLayers();
 
-            // Win zone
             if (lv.hasWinZone)
                 wincondition = { lv.winZone.x, lv.winZone.y, lv.winZone.w, lv.winZone.h };
 
-            // Kill zones
             liveKillZones.clear();
-            for (const auto& kz : lv.killZones)
-                liveKillZones.push_back(kz);
+            for (const auto& kz : lv.killZones) liveKillZones.push_back(kz);
 
-            // Conveyors
             liveConveyors = lv.conveyors;
 
-            // Add a thin invisible platform at the top surface of each conveyor
-            // so that physics (CollisionManager) can land entities on them.
-            // These are appended AFTER the real level platforms so they can be
-            // stripped and rebuilt on each ApplyLevelData without bookkeeping.
             conveyorPlatStart = (int)platforms.size();
             for (const auto& cv : lv.conveyors)
                 platforms.push_back(Platform::Make(cv.x, cv.y, cv.length, 0.f, cv.rotation));
-            // Props: invisible collision platforms for props with hasCollision == true
             for (const auto& pr : lv.props)
                 if (pr.hasCollision)
                     platforms.push_back(Platform::Make(pr.x, pr.y, pr.width, 0.f, pr.rotation));
@@ -1173,13 +1007,13 @@ int main(void)
     Color rainTint = { 255, 255, 255,  80 };
     Color rain2Tint = { 255, 255, 255,  50 };
 
-    // ── Helper: respawn items on death ────────────────────────────────────────
+    // ── Lambdas ───────────────────────────────────────────────────────────────
     auto RespawnItems = [&]()
         {
             if (nukeRespawnNodes.empty()) return;
             if (GetRandomValue(1, 100) <= 30)
             {
-                int idx = GetRandomValue(0, (int)nukeRespawnNodes.size() - 1);
+                int  idx = GetRandomValue(0, (int)nukeRespawnNodes.size() - 1);
                 bool blocked = false;
                 for (const auto& nk : nukes)
                     if (nk.active && Vector2Distance(nk.pos, nukeRespawnNodes[idx]) < 50.0f)
@@ -1189,7 +1023,6 @@ int main(void)
             }
         };
 
-    // ── Helper lambdas ────────────────────────────────────────────────────────
     auto ResetRegulus = [&]()
         {
             regulusThrowing = false;
@@ -1221,7 +1054,6 @@ int main(void)
             for (auto& en : enemies)     en.active = false;
             for (auto& fn : flyingNukes) fn.active = false;
             flyingNukes.clear();
-            spawnTimer = 0.0f;
             playerHasNuke = false;
             playerHasBeatrice = false;
             beatriceAbilityTimer = 0.0f;
@@ -1291,8 +1123,6 @@ int main(void)
             RespawnItems();
         };
 
-    //resets
-
     auto ResetRound = [&]()
         {
             ClearDeathState();
@@ -1306,7 +1136,6 @@ int main(void)
 
     auto FullReset = [&]()
         {
-            // Reload level 1 data if we've moved past it
             if (currentLevelId != 1) {
                 currentLevelId = 1;
                 LevelData lv1;
@@ -1319,12 +1148,10 @@ int main(void)
             ResetRegulus();
 
             lives = 3;
-            death = false;
             invincible = false;
             invincibleTimer = 0.0f;
             score = 0;
-            spawnInterval = 10.0f;
-            minuteTimer = 0.0f;
+
             playerHasBeatrice = false;
             beatriceAbilityTimer = 0.0f;
             beaBulletShootTimer = 0.0f;
@@ -1364,14 +1191,12 @@ int main(void)
             regulusIdleFrame = 0;
             regulusIdleTimer = 0.0f;
 
-            // Reset Subaru animation
             subaruFrame = 0;
             subaruTimer = 0.0f;
 
             ResumeMusicStream(music);
         };
 
-    // ── Spawn one enemy at the cave end when a barrel completes its path ─────
     auto SpawnEnemyAtEnd = [&](float barrelCX)
         {
             for (auto& en : enemies)
@@ -1380,7 +1205,6 @@ int main(void)
                 EnemyType t = (GetRandomValue(0, 1) == 0) ? GRUNT : SPECTER;
                 float     hw = (t == GRUNT) ? 30.8f : 26.6f;
                 float     hh = (t == GRUNT) ? 30.8f : 35.0f;
-                // feet flush with the bottom platform (y = 880)
                 en.hitbox = { barrelCX - hw * 0.5f, 880.0f - hh, hw, hh };
                 en.type = t;
                 en.state = ES_IDLE;
@@ -1395,41 +1219,38 @@ int main(void)
             }
         };
 
-    // ── Cinematic player apply callback — patches live game objects directly ──
-    // Call CinematicSequencer::Play("Name") anywhere to trigger a sequence.
     Cinematic::Global.SetApplyCallback([&](const CinematicEntityState& st) {
         int i = st.entityIndex;
         switch (st.entityType) {
-        case 4: // PLATFORM — rebuild from cinematic state
+        case 4:
             if (i >= 0 && i < (int)platforms.size())
                 platforms[i] = Platform::Make(st.x, st.y,
-                    st.width > 0.f ? st.width : 128.f,
-                    0, st.tilt);
+                    st.width > 0.f ? st.width : 128.f, 0, st.tilt);
             break;
-        case 5: // LADDER
+        case 5:
             if (i >= 0 && i < (int)ladders.size())
                 ladders[i] = Ladder::Make(st.x, st.y,
-                    ladders[i].width,
-                    st.height > 0.f ? st.height : ladders[i].height);
+                    ladders[i].width, st.height > 0.f ? st.height : ladders[i].height);
             break;
-        case 6: // BEAM
-            if (i >= 0 && i < (int)beamPositions.size()) {
+        case 6:
+            if (i >= 0 && i < (int)beamPositions.size())
+            {
                 beamPositions[i].x = st.x; beamPositions[i].y = st.y;
             }
             break;
-        case 7: // PATH NODE
-            if (i >= 0 && i < (int)barrelPath.size()) {
-                barrelPath[i].pos.x = st.x;
-                barrelPath[i].pos.y = st.y;
-            } break;
-        case 3: // CAVE / HOUSE
+        case 7:
+            if (i >= 0 && i < (int)barrelPath.size())
+            {
+                barrelPath[i].pos.x = st.x; barrelPath[i].pos.y = st.y;
+            }
+            break;
+        case 3:
             houseX = st.x; houseY = st.y;
             houseHitbox = { houseX, houseY, houseW, houseH };
             break;
-        case 8:  if (i >= 0 && i < (int)nukeSpawnNodes.size())      nukeSpawnNodes[i] = { st.x,st.y };     break;
-        case 9:  if (i >= 0 && i < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[i] = { st.x,st.y }; break;
-        case 10: if (i >= 0 && i < (int)enemySpawnPositions.size())  enemySpawnPositions[i] = { st.x,st.y }; break;
-            // Types 1 (PLAYER_SPAWN) and 2 (REGULUS) are spawn points — not moved mid-game
+        case 8:  if (i >= 0 && i < (int)nukeSpawnNodes.size())      nukeSpawnNodes[i] = { st.x, st.y }; break;
+        case 9:  if (i >= 0 && i < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[i] = { st.x, st.y }; break;
+        case 10: if (i >= 0 && i < (int)enemySpawnPositions.size())  enemySpawnPositions[i] = { st.x, st.y }; break;
         default: break;
         }
         });
@@ -1441,12 +1262,10 @@ int main(void)
     {
         float dt = GetFrameTime();
 
-        // N = back to menu from anywhere, always
         if (IsKeyPressed(KEY_N) && currentScreen != MENU) {
             editor.ClearFlags();
             currentScreen = MENU;
         }
-
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
 
         if (currentScreen == SPLASH_SCREEN)
@@ -1464,11 +1283,26 @@ int main(void)
         else if (currentScreen == MENU)
         {
             Vector2 mouse = GetMousePosition();
-            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER)) { selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
-            if (CheckCollisionPointRec(mouse, btnPlay)) { selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
-            if (CheckCollisionPointRec(mouse, btnCtrl)) { selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = CONTROLS; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; } }
-            if (CheckCollisionPointRec(mouse, btnEditor)) { selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; } }
-            if (CheckCollisionPointRec(mouse, btnExit)) { selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break; }
+            if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER))
+            {
+                selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f;
+            }
+            if (CheckCollisionPointRec(mouse, btnPlay))
+            {
+                selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
+            }
+            if (CheckCollisionPointRec(mouse, btnCtrl))
+            {
+                selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = CONTROLS; splashTimer = 0.0f; }
+            }
+            if (CheckCollisionPointRec(mouse, btnEditor))
+            {
+                selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; }
+            }
+            if (CheckCollisionPointRec(mouse, btnExit))
+            {
+                selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break;
+            }
         }
         else if (currentScreen == CONTROLS)
         {
@@ -1477,50 +1311,39 @@ int main(void)
             if (CheckCollisionPointRec(mouse, btnsalida))
             {
                 DrawText(">", 725, 900, 40, ORANGE);
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                {
-                    currentScreen = MENU;
-
-                }
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = MENU;
             }
-
         }
-        // ── LEVEL EDITOR ──────────────────────────────────────────────────────
         else if (currentScreen == LEVEL_EDITOR)
         {
-            // N key checked here FIRST, before any editor code runs
             if (IsKeyPressed(KEY_N)) {
                 editor.ClearFlags();
-                Cinematic::Global.LoadAll();   // pick up any new sequences saved in editor
+                Cinematic::Global.LoadAll();
                 currentScreen = MENU;
             }
             else {
                 editor.Update(dt);
                 if (editor.WantsMenu()) { editor.ClearFlags(); currentScreen = MENU; }
-                if (editor.WantsEmote()) { editor.ClearFlags(); /* emote not active in editor mode */ }
                 if (editor.WantsPlay()) {
                     editor.ClearFlags();
-                    // Apply the editor's current level to the live game data
                     ApplyLevelData(editor.GetLevel());
                     currentLevelId = editor.GetCurrentLevelId();
-                    // Reload cinematics — user may have created new sequences in editor
                     Cinematic::Global.LoadAll();
-                    // Full reset without reloading level 1 (we just applied editor data)
                     ClearDeathState();
                     ClearRoundEntities();
                     ResetPlayerPos();
                     ResetRegulus();
-                    lives = 3; death = false; score = 0;
+                    lives = 3; score = 0;
                     invincible = true; invincibleTimer = invincibleDuration;
-                    spawnInterval = 10.0f; minuteTimer = 0.0f;
-                    playerHasBeatrice = false; beatriceAbilityTimer = 0.0f;
+                    playerHasBeatrice = false;
+                    beatriceAbilityTimer = 0.0f;
                     beaBulletShootTimer = 0.0f;
                     for (auto& bb : beaBullets) bb.active = false;
                     beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
                     houseAnimPlaying = false; houseAnimFrame = 0;
-                    houseAnimTimer = 0.0f; houseIsSnowed = false;
+                    houseAnimTimer = 0.0f;  houseIsSnowed = false;
                     nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
-                    nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
+                    nukeExplosionFrame = 0;    nukeExplosionTimer = 0.0f;
                     nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
                     for (auto& nk : nukes) nk.active = false;
                     nukes.clear();
@@ -1540,82 +1363,63 @@ int main(void)
                     subaruFrame = 0; subaruTimer = 0.0f;
                     ResumeMusicStream(music);
                     currentScreen = GAMEPLAY;
-                } // end WantsPlay
-            } // end else (not KEY_B)
+                }
+            }
         }
-        // ── HOW HIGH screen (update) ──────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
         {
             splashTimer += dt;
-
-            // Advance Subaru animation at 5 fps
             subaruTimer += dt;
             if (subaruTimer >= 1.0f / SUBARU_ANIM_FPS)
             {
-                subaruTimer -= 1.0f / SUBARU_ANIM_FPS;
-                subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
+                subaruTimer -= 1.0f / SUBARU_ANIM_FPS; subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
             }
-
             if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
             {
-                splashTimer = 0.0f;
-                currentScreen = GAMEPLAY;
+                splashTimer = 0.0f; currentScreen = GAMEPLAY;
             }
         }
-
-        // ── GAMEPLAY ──────────────────────────────────────────────────────────
         else if (currentScreen == GAMEPLAY)
         {
             UpdateMusicStream(music);
 
-            // ── Cinematic sequences ───────────────────────────────────────────
-            // The SetApplyCallback set above patches live game objects directly.
             {
                 static LevelData _cinematicDummy;
                 Cinematic::Global.Update(dt, _cinematicDummy);
             }
 
-            // ── Elevator children movement ─────────────────────────────────────
-            // Each child of an elevator loops along the shaft: phase 0=top, h=bottom
-            //
-            // Snapshot platform Y values BEFORE moving them so we can detect
-            // upward motion and push the player up when a platform rises into them.
-            // Without this, the one-way collision guard in CollisionManager::Resolve
-            // fires incorrectly: the platform teleports up, prevY still has the
-            // player "below" the old top, and the guard passes the player through.
+            // ── Elevator children ─────────────────────────────────────────────
             struct ElevPlatSnapshot { int platIndex; float prevY; float newY; float platW; };
             vector<ElevPlatSnapshot> elevSnapshots;
 
             for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
                 const auto& rel = liveRelations[ri];
-                if (rel.parent.type != 11) continue; // 11 = ELEVATOR tool enum
+                if (rel.parent.type != 11) continue;
                 int ei = rel.parent.index;
                 if (ei < 0 || ei >= (int)liveElevators.size()) continue;
                 const ElevatorData& el = liveElevators[ei];
                 if ((int)elevChildPhases.size() <= ri) elevChildPhases.resize(ri + 1, 0.f);
                 float& phase = elevChildPhases[ri];
 
-                // Snapshot platform Y before update (platform children only)
                 int ci = rel.child.index;
                 if (rel.child.type == 4 && ci >= 0 && ci < (int)platforms.size())
                     elevSnapshots.push_back({ ci, platforms[ci].y, 0.f, platforms[ci].width });
 
                 if (el.direction == 1) { phase -= el.speed * dt; if (phase < 0.f)  phase = el.h; }
-                else { phase += el.speed * dt; if (phase > el.h) phase = 0.f; }
+                else { phase += el.speed * dt; if (phase > el.h)  phase = 0.f; }
                 float cx = el.x + rel.offsetX;
                 float cy = el.y + phase;
 
-                // Record the new Y into the snapshot entry we just pushed
                 if (rel.child.type == 4 && !elevSnapshots.empty())
                     elevSnapshots.back().newY = cy;
 
                 switch (rel.child.type) {
-                case 4: if (ci >= 0 && ci < (int)platforms.size()) platforms[ci] = Platform::Make(cx, cy, platforms[ci].width, 0, 0.f); break;
-                case 5: if (ci >= 0 && ci < (int)ladders.size())   ladders[ci] = Ladder::Make(cx, cy, ladders[ci].width, ladders[ci].height); break;
+                case 4: if (ci >= 0 && ci < (int)platforms.size())     platforms[ci] = Platform::Make(cx, cy, platforms[ci].width, 0, 0.f); break;
+                case 5: if (ci >= 0 && ci < (int)ladders.size())       ladders[ci] = Ladder::Make(cx, cy, ladders[ci].width, ladders[ci].height); break;
                 case 6: if (ci >= 0 && ci < (int)beamPositions.size()) { beamPositions[ci].x = cx; beamPositions[ci].y = cy; } break;
-                case 8: if (ci >= 0 && ci < (int)nukeSpawnNodes.size())      nukeSpawnNodes[ci] = { cx,cy }; break;
-                case 9: if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[ci] = { cx,cy }; break;
-                case 10:if (ci >= 0 && ci < (int)enemySpawnPositions.size())  enemySpawnPositions[ci] = { cx,cy }; break;
+                case 8: if (ci >= 0 && ci < (int)nukeSpawnNodes.size())      nukeSpawnNodes[ci] = { cx, cy }; break;
+                case 9: if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[ci] = { cx, cy }; break;
+                case 10:if (ci >= 0 && ci < (int)enemySpawnPositions.size())  enemySpawnPositions[ci] = { cx, cy }; break;
                 }
             }
 
@@ -1631,14 +1435,11 @@ int main(void)
             float prevX = player.x, prevY = player.y;
             bool  playerIsMoving = false;
 
-            // Shared half-height hitbox anchored to player feet, used for
-            // barrel/enemy/killzone damage checks so the collision feel matches
-            // the platform collision box.
             auto PlayerHitbox = [&]() -> Rectangle {
                 float colW = player.width * 0.5f;
                 float colH = player.height * 0.5f;
-                float offX = (player.width - colW) * 0.5f;  // centred horizontally
-                float offY = player.height - colH;           // anchored to feet
+                float offX = (player.width - colW) * 0.5f;
+                float offY = player.height - colH;
                 return { player.x + offX, player.y + offY, colW, colH };
                 };
 
@@ -1652,8 +1453,6 @@ int main(void)
                     if (wasActive && !b.active && b.reachedEnd)
                         SpawnEnemyAtEnd(b.hitbox.x + b.hitbox.width * 0.5f);
                 }
-                spawnTimer += dt;
-                minuteTimer += dt;
             }
 
             // ── Flying nuke physics ───────────────────────────────────────────
@@ -1661,7 +1460,7 @@ int main(void)
             {
                 if (!fn.active) continue;
                 float prevFnX = fn.rect.x, prevFnY = fn.rect.y;
-                fn.vel.y += gravity;          // same gravity constant as player
+                fn.vel.y += gravity;
                 fn.rect.x += fn.vel.x;
                 fn.rect.y += fn.vel.y;
                 float fnVx = fn.vel.x, fnVy = fn.vel.y;
@@ -1669,11 +1468,7 @@ int main(void)
                     fn.rect, fnVx, fnVy, platforms, prevFnX, prevFnY);
                 fn.vel.x = fnVx;
                 fn.vel.y = fnVy;
-                if (col.grounded)
-                {
-                    nukes.push_back({ { fn.rect.x, fn.rect.y }, true });
-                    fn.active = false;
-                }
+                if (col.grounded) { nukes.push_back({ { fn.rect.x, fn.rect.y }, true }); fn.active = false; }
                 if (fn.rect.y > (float)screenHeight + 120.0f) fn.active = false;
             }
 
@@ -1681,11 +1476,10 @@ int main(void)
             beatriceItemAnimTimer += dt;
             if (beatriceItemAnimTimer >= 0.35f)
             {
-                beatriceItemAnimFrame = (beatriceItemAnimFrame + 1) % 2;
-                beatriceItemAnimTimer = 0.0f;
+                beatriceItemAnimFrame = (beatriceItemAnimFrame + 1) % 2; beatriceItemAnimTimer = 0.0f;
             }
 
-            // ── Regulus animation update ──────────────────────────────────────
+            // ── Regulus animation ─────────────────────────────────────────────
             if (regulusIsStunned)
             {
                 if (regulusStunEnding)
@@ -1718,9 +1512,7 @@ int main(void)
                             regulusStunLoops++;
                             if (regulusStunLoops >= REGULUS_STUN_LOOPS)
                             {
-                                regulusStunEnding = true;
-                                regulusStunEndFrame = 0;
-                                regulusStunEndTimer = 0.0f;
+                                regulusStunEnding = true; regulusStunEndFrame = 0; regulusStunEndTimer = 0.0f;
                             }
                         }
                     }
@@ -1731,8 +1523,7 @@ int main(void)
                 regulusIdleTimer += dt;
                 if (regulusIdleTimer >= 1.0f / REGULUS_IDLE_FPS)
                 {
-                    regulusIdleTimer -= 1.0f / REGULUS_IDLE_FPS;
-                    regulusIdleFrame = (regulusIdleFrame + 1) % 3;
+                    regulusIdleTimer -= 1.0f / REGULUS_IDLE_FPS; regulusIdleFrame = (regulusIdleFrame + 1) % 3;
                 }
             }
             else
@@ -1761,8 +1552,7 @@ int main(void)
             // ── Nuke pickup ───────────────────────────────────────────────────
             if (!isDying && !playerHasNuke && IsKeyPressed(KEY_E))
             {
-                float nkW = NUKE_NATIVE_W * NUKE_SCALE;
-                float nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
                 for (auto& nk : nukes)
                 {
                     if (!nk.active) continue;
@@ -1792,7 +1582,7 @@ int main(void)
                 }
             }
 
-            // ── Beatrice ability timer & bullets ──────────────────────────────
+            // ── Beatrice ability ──────────────────────────────────────────────
             if (playerHasBeatrice && !isDying)
             {
                 beatriceAbilityTimer -= dt;
@@ -1828,7 +1618,7 @@ int main(void)
                 }
             }
 
-            // ── Bullet update & barrel collision ──────────────────────────────
+            // ── Bullet update & collisions ────────────────────────────────────
             for (auto& bb : beaBullets)
             {
                 if (!bb.active) continue;
@@ -1841,66 +1631,54 @@ int main(void)
                 {
                     bb.active = false; continue;
                 }
+
                 float     bbScale = 2.0f;
                 float     bbHalfW = texBeaBullet.width * bbScale * 0.5f;
                 float     bbHalfH = texBeaBullet.height * bbScale * 0.5f;
-                Rectangle bbRect = { bb.pos.x - bbHalfW, bb.pos.y - bbHalfH,
-                                      bbHalfW * 2.0f, bbHalfH * 2.0f };
+                Rectangle bbRect = { bb.pos.x - bbHalfW, bb.pos.y - bbHalfH, bbHalfW * 2.0f, bbHalfH * 2.0f };
+
                 for (auto& b : barrels)
                 {
                     if (!b.active) continue;
                     if (CheckCollisionRecs(bbRect, b.hitbox))
                     {
-                        b.active = false;
-                        bb.active = false;
-                        score += 100;
-                        break;
+                        b.active = false; bb.active = false; score += 100; break;
                     }
                 }
-                // Colisión bala Beatrice con enemigos
-                if (bb.active) // solo si la bala sigue viva tras golpear barriles
-                {
+                if (bb.active) {
                     for (auto& en : enemies)
                     {
                         if (!en.active) continue;
                         if (CheckCollisionRecs(bbRect, en.hitbox))
                         {
-                            en.active = false;   // matar enemigo
-                            bb.active = false;   // destruir bala
-                            score += 300;
-                            break;
+                            en.active = false; bb.active = false; score += 300; break;
                         }
                     }
                 }
             }
 
-            // ── Drop nuke with G — place it back in the world at player feet ──
-            // ── Throw nuke with G — arc in facing direction, lands on platforms ─
+            // ── Throw nuke (G) ────────────────────────────────────────────────
             if (playerHasNuke && IsKeyPressed(KEY_G))
             {
                 playerHasNuke = false;
-                float     nkW = NUKE_NATIVE_W * NUKE_SCALE;
-                float     nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
                 FlyingNuke fn;
                 fn.rect = { player.x + player.width * 0.5f - nkW * 0.5f,
-                              player.y + player.height * 0.5f - nkH * 0.5f,
-                              nkW, nkH };
-                fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };  // forward arc
+                               player.y + player.height * 0.5f - nkH * 0.5f, nkW, nkH };
+                fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };
                 fn.active = true;
                 flyingNukes.push_back(fn);
             }
 
-            // ── Nuke detonation ───────────────────────────────────────────────
+            // ── Detonate nuke (F) ─────────────────────────────────────────────
             if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
             {
                 PlaySound(nukeSound);
                 float scale = 3.8f * 0.85f * 1.05f;
                 float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
                 float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                nukeExplosionPos = {
-                    player.x + image->width * scale * 0.5f - nkW * 0.5f,
-                    player.y - nkH - 2.0f
-                };
+                nukeExplosionPos = { player.x + image->width * scale * 0.5f - nkW * 0.5f,
+                                     player.y - nkH - 2.0f };
                 playerHasNuke = false;
                 nukeExplosionPlaying = true;
                 nukeExplosionFrame = 0;
@@ -1909,13 +1687,7 @@ int main(void)
                 nukeExtraDelay = 3.0f;
 
                 for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
-                // Nuke mata enemigos 
-                int enemiesKilled = 0;
-                for (auto& en : enemies)
-                {
-                    if (en.active) { en.active = false; score += 300; enemiesKilled++; }
-                }
-                spawnTimer = 0.0f;
+                for (auto& en : enemies) { if (en.active) { score += 300; en.active = false; } }
 
                 regulusIsStunned = true;
                 regulusStunEnding = false;
@@ -1958,7 +1730,7 @@ int main(void)
                 else nukeShakeOffset = { 0, 0 };
             }
 
-            // ── Regulus active/inactive machine ───────────────────────────────
+            // ── Regulus active/inactive state machine ─────────────────────────
             if (!isDying && nukeExtraDelay <= 0.0f && !regulusIsStunned)
             {
                 regulusStateTickTimer += dt;
@@ -1976,7 +1748,7 @@ int main(void)
                             regulusInactiveFails = 0;
                             regulusActiveFails = 0;
                         }
-                        else { regulusActiveFails++; }
+                        else regulusActiveFails++;
                     }
                     else
                     {
@@ -1991,14 +1763,14 @@ int main(void)
                                 regulusInactiveFails = 0;
                                 regulusActiveSpawnTimer = 0.0f;
                             }
-                            else { regulusInactiveFails++; }
+                            else regulusInactiveFails++;
                         }
                     }
                 }
                 if (!regulusIsActive) regulusInactiveTime += dt;
             }
 
-            // ── Barrel spawn (active mode) ────────────────────────────────────
+            // ── Barrel spawn ──────────────────────────────────────────────────
             if (!isDying && regulusIsActive && nukeExtraDelay <= 0.0f && !regulusIsStunned)
             {
                 regulusActiveSpawnTimer += dt;
@@ -2040,8 +1812,7 @@ int main(void)
                 }
             }
 
-            //Rabbit/ player collision
-            // ── Actualizar enemigos y colisión con jugador ────────────────────────────
+            // ── Enemy update & collision ──────────────────────────────────────
             if (!isDying)
             {
                 for (auto& en : enemies)
@@ -2062,14 +1833,16 @@ int main(void)
                     float zoneH = b.hitbox.height * 1.3f;
                     Rectangle jumpZone = {
                         b.hitbox.x - (zoneW - b.hitbox.width) * 0.5f,
-                        b.hitbox.y - zoneH,
-                        zoneW, zoneH
+                        b.hitbox.y - zoneH, zoneW, zoneH
                     };
-                    if (CheckCollisionRecs(player, jumpZone)) { score += 100; b.jumpScored = true; PlaySound(jumpBrlSound); }
+                    if (CheckCollisionRecs(player, jumpZone))
+                    {
+                        score += 100; b.jumpScored = true; PlaySound(jumpBrlSound);
+                    }
                 }
             }
 
-            // ── Death sequence update ─────────────────────────────────────────
+            // ── Death sequence ────────────────────────────────────────────────
             if (isDying)
             {
                 deathTimer += dt;
@@ -2093,8 +1866,7 @@ int main(void)
                     player.y += deathFallVelY;
                     if (deathTimer >= DEATH_TOTAL_FALL)
                     {
-                        deathReachedBlack = true;
-                        deathBlackTimer = 0.0f;
+                        deathReachedBlack = true; deathBlackTimer = 0.0f;
                     }
                 }
                 else
@@ -2108,25 +1880,23 @@ int main(void)
                 }
             }
 
-            // ── Barrel / house collision ──────────────────────────────────────
+            // ── Blue barrel / house collision ─────────────────────────────────
             if (!isDying && !houseAnimPlaying)
             {
                 for (auto& b : barrels)
                 {
                     if (b.active && b.isBlue && CheckCollisionRecs(b.hitbox, houseHitbox))
                     {
-                        houseAnimPlaying = true; houseAnimFrame = 0; houseAnimTimer = 0.0f;
-                        b.active = false; break;
+                        houseAnimPlaying = true; houseAnimFrame = 0; houseAnimTimer = 0.0f; b.active = false; break;
                     }
                 }
             }
             if (houseAnimPlaying)
             {
                 houseAnimTimer += dt;
-                float frameDuration = 1.0f / HOUSE_ANIM_FPS;
-                if (houseAnimTimer >= frameDuration)
+                if (houseAnimTimer >= 1.0f / HOUSE_ANIM_FPS)
                 {
-                    houseAnimTimer -= frameDuration;
+                    houseAnimTimer -= 1.0f / HOUSE_ANIM_FPS;
                     houseAnimFrame++;
                     if (houseAnimFrame == HOUSE_SWAP_AT_FRAME) houseIsSnowed = true;
                     if (houseAnimFrame >= CAVE_FRAME_COUNT) { houseAnimPlaying = false; houseAnimFrame = CAVE_FRAME_COUNT - 1; }
@@ -2148,7 +1918,7 @@ int main(void)
                         player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
                         ladderExitTimer += dt;
                         if (ladderExitTimer >= ladderExitFrameDuration) { ladderExitTimer = 0.0f; ladderExitStep++; }
-                        if (ladderExitStep == 0)      image = &imgMarioClimbEnd1;
+                        if (ladderExitStep == 0) image = &imgMarioClimbEnd1;
                         else if (ladderExitStep == 1) image = &imgMarioClimbEnd2;
                         else
                         {
@@ -2174,7 +1944,10 @@ int main(void)
                         player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
                         velocityY = 0; velocityX = 0;
                         ladderClimbTimer += dt;
-                        if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
+                        if (ladderClimbTimer >= ladderClimbAnimSpeed)
+                        {
+                            ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0;
+                        }
                         image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
                         if (t >= 1.0f) ladderEntryClamp = false;
                     }
@@ -2209,7 +1982,10 @@ int main(void)
                         else if (climbing)
                         {
                             ladderClimbTimer += dt;
-                            if (ladderClimbTimer >= ladderClimbAnimSpeed) { ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0; }
+                            if (ladderClimbTimer >= ladderClimbAnimSpeed)
+                            {
+                                ladderClimbFrame = (ladderClimbFrame + 1) % 2; ladderClimbTimer = 0;
+                            }
                             image = (ladderClimbFrame == 0) ? &imgMarioClimb1 : &imgMarioClimb2;
                         }
                     }
@@ -2243,7 +2019,7 @@ int main(void)
                                     onLadder = true;
                                     currentLadder = i;
                                     ladderExitPlaying = false; ladderExitStep = 0; ladderExitTimer = 0;
-                                    ladderClimbFrame = 0;      ladderClimbTimer = 0;
+                                    ladderClimbFrame = 0;     ladderClimbTimer = 0;
                                     player.x = ladders[i].x + ladders[i].width * 0.5f - player.width * 0.5f;
                                     velocityY = 0; velocityX = 0; isJumping = false; isGrounded = false;
                                     entered = true; break;
@@ -2264,7 +2040,6 @@ int main(void)
                     if (!isGrounded) velocityY += gravity;
                     player.y += velocityY;
 
-                    // Shrunk collision box anchored to player feet (50% height, bottom-aligned)
                     {
                         float colW = player.width * 0.5f;
                         float colH = player.height * 0.5f;
@@ -2276,85 +2051,59 @@ int main(void)
                         CollisionResult col = CollisionManager::ResolveAll(
                             colRect, velocityX, velocityY, platforms, prevX, colPrevY);
 
-                        // Mirror Y correction back so visual rect stays bottom-anchored
-                        player.y = colRect.y - colOffY;  // mirror Y correction back to visual rect
-
+                        player.y = colRect.y - colOffY;
                         isGrounded = col.grounded;
                         if (col.grounded) isJumping = false;
                     }
 
-                    // ── Upward-moving platform push ───────────────────────────
-                    // CollisionManager uses a one-way top-surface guard based on
-                    // the player's previous position. When a platform moves UP
-                    // into the player this frame, prevY still shows the player
-                    // "below" the old top, so the guard wrongly skips resolution
-                    // and the player phases through. We fix it here: for every
-                    // elevator-child platform that moved upward, if the platform
-                    // top has risen into the player's bottom half, push the player
-                    // up flush with the new top and kill downward velocity.
+                    // Push player up when an elevator platform rises into them
                     if (!onLadder)
                     {
                         for (const auto& snap : elevSnapshots)
                         {
-                            // Only care about upward movement
                             if (snap.newY >= snap.prevY) continue;
                             int pi = snap.platIndex;
                             if (pi < 0 || pi >= (int)platforms.size()) continue;
                             const Platform& movPlat = platforms[pi];
 
-                            // Build an AABB for the platform top surface (thin strip)
-                            // using its current (new) position.
-                            float platTop = movPlat.y;  // y is the top edge for Make(x,y,w,0)
+                            float platTop = movPlat.y;
                             float platLeft = movPlat.x;
                             float platRight = movPlat.x + movPlat.width;
-
                             float playerBottom = player.y + player.height;
-                            float playerLeft = player.x;
-                            float playerRight = player.x + player.width;
 
-                            // Horizontal overlap check
-                            bool hOverlap = playerRight > platLeft && playerLeft < platRight;
+                            bool hOverlap = (player.x + player.width) > platLeft && player.x < platRight;
                             if (!hOverlap) continue;
 
-                            // The platform top has risen into (or past) the player's
-                            // lower half. Tolerance of 4 px avoids accidental triggers
-                            // when the player is well above the platform.
                             float penetration = playerBottom - platTop;
                             if (penetration > 0.f && penetration < player.height * 0.75f)
                             {
-                                player.y -= penetration;   // push up flush with platform top
-                                if (velocityY > 0.f) velocityY = 0.f;  // kill downward velocity
+                                player.y -= penetration;
+                                if (velocityY > 0.f) velocityY = 0.f;
                                 isGrounded = true;
                                 isJumping = false;
                             }
                         }
                     }
 
-                    // ── Player animation selection ────────────────────────────
-                    // B key: start emote (only when grounded and not moving)
+                    // ── Player animation ──────────────────────────────────────
                     if (IsKeyPressed(KEY_B) && !isDying && isGrounded && !onLadder && !playerIsMoving)
                     {
-                        isEmoting = true;
-                        emoteFrame = 0;
-                        emoteTimer = 0.f;
+                        isEmoting = true; emoteFrame = 0; emoteTimer = 0.f;
                     }
-                    // Cancel emote if player starts moving or jumps
                     if (isEmoting && (playerIsMoving || isJumping || isDying))
                         isEmoting = false;
-                    // Advance emote animation; loop through frames 1-5
                     if (isEmoting)
                     {
                         emoteTimer += dt;
                         if (emoteTimer >= EMOTE_FRAME_SPD)
                         {
-                            emoteTimer = fmod(emoteTimer, EMOTE_FRAME_SPD);
-                            emoteFrame = (emoteFrame + 1) % EMOTE_FRAME_COUNT;
+                            emoteTimer = fmod(emoteTimer, EMOTE_FRAME_SPD); emoteFrame = (emoteFrame + 1) % EMOTE_FRAME_COUNT;
                         }
                         image = &imgSubaruDance[emoteFrame];
                     }
                     else if (isJumping)
                     {
-                        if (playerHasBeatrice)      image = &Dk_Mario_Jump_Beatrice;
+                        if (playerHasBeatrice) image = &Dk_Mario_Jump_Beatrice;
                         else if (playerHasNuke)     image = &imgMarioJumpNuke;
                         else                        image = &imgMarioJump;
                     }
@@ -2362,16 +2111,15 @@ int main(void)
                     {
                         if (animationTimer >= animationSpeed)
                         {
-                            walkFrame = (walkFrame + 1) % 2;
-                            animationTimer = fmod(animationTimer, animationSpeed);
+                            walkFrame = (walkFrame + 1) % 2; animationTimer = fmod(animationTimer, animationSpeed);
                         }
-                        if (playerHasBeatrice)      image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
+                        if (playerHasBeatrice) image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
                         else if (playerHasNuke)     image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
                         else                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
                     }
                     else
                     {
-                        if (playerHasBeatrice)      image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
+                        if (playerHasBeatrice) image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
                         else if (playerHasNuke)     image = &imgMarioIdleNuke;
                         else                        image = &imgMarioIdle;
                         walkFrame = 0;
@@ -2383,70 +2131,39 @@ int main(void)
 
             if (isDying) { isEmoting = false; image = (deathFallVelY < 0.0f) ? &imgMarioJump : &imgMarioFalling; }
 
-            // ── Kill Zone collision ───────────────────────────────────────────
+            // ── Kill zone collision ───────────────────────────────────────────
             if (!isDying && !invincible) {
                 for (const auto& kz : liveKillZones) {
-                    if (CheckCollisionRecs({ kz.x, kz.y, kz.w, kz.h }, PlayerHitbox())) {
-                        TriggerDeath();
-                        break;
+                    if (CheckCollisionRecs({ kz.x, kz.y, kz.w, kz.h }, PlayerHitbox()))
+                    {
+                        TriggerDeath(); break;
                     }
                 }
             }
 
             // ── Conveyor push ─────────────────────────────────────────────────
-            // Direct position drift applied AFTER collision resolution so the
-            // effect is constant and frame-rate-independent.  Velocity is NOT
-            // touched — the belt nudges world position each tick, exactly like
-            // a real conveyor surface.  Collision surfaces are added to platforms[]
-            // in ApplyLevelData so entities actually land on the belt.
             for (int cvi = 0; cvi < (int)liveConveyors.size(); cvi++) {
                 const ConveyorData& cv = liveConveyors[cvi];
                 float rad = cv.rotation * DEG2RAD;
                 float driftX = cv.direction * cv.speed * dt * cosf(rad);
                 float driftY = cv.direction * cv.speed * dt * sinf(rad);
-
-                // Detection zone: a few pixels above the visual top so entities
-                // whose feet are flush with the platform edge are still caught.
                 Rectangle belt = { cv.x, cv.y - 4.f, cv.length, cv.beltH + 8.f };
 
-                // ── Player ──────────────────────────────────────────────────
                 if (!isDying && !onLadder && isGrounded) {
-                    float colW = player.width * 0.5f;
-                    float colH = player.height * 0.5f;
-                    float offX = (player.width - colW) * 0.5f;
-                    float offY = player.height - colH;
+                    float colW = player.width * 0.5f, colH = player.height * 0.5f;
+                    float offX = (player.width - colW) * 0.5f, offY = player.height - colH;
                     Rectangle feet = { player.x + offX, player.y + offY, colW, colH };
-                    if (CheckCollisionRecs(feet, belt)) {
-                        player.x += driftX;
-                        player.y += driftY;
-                    }
+                    if (CheckCollisionRecs(feet, belt)) { player.x += driftX; player.y += driftY; }
                 }
-
-                // ── Enemies ──────────────────────────────────────────────────
                 for (auto& en : enemies) {
                     if (!en.active || !en.grounded) continue;
-                    if (CheckCollisionRecs(en.hitbox, belt)) {
-                        en.hitbox.x += driftX;
-                        en.hitbox.y += driftY;
-                    }
+                    if (CheckCollisionRecs(en.hitbox, belt)) { en.hitbox.x += driftX; en.hitbox.y += driftY; }
                 }
-
-                // ── Barrels ──────────────────────────────────────────────────
-                // Only non-falling (rolling) barrels are affected.
                 for (auto& b : barrels) {
                     if (!b.active || b.isFalling) continue;
-                    Rectangle bFeet = { b.hitbox.x,
-                                        b.hitbox.y + b.hitbox.height - 6.f,
-                                        b.hitbox.width, 6.f };
-                    if (CheckCollisionRecs(bFeet, belt)) {
-                        b.hitbox.x += driftX;
-                        b.hitbox.y += driftY;
-                    }
+                    Rectangle bFeet = { b.hitbox.x, b.hitbox.y + b.hitbox.height - 6.f, b.hitbox.width, 6.f };
+                    if (CheckCollisionRecs(bFeet, belt)) { b.hitbox.x += driftX; b.hitbox.y += driftY; }
                 }
-
-                // ── Relation children parented to this conveyor ──────────────
-                // Items (nukes, beatrices, beams…) placed on the belt in the
-                // editor will drift with the surface at runtime.
                 EntityRef convRef;
                 convRef.type = (int)EditorTool::CONVEYOR;
                 convRef.index = cvi;
@@ -2458,38 +2175,34 @@ int main(void)
                         if (ci >= 0 && ci < (int)nukeSpawnNodes.size())
                         {
                             nukeSpawnNodes[ci].x += driftX; nukeSpawnNodes[ci].y += driftY;
-                        }
-                        break;
+                        } break;
                     case (int)EditorTool::BEATRICE_SPAWN:
                         if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())
                         {
                             beatriceSpawnNodes[ci].x += driftX; beatriceSpawnNodes[ci].y += driftY;
-                        }
-                        break;
+                        } break;
                     case (int)EditorTool::ENEMY_SPAWN:
                         if (ci >= 0 && ci < (int)enemySpawnPositions.size())
                         {
                             enemySpawnPositions[ci].x += driftX; enemySpawnPositions[ci].y += driftY;
-                        }
-                        break;
+                        } break;
                     case (int)EditorTool::BEAM:
                         if (ci >= 0 && ci < (int)beamPositions.size())
                         {
                             beamPositions[ci].x += driftX; beamPositions[ci].y += driftY;
-                        }
-                        break;
+                        } break;
                     default: break;
                     }
                 }
             }
+
+            // ── Win condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
                 LevelData nextLv;
                 if (LoadLevel(nextLv, currentLevelId + 1)) {
                     currentLevelId++;
                     ApplyLevelData(nextLv);
-                    // Do NOT call FullReset() — it reverts currentLevelId to 1
-                    // and reloads level 1 data, corrupting the new level.
                     ClearDeathState();
                     ClearRoundEntities();
                     ResetPlayerPos();
@@ -2519,7 +2232,10 @@ int main(void)
         else if (currentScreen == GAME_OVER)
         {
             splashTimer += dt;
-            if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER)) { splashTimer = 0.0f; FullReset(); currentScreen = MENU; }
+            if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER))
+            {
+                splashTimer = 0.0f; FullReset(); currentScreen = MENU;
+            }
         }
 
         rainScrollY += rainSpeed * dt;
@@ -2572,7 +2288,6 @@ int main(void)
             int editorX = (screenWidth - editorW) / 2, editorY = controlY + menuFont + spacing;
             int subX = (screenWidth - subW) / 2, subY = editorY + menuFont + spacing;
 
-            // Keep button rects in sync with computed positions
             btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)(menuFont + 6) };
             btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)(menuFont + 6) };
             btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)(menuFont + 6) };
@@ -2590,67 +2305,49 @@ int main(void)
             DrawText(editorText, editorX, editorY, menuFont, dkOrange);
             DrawText(subtitle, subX, subY, smallFont, dkOrange);
         }
-        // ── HOW HIGH screen (draw) ────────────────────────────────────────────
-        // ── HOW HIGH screen (update) ──────────────────────────────────────────
         else if (currentScreen == HOW_HIGH)
         {
-            // 1. Background stretched to fill screen
             DrawTexturePro(Subaru_Background,
                 { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
-                { 0, 0, (float)screenWidth, (float)screenHeight },
-                { 0, 0 }, 0.f, WHITE);
+                { 0, 0, (float)screenWidth, (float)screenHeight }, { 0, 0 }, 0.f, WHITE);
 
-            // 2. Current Subaru animation frame, also full-screen
             Texture2D* subTex = subaruFrames[subaruFrame];
             DrawTexturePro(*subTex,
                 { 0, 0, (float)subTex->width, (float)subTex->height },
-                { 0, 0, (float)screenWidth, (float)screenHeight },
-                { 0, 0 }, 0.f, WHITE);
+                { 0, 0, (float)screenWidth, (float)screenHeight }, { 0, 0 }, 0.f, WHITE);
 
-            // 3. Text on top
             const char* howHighTxt = "HOW HIGH CAN YOU GET?";
             int hwW = MeasureText(howHighTxt, 50);
             DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
-
             const char* pressEnter = "PRESS ENTER TO PLAY";
             int peW = MeasureText(pressEnter, 28);
             DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
         }
         else if (currentScreen == CONTROLS)
         {
-
-            DrawText("- Move with", 10, 250, 30, WHITE);
-            DrawText("W, A, S, D", 195, 250, 30, ORANGE);
-            DrawText("E", 285, 300, 30, ORANGE);
-            DrawText("- Grab Items with", 10, 300, 30, WHITE);
-            DrawText("- Use items with", 10, 350, 30, WHITE);
-            DrawText("F", 260, 350, 30, ORANGE);
-            DrawText("- Climb stairs with ", 10, 400, 30, WHITE);
-            DrawText("W", 295, 400, 30, ORANGE);
+            DrawText("- Move with", 10, 250, 30, WHITE);  DrawText("W, A, S, D", 195, 250, 30, ORANGE);
+            DrawText("- Grab Items with", 10, 300, 30, WHITE);  DrawText("E", 285, 300, 30, ORANGE);
+            DrawText("- Use items with", 10, 350, 30, WHITE);  DrawText("F", 260, 350, 30, ORANGE);
+            DrawText("- Climb stairs with", 10, 400, 30, WHITE);  DrawText("W", 295, 400, 30, ORANGE);
             DrawText("while you are close to them", 330, 400, 30, WHITE);
-
             DrawText("Return", 750, 900, 30, WHITE);
         }
-
-        // ── LEVEL EDITOR draw ─────────────────────────────────────────────────
         else if (currentScreen == LEVEL_EDITOR)
         {
             editor.Draw();
         }
-
         else if (currentScreen == GAMEPLAY)
         {
             Camera2D cam = { 0 };
             cam.zoom = 1.0f;
             cam.offset = { nukeShakeOffset.x + deathShakeOffset.x, nukeShakeOffset.y + deathShakeOffset.y };
 
-            // ── Lighting: capture scene ───────────────────────────────────────
             gameLighting.BeginScene(cam);
 
             // 1. Background
             DrawTexturePro(background, { 0,0,438,475 }, { 0,0,875,950 }, {}, 0.f, WHITE);
 
-            // 1.5 Rain2
+            // 2. Rain (back layer)
             {
                 float scaleX = (float)screenWidth / Rain2.width;
                 float scaleY = (float)screenHeight / Rain2.height;
@@ -2659,85 +2356,54 @@ int main(void)
                 DrawTexturePro(Rain2, { 0, 0, (float)Rain2.width, (float)Rain2.height }, { 0, -sH + rain2ScrollY, sW, sH }, {}, 0.f, rain2Tint);
             }
 
-            // 2. Ladders (static — pre-baked, excludes elevator children)
+            // 3. Ladders (baked)
             DrawTextureRec(ladderLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
 
-            // 2.1 Elevator-child ladders — drawn live every frame because their
-            //     position is updated by the elevator each tick (not static).
+            // 3.1 Elevator-child ladders (live)
             {
-                const float lScale = 4.f;
-                const float tileW = 16.f * lScale;
-                const float tileH = 16.f * lScale;
-                for (int ri = 0; ri < (int)liveRelations.size(); ri++)
-                {
+                const float lScale = 4.f, tileW = 16.f * lScale, tileH = 16.f * lScale;
+                for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
                     const auto& rel = liveRelations[ri];
-                    if (rel.parent.type != 11 || rel.child.type != 5) continue; // only ladder children of elevators
+                    if (rel.parent.type != 11 || rel.child.type != 5) continue;
                     int li = rel.child.index;
                     if (li < 0 || li >= (int)ladders.size()) continue;
                     const Ladder& lad = ladders[li];
                     float drawX = lad.x + lad.width * 0.5f - tileW * 0.5f;
-                    for (float y = lad.y; y < lad.y + lad.height; y += tileH)
-                    {
+                    for (float y = lad.y; y < lad.y + lad.height; y += tileH) {
                         float dh = fminf(tileH, lad.y + lad.height - y);
-                        float srh = dh / lScale;
-                        DrawTexturePro(LadderPart,
-                            { 0, 0, 16.f, srh },
-                            { drawX, y, tileW, dh },
-                            { 0, 0 }, 0.f, WHITE);
+                        DrawTexturePro(LadderPart, { 0, 0, 16.f, dh / lScale },
+                            { drawX, y, tileW, dh }, { 0, 0 }, 0.f, WHITE);
                     }
                 }
             }
 
-            // 2.5 Elevators — rope shaft tiled + panned toward direction
+            // 3.2 Elevator rope shafts
             {
                 const float sc = 4.f;
-                for (const auto& el : liveElevators)
-                {
-                    if (RopeTex.id == 0)
-                    {
-                        // Fallback: plain tinted rect so the shaft is still visible
-                        DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h,
-                            { 80, 60, 40, 80 });
-                        continue;
-                    }
-
-                    float tw = RopeTex.width * sc;
-                    float th = RopeTex.height * sc;
+                for (const auto& el : liveElevators) {
+                    if (RopeTex.id == 0) { DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, { 80,60,40,80 }); continue; }
+                    float tw = RopeTex.width * sc, th = RopeTex.height * sc;
                     float drawX = el.x + el.w * 0.5f - tw * 0.5f;
-
-                    // Pan: direction=1 (UP) scrolls rope upward, -1 (DOWN) downward.
-                    // Speed is in world-px/s; th is one tile in world-px at scale sc.
-                    float rawPan = (float)GetTime() * el.speed
-                        * (el.direction == 1 ? 1.f : -1.f);
-                    float panOff = fmodf(rawPan, th);
-                    if (panOff < 0.f) panOff += th;
-
-                    // One extra tile above the top hides the seam as it scrolls in.
+                    float rawPan = (float)GetTime() * el.speed * (el.direction == 1 ? 1.f : -1.f);
+                    float panOff = fmodf(rawPan, th); if (panOff < 0.f) panOff += th;
                     float startY = el.y - th + panOff;
-
-                    for (float y = startY; y < el.y + el.h; y += th)
-                    {
-                        float dy = fmaxf(y, el.y);
-                        float dyEnd = fminf(y + th, el.y + el.h);
+                    for (float y = startY; y < el.y + el.h; y += th) {
+                        float dy = fmaxf(y, el.y), dyEnd = fminf(y + th, el.y + el.h);
                         if (dy >= dyEnd) continue;
-                        float srcYOff = (dy - y) / sc;
-                        float srcH = (dyEnd - dy) / sc;
-                        DrawTexturePro(RopeTex,
-                            { 0, srcYOff, (float)RopeTex.width, srcH },
-                            { drawX, dy, tw, dyEnd - dy },
-                            {}, 0.f, WHITE);
+                        float srcYOff = (dy - y) / sc, srcH = (dyEnd - dy) / sc;
+                        DrawTexturePro(RopeTex, { 0, srcYOff, (float)RopeTex.width, srcH },
+                            { drawX, dy, tw, dyEnd - dy }, {}, 0.f, WHITE);
                     }
                 }
             }
 
-            // 3. Beams (static — pre-baked, excludes elevator children)
+            // 4. Beams (baked)
             DrawTextureRec(staticLayer.texture, { 0, 0, (float)screenWidth, -(float)screenHeight }, { 0, 0 }, WHITE);
 
-            // 3.05b Elevator-child beams — drawn live, behind kill zones
+            // 4.1 Elevator-child beams (live)
             {
                 const float bScale = 4.f;
-                for (int ri = 0; ri < (int)liveRelations.size(); ri++)
-                {
+                for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
                     const auto& rel = liveRelations[ri];
                     if (rel.parent.type != 11 || rel.child.type != 6) continue;
                     int bi = rel.child.index;
@@ -2748,12 +2414,11 @@ int main(void)
                     float ecSrcX = b.flipX ? (float)bTex->width : 0.f;
                     float ecSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
                     DrawTexturePro(*bTex, { ecSrcX, 0, ecSrcW, (float)bTex->height },
-                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
-                        { 0, 0 }, 0.f, WHITE);
+                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale }, { 0,0 }, 0.f, WHITE);
                 }
             }
 
-            // 3.0 Kill zones
+            // 5. Kill zones
             for (const auto& kz : liveKillZones) {
                 if (kz.texId == KillZoneTexture::DK_GOLDEN_PISTON && GoldenPistonTex.id > 0) {
                     float tw = (float)GoldenPistonTex.width, th = (float)GoldenPistonTex.height;
@@ -2768,18 +2433,17 @@ int main(void)
                         }
                 }
                 else {
-                    DrawRectangle((int)kz.x, (int)kz.y, (int)kz.w, (int)kz.h, { 255, 30, 30, 60 });
-                    DrawRectangleLinesEx({ kz.x, kz.y, kz.w, kz.h }, 2.f, { 255, 60, 60, 200 });
+                    DrawRectangle((int)kz.x, (int)kz.y, (int)kz.w, (int)kz.h, { 255,30,30,60 });
+                    DrawRectangleLinesEx({ kz.x,kz.y,kz.w,kz.h }, 2.f, { 255,60,60,200 });
                 }
             }
 
-            // 3.01 High-layer beams (renderLayer > 0) — drawn live, on top of kill zones
+            // 5.1 High-layer beams (above kill zones)
             {
                 const float bScale = 4.f;
                 for (int bi = 0; bi < (int)beamPositions.size(); bi++) {
                     const auto& b = beamPositions[bi];
                     if (b.renderLayer <= 0) continue;
-                    // Skip elevator children (they're drawn separately below)
                     bool isElevChild = false;
                     for (const auto& rel : liveRelations)
                         if (rel.parent.type == 11 && rel.child.type == 6 && rel.child.index == bi)
@@ -2792,81 +2456,57 @@ int main(void)
                     float hlSrcX = b.flipX ? (float)bTex->width : 0.f;
                     float hlSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
                     DrawTexturePro(*bTex, { hlSrcX, 0, hlSrcW, (float)bTex->height },
-                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale },
-                        { 0, 0 }, 0.f, WHITE);
+                        { b.x, b.y, (float)bTex->width * bScale, (float)bTex->height * bScale }, { 0,0 }, 0.f, WHITE);
                 }
             }
 
-            // 3.05 Conveyors
+            // 5.2 Conveyors
             {
                 int rawFrame = (int)(GetTime() * 9.0) % 3;
                 for (const auto& cv : liveConveyors) {
                     int frameL = (cv.direction == 1) ? rawFrame : (2 - rawFrame);
-                    int frameR = 2 - frameL;   // inverted for right end-cap
-                    Texture2D& sideL = ConvSide[frameL];
-                    Texture2D& sideR = ConvSide[frameR];
-                    Texture2D& mid = ConvM[frameL];
-                    float rad = cv.rotation * DEG2RAD;
-                    float ca = cosf(rad), sa = sinf(rad);
-                    float ecW = cv.endCapW, bH = cv.beltH;
-                    float midW = fmaxf(0.f, cv.length - 2.f * ecW);
-                    // Draw section at local-x offset; flipH mirrors the source rect
+                    int frameR = 2 - frameL;
+                    Texture2D& sideL = ConvSide[frameL], & sideR = ConvSide[frameR], & mid = ConvM[frameL];
+                    float rad = cv.rotation * DEG2RAD, ca = cosf(rad), sa = sinf(rad);
+                    float ecW = cv.endCapW, bH = cv.beltH, midW = fmaxf(0.f, cv.length - 2.f * ecW);
                     auto DrawSec = [&](Texture2D& tex, float lx, float w, bool flipH) {
                         if (tex.id == 0) return;
-                        float srcX = flipH ? (float)tex.width : 0.f;
-                        float srcW = flipH ? -(float)tex.width : (float)tex.width;
-                        float wx = cv.x + lx * ca, wy = cv.y + lx * sa;
-                        DrawTexturePro(tex, { srcX, 0, srcW, (float)tex.height },
-                            { wx, wy, w, bH }, {}, cv.rotation, WHITE);
+                        float srcX = flipH ? (float)tex.width : 0.f, srcW = flipH ? -(float)tex.width : (float)tex.width;
+                        DrawTexturePro(tex, { srcX,0,srcW,(float)tex.height },
+                            { cv.x + lx * ca, cv.y + lx * sa, w, bH }, {}, cv.rotation, WHITE);
                         };
-                    DrawSec(sideL, 0.f, ecW, false);         // left cap — forward frame
+                    DrawSec(sideL, 0.f, ecW, false);
                     if (mid.id > 0 && midW > 0.f) {
-                        // Each middle tile is displayed at ecW world-pixels wide
-                        // (same as a side cap) so all three sections have identical
-                        // visual scale.  Partial last tiles are source-cropped so
-                        // the texture is never stretched — only tiled.
                         float tileDisp = ecW;
                         for (float lx = ecW; lx < ecW + midW; lx += tileDisp) {
                             float drawW = fminf(tileDisp, ecW + midW - lx);
                             float srcCropW = (float)mid.width * (drawW / tileDisp);
                             DrawTexturePro(mid, { 0, 0, srcCropW, (float)mid.height },
-                                { cv.x + lx * ca, cv.y + lx * sa, drawW, bH },
-                                {}, cv.rotation, WHITE);
+                                { cv.x + lx * ca, cv.y + lx * sa, drawW, bH }, {}, cv.rotation, WHITE);
                         }
                     }
-                    DrawSec(sideR, cv.length - ecW, ecW, true); // right cap — reversed frame
+                    DrawSec(sideR, cv.length - ecW, ecW, true);
                 }
             }
 
-            // 3.07 Props — renderLayer 0, affected by lighting
+            // 5.3 Props (layer 0, lit)
             for (const auto& pr : currentLevelData.props) {
                 if (pr.renderLayer != 0 || pr.lightAffect <= 0.f) continue;
-                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0)
-                    ? &propTextures[0] : nullptr;
-                if (!tex) {
-                    DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
-                        {}, pr.rotation, { 180, 100, 220, 140 });
-                }
-                else {
-                    DrawTexturePro(*tex,
-                        { 0, 0, (float)tex->width, (float)tex->height },
-                        { pr.x, pr.y, pr.width, pr.height },
-                        { pr.width * 0.5f, pr.height * 0.5f },
-                        pr.rotation, WHITE);
-                }
+                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0) ? &propTextures[0] : nullptr;
+                if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
+                else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
+                    { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
             }
 
-            // 4. House
+            // 6. House
             {
                 Texture2D& houseTex = houseIsSnowed ? House2 : House1;
                 DrawTexturePro(houseTex, { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H }, { houseX, houseY, houseW, houseH }, {}, 0.f, WHITE);
-                if (houseIsSnowed)
-                {
+                if (houseIsSnowed) {
                     float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE, sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
                     DrawTexturePro(SnowFloor, { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H }, { houseX, 865.0f, sfW, sfH }, {}, 0.f, WHITE);
                 }
-                if (houseAnimPlaying && houseAnimFrame < CAVE_FRAME_COUNT)
-                {
+                if (houseAnimPlaying && houseAnimFrame < CAVE_FRAME_COUNT) {
                     Texture2D* caveTex = caveFrames[houseAnimFrame];
                     float caveW = CAVE_NATIVE_W * CAVE_DRAW_SCALE, caveH = CAVE_NATIVE_H * CAVE_DRAW_SCALE;
                     float caveX = houseX + houseW - caveW * 0.65f;
@@ -2876,63 +2516,44 @@ int main(void)
                 }
             }
 
-            // 4.5 Nuke items
+            // 7. Nuke items
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                for (const auto& nk : nukes)
-                {
+                for (const auto& nk : nukes) {
                     if (!nk.active) continue;
                     float bobY = nk.pos.y + sinf((float)GetTime() * 3.0f) * 4.0f;
-                    DrawTexturePro(Nuke, { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H }, { nk.pos.x, bobY, nkW, nkH }, {}, 0.f, WHITE);
+                    DrawTexturePro(Nuke, { 0,0,NUKE_NATIVE_W,NUKE_NATIVE_H }, { nk.pos.x, bobY, nkW, nkH }, {}, 0.f, WHITE);
                 }
             }
-
-            // 4.55 Flying nukes (in-air)
-            for (const auto& fn : flyingNukes)
-            {
+            for (const auto& fn : flyingNukes) {
                 if (!fn.active) continue;
-                DrawTexturePro(Nuke,
-                    { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H },
-                    { fn.rect.x, fn.rect.y, fn.rect.width, fn.rect.height },
-                    {}, 0.f, WHITE);
+                DrawTexturePro(Nuke, { 0,0,NUKE_NATIVE_W,NUKE_NATIVE_H },
+                    { fn.rect.x, fn.rect.y, fn.rect.width, fn.rect.height }, {}, 0.f, WHITE);
             }
 
-            // 4.6 Beatrice items
+            // 8. Beatrice items
             {
                 float      bcScale = 2.0f;
                 Texture2D* bcTex = (beatriceItemAnimFrame == 0) ? &Beatrice_Idle1 : &Beatrice_Idle2;
-                float bcW = bcTex->width * bcScale;
-                float bcH = bcTex->height * bcScale;
-                for (const auto& bc : beatrices)
-                {
+                float bcW = bcTex->width * bcScale, bcH = bcTex->height * bcScale;
+                for (const auto& bc : beatrices) {
                     if (!bc.active) continue;
                     float bobY = bc.pos.y - bcH + sinf((float)GetTime() * 2.5f) * 4.0f;
-                    DrawTexturePro(*bcTex,
-                        { 0, 0, (float)bcTex->width, (float)bcTex->height },
-                        { bc.pos.x, bobY, bcW, bcH },
-                        {}, 0.f, WHITE);
+                    DrawTexturePro(*bcTex, { 0,0,(float)bcTex->width,(float)bcTex->height },
+                        { bc.pos.x, bobY, bcW, bcH }, {}, 0.f, WHITE);
                 }
             }
 
-            // 4.7 Regulus
+            // 9. Regulus
             {
                 Texture2D* regTex = nullptr;
-                if (regulusIsStunned)
-                {
-                    if (regulusStunEnding)
-                    {
-                        int idx = regulusStunEndFrame < 5 ? regulusStunEndFrame : 4;
-                        regTex = regulusStunEndFrames[idx];
-                    }
-                    else
-                    {
-                        int idx = regulusStunFrame < 3 ? regulusStunFrame : 0;
-                        regTex = regulusStunFrames[idx];
-                    }
+                if (regulusIsStunned) {
+                    regTex = regulusStunEnding
+                        ? regulusStunEndFrames[regulusStunEndFrame < 5 ? regulusStunEndFrame : 4]
+                        : regulusStunFrames[regulusStunFrame < 3 ? regulusStunFrame : 0];
                 }
-                else
-                {
-                    int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                else {
+                    int throwIdx = Clamp(regulusThrowFrame, 0, 2);
                     regTex = regulusThrowing ? regulusThrowFrames[throwIdx] : regulusIdleFrames[regulusIdleFrame];
                 }
 
@@ -2943,7 +2564,7 @@ int main(void)
 
                 if (!regulusIsStunned && regulusThrowing)
                 {
-                    int throwIdx = regulusThrowFrame < 0 ? 0 : (regulusThrowFrame > 2 ? 2 : regulusThrowFrame);
+                    int throwIdx = Clamp(regulusThrowFrame, 0, 2);
                     const float handOffX[3] = { 11.0f, 29.0f, 47.0f };
                     const float handOffY[3] = { 40.0f, 19.0f, 40.0f };
                     Texture2D* barrelHandTex = regulusForceBlue ? &BlueBarrelMov1 : &BarrelMov1;
@@ -2954,32 +2575,27 @@ int main(void)
                     float handScrY = regY + handOffY[throwIdx] * REGULUS_SCALE - barrelHandH * 0.5f;
 
                     if (throwIdx == 0 || throwIdx == 2)
-                        DrawTexturePro(*barrelHandTex,
-                            { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                        DrawTexturePro(*barrelHandTex, { 0,0,(float)barrelHandTex->width,(float)barrelHandTex->height },
                             { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
-                    DrawTexturePro(*regTex,
-                        { 0, 0, (float)regTex->width, (float)regTex->height },
+                    DrawTexturePro(*regTex, { 0,0,(float)regTex->width,(float)regTex->height },
                         { regX, regY, regW, regH }, {}, 0.f, WHITE);
                     if (throwIdx == 1)
-                        DrawTexturePro(*barrelHandTex,
-                            { 0, 0, (float)barrelHandTex->width, (float)barrelHandTex->height },
+                        DrawTexturePro(*barrelHandTex, { 0,0,(float)barrelHandTex->width,(float)barrelHandTex->height },
                             { handScrX, handScrY, barrelHandW, barrelHandH }, {}, 0.f, WHITE);
                 }
                 else
                 {
-                    DrawTexturePro(*regTex,
-                        { 0, 0, (float)regTex->width, (float)regTex->height },
+                    DrawTexturePro(*regTex, { 0,0,(float)regTex->width,(float)regTex->height },
                         { regX, regY, regW, regH }, {}, 0.f, WHITE);
                 }
             }
 
-            // 5. Player
+            // 10. Player
             {
                 bool showPlayer = isDying || !invincible || ((int)(invincibleTimer * 10) % 2 == 0);
                 if (showPlayer)
                 {
                     float scale = 3.8f * 0.85f * 1.05f;
-                    // Feet-aligned: shift Beatrice sprites up so feet stay at same Y
                     float baseH = imgMarioIdle.height * scale;
                     float thisH = image->height * scale;
                     float drawY = player.y + 10.0f + (baseH - thisH);
@@ -3004,7 +2620,7 @@ int main(void)
                 }
             }
 
-            // 6. Barrels
+            // 11. Barrels
             for (const auto& b : barrels)
             {
                 if (!b.active) continue;
@@ -3012,58 +2628,44 @@ int main(void)
                 Texture2D** fallSet = b.isBlue ? blueBarrelFall : barrelFall;
                 Texture2D* tex = nullptr;
                 if (b.isFalling) tex = fallSet[b.animFrame % 2];
-                else
-                {
+                else {
                     int frame = b.movingLeft ? (3 - b.animFrame % 4) : (b.animFrame % 4);
                     tex = rollSet[frame];
                 }
-                float drawW = b.hitbox.width * 2.0f;
-                float drawH = b.hitbox.height * 2.0f;
+                float drawW = b.hitbox.width * 2.0f, drawH = b.hitbox.height * 2.0f;
                 float drawX = b.hitbox.x - (drawW - b.hitbox.width) * 0.5f;
                 float drawY = b.hitbox.y - (drawH - b.hitbox.height) * 0.5f - 2.625f;
-                DrawTexturePro(*tex, { 0, 0, (float)tex->width, (float)tex->height }, { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
+                DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
+                    { drawX, drawY, drawW, drawH }, {}, 0.f, WHITE);
             }
 
-            // 6.1 Enemies
+            // 12. Enemies
             for (const auto& en : enemies)
                 DrawEnemy(en, rabbitWalkBlack, rabbitJumpBlack, rabbitWalkWhite, rabbitJumpWhite);
 
-
-            // 6.2 Props — renderLayer 1, affected by lighting
+            // 13. Props (layer 1, lit)
             for (const auto& pr : currentLevelData.props) {
                 if (pr.renderLayer != 1 || pr.lightAffect <= 0.f) continue;
-                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0)
-                    ? &propTextures[0] : nullptr;
-                if (!tex) {
-                    DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
-                        {}, pr.rotation, { 180, 100, 220, 140 });
-                }
-                else {
-                    DrawTexturePro(*tex,
-                        { 0, 0, (float)tex->width, (float)tex->height },
-                        { pr.x, pr.y, pr.width, pr.height },
-                        { pr.width * 0.5f, pr.height * 0.5f },
-                        pr.rotation, WHITE);
-                }
+                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0) ? &propTextures[0] : nullptr;
+                if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
+                else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
+                    { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
             }
 
-            // 6.5 Beatrice bullets
+            // 14. Beatrice bullets
             {
                 float bbScale = 2.0f;
-                float bbW = texBeaBullet.width * bbScale;
-                float bbH = texBeaBullet.height * bbScale;
-                for (const auto& bb : beaBullets)
-                {
+                float bbW = texBeaBullet.width * bbScale, bbH = texBeaBullet.height * bbScale;
+                for (const auto& bb : beaBullets) {
                     if (!bb.active) continue;
                     float angle = atan2f(bb.vel.y, bb.vel.x) * RAD2DEG;
-                    DrawTexturePro(texBeaBullet,
-                        { 0, 0, (float)texBeaBullet.width, (float)texBeaBullet.height },
-                        { bb.pos.x - bbW * 0.5f, bb.pos.y - bbH * 0.5f, bbW, bbH },
-                        { bbW * 0.5f, bbH * 0.5f }, angle, WHITE);
+                    DrawTexturePro(texBeaBullet, { 0,0,(float)texBeaBullet.width,(float)texBeaBullet.height },
+                        { bb.pos.x - bbW * .5f, bb.pos.y - bbH * .5f, bbW, bbH },
+                        { bbW * .5f, bbH * .5f }, angle, WHITE);
                 }
             }
 
-            // 7. HUD
+            // 15. HUD
             for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
             {
                 const char* scoreTxt = TextFormat("SCORE: %u", score);
@@ -3077,185 +2679,130 @@ int main(void)
                 DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
             }
             if (playerHasBeatrice)
-                DrawText(TextFormat("BEATRICE: %.1fs", beatriceAbilityTimer),
-                    10, screenHeight - 105, 18, MAGENTA);
+                DrawText(TextFormat("BEATRICE: %.1fs", beatriceAbilityTimer), 10, screenHeight - 105, 18, MAGENTA);
             if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
 
-            // 8. Nuke explosion
-            if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT)
-            {
+            // 16. Nuke explosion
+            if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT) {
                 Texture2D* exTex = explosionFrames[nukeExplosionFrame];
                 float exScale = 4.0f;
                 float exW = exTex->width * exScale, exH = exTex->height * exScale;
-                DrawTexturePro(*exTex, { 0, 0, (float)exTex->width, (float)exTex->height },
-                    { nukeExplosionPos.x - exW * 0.5f, nukeExplosionPos.y - exH * 0.5f, exW, exH }, {}, 0.f, WHITE);
+                DrawTexturePro(*exTex, { 0,0,(float)exTex->width,(float)exTex->height },
+                    { nukeExplosionPos.x - exW * .5f, nukeExplosionPos.y - exH * .5f, exW, exH }, {}, 0.f, WHITE);
             }
 
-            // ── Lighting: end scene, bake occluders, composite ─────────────
+            // ── Lighting composite ────────────────────────────────────────────
             gameLighting.EndScene();
             gameLighting.BakeOccludersFromLevel(currentLevelData, cam);
             gameLighting.Composite(currentLevelData, cam);
 
-            // 8.5 Props — unlit (lightAffect 0) or overlay (renderLayer 2)
+            // 17. Props (unlit / overlay)
             for (const auto& pr : currentLevelData.props) {
                 bool isUnlit = (pr.lightAffect <= 0.f);
                 bool isOverlay = (pr.renderLayer == 2);
                 if (!isUnlit && !isOverlay) continue;
-                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0)
-                    ? &propTextures[0] : nullptr;
-                if (!tex) {
-                    DrawRectanglePro({ pr.x - pr.width * 0.5f, pr.y - pr.height * 0.5f, pr.width, pr.height },
-                        {}, pr.rotation, { 180, 100, 220, 140 });
-                }
-                else {
-                    DrawTexturePro(*tex,
-                        { 0, 0, (float)tex->width, (float)tex->height },
-                        { pr.x, pr.y, pr.width, pr.height },
-                        { pr.width * 0.5f, pr.height * 0.5f },
-                        pr.rotation, WHITE);
-                }
+                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0) ? &propTextures[0] : nullptr;
+                if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
+                else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
+                    { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
             }
-            // 8.6 Glow pass — additive for props with lightAffect > 1
+
+            // 17.1 Glow pass (additive)
             {
                 bool anyGlow = false;
-                for (const auto& pr : currentLevelData.props)
-                    if (pr.lightAffect > 1.f) { anyGlow = true; break; }
+                for (const auto& pr : currentLevelData.props) if (pr.lightAffect > 1.f) { anyGlow = true; break; }
                 if (anyGlow) {
                     BeginBlendMode(BLEND_ADDITIVE);
                     for (const auto& pr : currentLevelData.props) {
-                        if (pr.lightAffect <= 1.f) continue;
-                        if (propTextures[0].id == 0) continue;
+                        if (pr.lightAffect <= 1.f || propTextures[0].id == 0) continue;
                         unsigned char glowA = (unsigned char)Clamp((pr.lightAffect - 1.f) / 2.f * 255.f, 0.f, 255.f);
-                        DrawTexturePro(propTextures[0],
-                            { 0, 0, (float)propTextures[0].width, (float)propTextures[0].height },
-                            { pr.x, pr.y, pr.width, pr.height },
-                            { pr.width * 0.5f, pr.height * 0.5f },
-                            pr.rotation, { 255, 255, 255, glowA });
+                        DrawTexturePro(propTextures[0], { 0,0,(float)propTextures[0].width,(float)propTextures[0].height },
+                            { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, { 255,255,255,glowA });
                     }
                     EndBlendMode();
                 }
             }
 
-            // 9. Rain overlay (drawn after lighting so it's unaffected)
+            // 18. Rain overlay
             {
                 float scaleX = (float)screenWidth / Rain.width;
                 float scaleY = (float)screenHeight / Rain.height;
                 float sW = Rain.width * scaleX, sH = Rain.height * scaleY;
-                DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height }, { 0, 0, sW, sH }, {}, 0.f, rainTint);
+                DrawTexturePro(Rain, { 0, rainScrollY, (float)Rain.width, (float)Rain.height }, { 0,0,sW,sH }, {}, 0.f, rainTint);
                 DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height }, { 0, -sH + rainScrollY, sW, sH }, {}, 0.f, rainTint);
             }
 
-            // 9.5 "Press E" prompt — drawn after rain so it's above everything
+            // 19. "Press E" prompt
             if (!isDying)
             {
                 const float ebScale = 1.75f;
                 const float ebW = EButton.width * ebScale;
                 const float ebH = EButton.height * ebScale;
-                bool        shown = false;
+                bool shown = false;
 
-                // ── Nuke item ─────────────────────────────────────────────
-                if (!playerHasNuke)
-                {
-                    const float nkW = NUKE_NATIVE_W * NUKE_SCALE;
-                    const float nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                    for (const auto& nk : nukes)
-                    {
+                if (!playerHasNuke) {
+                    const float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                    for (const auto& nk : nukes) {
                         if (!nk.active) continue;
-                        Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
-                        if (CheckCollisionRecs(player, nkRect))
-                        {
-                            // centre horizontally over item, sit just above it
-                            float cx = nk.pos.x + nkW * 0.5f - ebW * 0.5f;
-                            float cy = nk.pos.y - ebH + 5.0f;
-                            DrawTexturePro(EButton,
-                                { 0, 0, (float)EButton.width, (float)EButton.height },
-                                { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
-                            shown = true;
-                            break;
+                        if (CheckCollisionRecs(player, { nk.pos.x, nk.pos.y, nkW, nkH })) {
+                            DrawTexturePro(EButton, { 0,0,(float)EButton.width,(float)EButton.height },
+                                { nk.pos.x + nkW * .5f - ebW * .5f, nk.pos.y - ebH + 5.0f, ebW, ebH }, {}, 0.f, WHITE);
+                            shown = true; break;
                         }
                     }
                 }
-
-                // ── Beatrice item ─────────────────────────────────────────
-                if (!shown && !playerHasBeatrice)
-                {
+                if (!shown && !playerHasBeatrice) {
                     const float bcScale2 = 2.0f;
-                    const float bcW = Beatrice_Idle1.width * bcScale2;
-                    const float bcH = Beatrice_Idle1.height * bcScale2;
-                    for (const auto& bc : beatrices)
-                    {
+                    const float bcW = Beatrice_Idle1.width * bcScale2, bcH = Beatrice_Idle1.height * bcScale2;
+                    for (const auto& bc : beatrices) {
                         if (!bc.active) continue;
-                        // beatrice rect is drawn feet-up, so top = pos.y - bcH
-                        Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
-                        if (CheckCollisionRecs(player, bcRect))
-                        {
-                            float cx = bc.pos.x + bcW * 0.5f - ebW * 0.5f;
-                            float cy = bc.pos.y - bcH - ebH - 1.0f;
-                            DrawTexturePro(EButton,
-                                { 0, 0, (float)EButton.width, (float)EButton.height },
-                                { cx, cy, ebW, ebH }, {}, 0.f, WHITE);
+                        if (CheckCollisionRecs(player, { bc.pos.x, bc.pos.y - bcH, bcW, bcH })) {
+                            DrawTexturePro(EButton, { 0,0,(float)EButton.width,(float)EButton.height },
+                                { bc.pos.x + bcW * .5f - ebW * .5f, bc.pos.y - bcH - ebH - 1.0f, ebW, ebH }, {}, 0.f, WHITE);
                             break;
                         }
                     }
                 }
             }
 
-            // 9.6 Beatrice ability bar (above rain, bottom-left)
+            // 20. Beatrice ability bar
             if (playerHasBeatrice)
             {
-                const float barMaxW = 180.0f;
-                const float barH = 14.0f;
-                const float barX = 20.0f;
+                const float barMaxW = 180.0f, barH = 14.0f, barX = 20.0f;
                 const float barY = (float)screenHeight - 58.0f;
-                float       frac = Clamp(beatriceAbilityTimer / BEATRICE_DURATION, 0.0f, 1.0f);
-
-                // outer border
-                DrawRectangle((int)barX - 2, (int)barY - 2,
-                    (int)barMaxW + 4, (int)barH + 4, BLACK);
-                // dark background track
-                DrawRectangle((int)barX, (int)barY,
-                    (int)barMaxW, (int)barH, { 60, 0, 60, 220 });
-                // fill — colour shifts red when low
-                Color fillCol = (frac > 0.3f) ? MAGENTA : RED;
-                DrawRectangle((int)barX, (int)barY,
-                    (int)(barMaxW * frac), (int)barH, fillCol);
-                // label above bar
+                float frac = Clamp(beatriceAbilityTimer / BEATRICE_DURATION, 0.0f, 1.0f);
+                DrawRectangle((int)barX - 2, (int)barY - 2, (int)barMaxW + 4, (int)barH + 4, BLACK);
+                DrawRectangle((int)barX, (int)barY, (int)barMaxW, (int)barH, { 60,0,60,220 });
+                DrawRectangle((int)barX, (int)barY, (int)(barMaxW * frac), (int)barH, (frac > 0.3f) ? MAGENTA : RED);
                 DrawText("BEATRICE", (int)barX, (int)barY - 18, 14, MAGENTA);
             }
 
-            // 10. Nuke flash
+            // 21. Nuke flash
             {
                 float flashTotal = NUKE_FLASH_IN + NUKE_FLASH_OUT;
-                if (nukeFlashTimer < flashTotal)
-                {
+                if (nukeFlashTimer < flashTotal) {
                     unsigned char alpha = 0;
                     if (nukeFlashTimer < NUKE_FLASH_IN)
                         alpha = (unsigned char)(255.0f * (nukeFlashTimer / NUKE_FLASH_IN));
                     else
                         alpha = (unsigned char)(255.0f * (1.0f - (nukeFlashTimer - NUKE_FLASH_IN) / NUKE_FLASH_OUT));
-                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255,255,255,alpha });
                 }
             }
 
-            // 11. Death overlay
+            // 22. Death overlay
             if (isDying || deathReachedBlack)
             {
-                if (deathReachedBlack)
-                {
-                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, 255 });
+                if (deathReachedBlack) {
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0,0,0,255 });
                 }
-                else if (deathTimer < DEATH_FLASH_DURATION)
-                {
+                else if (deathTimer < DEATH_FLASH_DURATION) {
                     float t = deathTimer / DEATH_FLASH_DURATION;
-                    unsigned char alpha = (unsigned char)(120.0f * t);
-                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255, 255, 255, alpha });
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 255,255,255,(unsigned char)(120.0f * t) });
                 }
-                else
-                {
-                    float t = (deathTimer - DEATH_FLASH_DURATION) / DEATH_FADE_DURATION;
-                    if (t > 1.0f) t = 1.0f;
-                    unsigned char alpha = (unsigned char)(t * 255.0f);
-                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, alpha });
+                else {
+                    float t = Clamp((deathTimer - DEATH_FLASH_DURATION) / DEATH_FADE_DURATION, 0.f, 1.f);
+                    DrawRectangle(0, 0, screenWidth, screenHeight, { 0,0,0,(unsigned char)(t * 255.0f) });
                 }
             }
         }
@@ -3263,34 +2810,18 @@ int main(void)
         {
             if (lives > 0)
             {
-                splashTimer += dt;
-
-                // Advance Subaru animation at 5 fps
                 subaruTimer += dt;
                 if (subaruTimer >= 1.0f / SUBARU_ANIM_FPS)
                 {
-                    subaruTimer -= 1.0f / SUBARU_ANIM_FPS;
-                    subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
+                    subaruTimer -= 1.0f / SUBARU_ANIM_FPS; subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
                 }
 
-                if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
-                {
-                    splashTimer = 0.0f;
-                    currentScreen = GAMEPLAY;
-                }
-                // 1. Background stretched to fill screen
                 DrawTexturePro(Subaru_Background,
-                    { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
-                    { 0, 0, (float)screenWidth, (float)screenHeight },
-                    { 0, 0 }, 0.f, WHITE);
-
-                // 2. Current Subaru animation frame, also full-screen
+                    { 0,0,(float)Subaru_Background.width,(float)Subaru_Background.height },
+                    { 0,0,(float)screenWidth,(float)screenHeight }, { 0,0 }, 0.f, WHITE);
                 Texture2D* subTex = subaruFrames[subaruFrame];
-                DrawTexturePro(*subTex,
-                    { 0, 0, (float)subTex->width, (float)subTex->height },
-                    { 0, 0, (float)screenWidth, (float)screenHeight },
-                    { 0, 0 }, 0.f, WHITE);
-
+                DrawTexturePro(*subTex, { 0,0,(float)subTex->width,(float)subTex->height },
+                    { 0,0,(float)screenWidth,(float)screenHeight }, { 0,0 }, 0.f, WHITE);
                 DrawText("HOW HIGH CAN YOU GET?", 225, 900, 30, WHITE);
                 DrawText("25", 200, 800, 30, WHITE);
                 DrawText("50", 200, 700, 30, WHITE);
@@ -3316,8 +2847,7 @@ int main(void)
 
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
-    UnloadTexture(imgMarioFalling);
-    UnloadTexture(RopeTex);
+    UnloadTexture(imgMarioFalling);   UnloadTexture(RopeTex);
     UnloadTexture(imgMarioClimb1);    UnloadTexture(imgMarioClimb2);
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
@@ -3331,8 +2861,7 @@ int main(void)
     UnloadTexture(BlueBarrelMov3);    UnloadTexture(BlueBarrelMov4);
     UnloadTexture(BlueBarrelFall1);   UnloadTexture(BlueBarrelFall2);
     UnloadTexture(House1);            UnloadTexture(House2);
-    UnloadTexture(SnowFloor);
-    UnloadTexture(Nuke);
+    UnloadTexture(SnowFloor);         UnloadTexture(Nuke);
     UnloadTexture(imgMarioIdleNuke);  UnloadTexture(imgMarioWalk1Nuke);
     UnloadTexture(imgMarioWalk2Nuke); UnloadTexture(imgMarioJumpNuke);
     UnloadTexture(Explosion1); UnloadTexture(Explosion2); UnloadTexture(Explosion3);
@@ -3342,23 +2871,21 @@ int main(void)
     UnloadTexture(cave7);  UnloadTexture(cave8);  UnloadTexture(cave9);
     UnloadTexture(cave10); UnloadTexture(cave11);
     UnloadTexture(Rain);   UnloadTexture(Rain2);
-
     UnloadTexture(RegulusGrab1);     UnloadTexture(RegulusGrab2);     UnloadTexture(RegulusGrab3);
     UnloadTexture(RegulusIdle1);     UnloadTexture(RegulusIdle2);     UnloadTexture(RegulusIdle3);
-    UnloadTexture(RegulusStairs1);   UnloadTexture(RegulusStairs2);
     UnloadTexture(Regulus_Stun1);    UnloadTexture(Regulus_Stun2);    UnloadTexture(Regulus_Stun3);
     UnloadTexture(Regulus_StunEnd1); UnloadTexture(Regulus_StunEnd2); UnloadTexture(Regulus_StunEnd3);
     UnloadTexture(Regulus_StunEnd4); UnloadTexture(Regulus_StunEnd5);
-
     UnloadTexture(Dk_Mario_Idle1_Beatrice); UnloadTexture(Dk_Mario_Idle2_Beatrice);
     UnloadTexture(Dk_Mario_Jump_Beatrice);
     UnloadTexture(Dk_Mario_Walk1_Beatrice); UnloadTexture(Dk_Mario_Walk2_Beatrice);
     UnloadTexture(Beatrice_Idle1);          UnloadTexture(Beatrice_Idle2);
     UnloadTexture(texBeaBullet);
-
     UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
     UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
-
+    UnloadTexture(rabbitWalkBlack); UnloadTexture(rabbitJumpBlack);
+    UnloadTexture(rabbitWalkWhite); UnloadTexture(rabbitJumpWhite);
+    UnloadTexture(EButton);
     for (int i = 0; i < PROP_TEX_COUNT; i++)
         if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
 

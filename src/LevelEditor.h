@@ -82,12 +82,7 @@ public:
 
     // Pass prop textures (variant 0 = Light.png, extend the array for more)
     // Call once after loading the textures in main.cpp.
-    void SetPropTextures(Texture2D** textures, int count)
-    {
-        for (int i = 0; i < count && i < PROP_TEX_MAX; i++)
-            _propTex[i] = textures[i];
-        _propTexCount = count < PROP_TEX_MAX ? count : PROP_TEX_MAX;
-    }
+    void SetPropTextures(Texture2D** textures, int count);
 
     void SetTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder)
     {

@@ -3169,7 +3169,10 @@ void LevelEditor::DrawPropEnt(const PropData& pr, bool sel, bool msel) const {
         (int)(corners[0].x), (int)(corners[0].y - 14), 9, outline);
 }
 
-void LevelEditor::SetPropTextures(Texture2D** ptrs, int count) {
-    _propTex = ptrs;
+void LevelEditor::SetPropTextures(Texture2D** ptrs, int count)
+{
     _propTexCount = count;
+
+    for (int i = 0; i < count && i < 16; i++)
+        _propTex[i] = ptrs[i];
 }
