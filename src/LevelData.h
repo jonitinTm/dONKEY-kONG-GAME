@@ -50,6 +50,7 @@ struct BeamData {
     int   texVariant = 0;
     int   renderLayer = 0;
     bool  flipX = false;
+    bool  transparent = false; // if true, beam does not block light
 };
 
 // ── Kill zone ─────────────────────────────────────────────────────────────────

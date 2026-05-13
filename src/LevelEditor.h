@@ -74,10 +74,10 @@ public:
         _ropeTex = rope; _goldenPistonTex = goldenPiston;
     }
 
-    // Pass the 10 variant beam textures (Dk_FloorPart1 .. Dk_FloorPart10)
-    void SetBeamVariantTextures(Texture2D* variants[10])
+    // Pass the 12 variant beam textures (Dk_FloorPart1..10, TransFloor, TransFloor2)
+    void SetBeamVariantTextures(Texture2D* variants[12])
     {
-        for (int i = 0; i < 10; i++) _beamVariantTex[i] = variants[i];
+        for (int i = 0; i < 12; i++) _beamVariantTex[i] = variants[i];
     }
 
     // Pass prop textures (variant 0 = Light.png, extend the array for more)
@@ -142,7 +142,7 @@ private:
     // ── Textures ──────────────────────────────────────────────────────────────
     Texture2D* _bgTex = nullptr;
     Texture2D* _beamTex = nullptr;
-    Texture2D* _beamVariantTex[10] = {};
+    Texture2D* _beamVariantTex[12] = {};
     Texture2D* _ladderTex = nullptr;
     Texture2D* _playerTex = nullptr;
     Texture2D* _regulusTex = nullptr;

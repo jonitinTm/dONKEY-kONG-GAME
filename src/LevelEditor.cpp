@@ -124,7 +124,7 @@ Rectangle LevelEditor::LadRect(const LadderData& l)    const { return { l.x,l.y,
 Rectangle LevelEditor::BeamRect(const BeamData& b)            const {
     // Use the variant texture if available, else fall back to the default beam texture
     Texture2D* tex = nullptr;
-    if (b.texVariant >= 1 && b.texVariant <= 10 && _beamVariantTex[b.texVariant - 1] && _beamVariantTex[b.texVariant - 1]->id > 0)
+    if (b.texVariant >= 1 && b.texVariant <= 12 && _beamVariantTex[b.texVariant - 1] && _beamVariantTex[b.texVariant - 1]->id > 0)
         tex = _beamVariantTex[b.texVariant - 1];
     else if (_beamTex && _beamTex->id > 0)
         tex = _beamTex;
@@ -1358,9 +1358,9 @@ void LevelEditor::DrawCircEnt(Vector2 pos, float rad, Color c, bool sel, bool ms
     if (lbl) { int tw = MeasureText(lbl, 9); DrawText(lbl, (int)pos.x - tw / 2, (int)pos.y - 4, 9, BLACK); }
 }
 void LevelEditor::DrawBeamEnt(const BeamData& b, bool sel, bool msel) const {
-    // Select the right texture: variant 1-10 first, then default, then placeholder
+    // Select the right texture: variant 1-12 first, then default, then placeholder
     Texture2D* tex = nullptr;
-    if (b.texVariant >= 1 && b.texVariant <= 10 && _beamVariantTex[b.texVariant - 1] && _beamVariantTex[b.texVariant - 1]->id > 0)
+    if (b.texVariant >= 1 && b.texVariant <= 12 && _beamVariantTex[b.texVariant - 1] && _beamVariantTex[b.texVariant - 1]->id > 0)
         tex = _beamVariantTex[b.texVariant - 1];
     else if (_beamTex && _beamTex->id > 0)
         tex = _beamTex;
@@ -1991,8 +1991,29 @@ void LevelEditor::DrawDataPanel() {
             }
             cy += 20;
         }
+        // Row 3: variants 11-12 (TransFloor, TransFloor2)
+        {
+            const int COLS = 2;
+            const char* rowLabels[] = { "TFloor", "TFloor2" };
+            float tbw = (fw - (COLS - 1) * 2.f) / COLS;
+            for (int ti = 0; ti < COLS; ti++) {
+                int varIdx = ti + 11;
+                Rectangle tb = { px + ti * (tbw + 2.f), cy, tbw, 16 };
+                bool isActive = (bm.texVariant == varIdx);
+                bool hov = CheckCollisionPointRec(GetMousePosition(), tb);
+                DrawRectangleRec(tb, isActive ? Color{ 20,50,80,255 } : (hov ? Color{ 45,48,68,255 } : Color{ 28,32,48,255 }));
+                DrawRectangleLinesEx(tb, isActive ? 2.f : 1.f, isActive ? Color{ 100,200,255,255 } : Color{ 70,75,100,255 });
+                int nlw = MeasureText(rowLabels[ti], 9);
+                DrawText(rowLabels[ti], (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
+                    isActive ? Color{ 100,200,255,255 } : Color{ 170,175,200,255 });
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = varIdx; }
+            }
+            cy += 20;
+        }
         // Show the texture name
         const char* varName = (bm.texVariant == 0) ? "Dk_FloorPart (default)"
+            : (bm.texVariant == 11) ? "TransFloor"
+            : (bm.texVariant == 12) ? "TransFloor2"
             : TextFormat("Dk_FloorPart%d", bm.texVariant);
         DrawText(varName, (int)px, (int)cy, 9, { 130,200,130,255 }); cy += 13;
         SectionHeader("── Render Layer ───────────");
@@ -2016,6 +2037,20 @@ void LevelEditor::DrawDataPanel() {
             DrawText(flipLbl, (int)(flipR.x + flipR.width / 2 - flw / 2), (int)flipR.y + 5, 9,
                 bm.flipX ? Color{ 200,150,255,255 } : Color{ 170,175,200,255 });
             if (hFlip && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.flipX = !bm.flipX; }
+            cy += 22;
+        }
+        // ── Transparent (light pass-through) ─────────────────────────────────
+        SectionHeader("── Light ──────────────────");
+        {
+            Rectangle trR = { px, cy, fw, 18 };
+            bool hTr = CheckCollisionPointRec(GetMousePosition(), trR);
+            DrawRectangleRec(trR, bm.transparent ? Color{ 20,50,80,255 } : (hTr ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
+            DrawRectangleLinesEx(trR, bm.transparent ? 2.f : 1.f, bm.transparent ? Color{ 100,200,255,255 } : Color{ 70,75,100,255 });
+            const char* trLbl = bm.transparent ? "Transparent: ON  (light passes)" : "Transparent: OFF (blocks light)";
+            int trw = MeasureText(trLbl, 9);
+            DrawText(trLbl, (int)(trR.x + trR.width / 2 - trw / 2), (int)trR.y + 5, 9,
+                bm.transparent ? Color{ 100,200,255,255 } : Color{ 170,175,200,255 });
+            if (hTr && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.transparent = !bm.transparent; }
             cy += 22;
         }
     }   // end BEAM section
@@ -2145,9 +2180,26 @@ void LevelEditor::DrawDataPanel() {
         }
         SectionHeader("── Tex Variant ─────────────");
         {
-            float tvF = (float)pr.texVariant;
-            if (NumField("Var", tvF, 1.f, 0, 15, px, cy, fw)) { PushUndo(); pr.texVariant = (int)tvF; }
-            cy += rowH;
+            static const char* propVarNames[] = { "Light", "WoodBox", "Barrel", "Support", "OilCan", "Fire" };
+            static constexpr int PROP_VAR_COUNT = 6;
+            const int COLS = 3;
+            float tbw = (fw - (COLS - 1) * 2.f) / COLS;
+            for (int row = 0; row < 2; row++) {
+                for (int col = 0; col < COLS; col++) {
+                    int vi = row * COLS + col;
+                    if (vi >= PROP_VAR_COUNT) break;
+                    Rectangle tb = { px + col * (tbw + 2.f), cy, tbw, 16 };
+                    bool isActive = (pr.texVariant == vi);
+                    bool hov = CheckCollisionPointRec(GetMousePosition(), tb);
+                    DrawRectangleRec(tb, isActive ? Color{ 60,40,10,255 } : (hov ? Color{ 45,48,68,255 } : Color{ 28,32,48,255 }));
+                    DrawRectangleLinesEx(tb, isActive ? 2.f : 1.f, isActive ? Color{ 255,200,80,255 } : Color{ 70,75,100,255 });
+                    int nlw = MeasureText(propVarNames[vi], 9);
+                    DrawText(propVarNames[vi], (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
+                        isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
+                    if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); pr.texVariant = vi; }
+                }
+                cy += 20;
+            }
         }
         // Copy / Paste props
         {

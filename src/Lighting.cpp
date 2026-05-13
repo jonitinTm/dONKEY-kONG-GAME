@@ -451,6 +451,7 @@ void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
     static constexpr float BEAM_SPRITE_W = 16.f;
     static constexpr float BEAM_SPRITE_H = 16.f;
     for (const auto& b : lv.beams) {
+        if (b.transparent) continue;
         DrawRectangleRec({ b.x, b.y,
                            BEAM_SPRITE_W * BEAM_SCALE,
                            BEAM_SPRITE_H * BEAM_SCALE }, WHITE);

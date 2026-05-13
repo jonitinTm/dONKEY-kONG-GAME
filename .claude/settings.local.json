@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /s /b *.vcxproj)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "PowerShell(head *)",
+      "Bash(mingw32-make config=debug_x64)",
+      "PowerShell(Get-Command *)"
+    ]
+  }
+}

@@ -661,12 +661,14 @@ int main(void)
     Texture2D background = LoadTexture("Wiki/SubaruStairs.png");
     Texture2D beam = LoadTexture("Assets/Textures/Architecture/Dk_FloorPart.png");
 
-    Texture2D beamVariants[10];
+    Texture2D beamVariants[12];
     for (int i = 0; i < 10; i++) {
         char path[128];
         snprintf(path, sizeof(path), "Assets/Textures/Architecture/Dk_FloorPart%d.png", i + 1);
         beamVariants[i] = LoadTexture(path);
     }
+    beamVariants[10] = LoadTexture("Assets/Textures/Architecture/TransFloor.png");
+    beamVariants[11] = LoadTexture("Assets/Textures/Architecture/TransFloor2.png");
 
     Texture2D imgMarioClimb1 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder1.png");
     Texture2D imgMarioClimb2 = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Ladder2.png");
@@ -789,10 +791,19 @@ int main(void)
 
     Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
 
-    static constexpr int PROP_TEX_COUNT = 1;
+    static constexpr int PROP_TEX_COUNT = 6;
+    static constexpr int PROP_FIRE_VARIANT = 5;
     Texture2D propTextures[PROP_TEX_COUNT] = {
         LoadTexture("Assets/Textures/Lighting/Light.png"),
+        LoadTexture("Assets/Textures/Architecture/WoodBox.png"),
+        LoadTexture("Assets/Textures/Architecture/Dk_Barrel_Idle.png"),
+        LoadTexture("Assets/Textures/Architecture/SupportBeam.png"),
+        LoadTexture("Assets/Textures/Items/Dk_OilCanister.png"),
+        LoadTexture("Assets/Textures/Items/Dk_Oil_Fire3.png"),
     };
+    Texture2D propFireFrame2 = LoadTexture("Assets/Textures/Items/Dk_Oil_Fire4.png");
+    float propFireTimer = 0.f;
+    int   propFireFrame = 0;
     {
         Texture2D* ptrs[PROP_TEX_COUNT];
         for (int i = 0; i < PROP_TEX_COUNT; i++) ptrs[i] = &propTextures[i];
@@ -824,7 +835,7 @@ int main(void)
     float beamScale = 4.0f;
     for (auto& b : beamPositions) {
         if (b.renderLayer > 0) continue;
-        Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+        Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 12 && beamVariants[b.texVariant - 1].id > 0)
             ? &beamVariants[b.texVariant - 1] : &beam;
         float bSrcX = b.flipX ? (float)bTex->width : 0.f;
         float bSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
@@ -865,8 +876,8 @@ int main(void)
         &imgMarioIdle, &RegulusIdle1, &House1, &RopeTex, &GoldenPistonTex);
     editor.SetConveyorTextures(&ConvSide[0], &ConvSide[1], &ConvSide[2], &ConvM[0], &ConvM[1], &ConvM[2]);
     {
-        Texture2D* bvPtrs[10];
-        for (int i = 0; i < 10; i++) bvPtrs[i] = &beamVariants[i];
+        Texture2D* bvPtrs[12];
+        for (int i = 0; i < 12; i++) bvPtrs[i] = &beamVariants[i];
         editor.SetBeamVariantTextures(bvPtrs);
     }
 
@@ -887,7 +898,7 @@ int main(void)
                         isElevChild = true; break;
                     }
                 if (isElevChild) continue;
-                Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 12 && beamVariants[b.texVariant - 1].id > 0)
                     ? &beamVariants[b.texVariant - 1] : &beam;
                 float rbSrcX = b.flipX ? (float)bTex->width : 0.f;
                 float rbSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
@@ -1477,6 +1488,13 @@ int main(void)
             if (beatriceItemAnimTimer >= 0.35f)
             {
                 beatriceItemAnimFrame = (beatriceItemAnimFrame + 1) % 2; beatriceItemAnimTimer = 0.0f;
+            }
+
+            // ── Prop fire animation (Dk_Oil_Fire3 <-> Dk_Oil_Fire4) ──────────
+            propFireTimer += dt;
+            if (propFireTimer >= 0.15f)
+            {
+                propFireFrame = 1 - propFireFrame; propFireTimer = 0.f;
             }
 
             // ── Regulus animation ─────────────────────────────────────────────
@@ -2409,7 +2427,7 @@ int main(void)
                     int bi = rel.child.index;
                     if (bi < 0 || bi >= (int)beamPositions.size()) continue;
                     const auto& b = beamPositions[bi];
-                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 12 && beamVariants[b.texVariant - 1].id > 0)
                         ? &beamVariants[b.texVariant - 1] : &beam;
                     float ecSrcX = b.flipX ? (float)bTex->width : 0.f;
                     float ecSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
@@ -2451,7 +2469,7 @@ int main(void)
                             isElevChild = true; break;
                         }
                     if (isElevChild) continue;
-                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 10 && beamVariants[b.texVariant - 1].id > 0)
+                    Texture2D* bTex = (b.texVariant >= 1 && b.texVariant <= 12 && beamVariants[b.texVariant - 1].id > 0)
                         ? &beamVariants[b.texVariant - 1] : &beam;
                     float hlSrcX = b.flipX ? (float)bTex->width : 0.f;
                     float hlSrcW = b.flipX ? -(float)bTex->width : (float)bTex->width;
@@ -2492,7 +2510,10 @@ int main(void)
             // 5.3 Props (layer 0, lit)
             for (const auto& pr : currentLevelData.props) {
                 if (pr.renderLayer != 0 || pr.lightAffect <= 0.f) continue;
-                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0) ? &propTextures[0] : nullptr;
+                Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
+                    ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
+                    : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
+                        ? &propTextures[pr.texVariant] : nullptr;
                 if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
                 else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
                     { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
@@ -2646,7 +2667,10 @@ int main(void)
             // 13. Props (layer 1, lit)
             for (const auto& pr : currentLevelData.props) {
                 if (pr.renderLayer != 1 || pr.lightAffect <= 0.f) continue;
-                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0) ? &propTextures[0] : nullptr;
+                Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
+                    ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
+                    : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
+                        ? &propTextures[pr.texVariant] : nullptr;
                 if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
                 else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
                     { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
@@ -2701,7 +2725,10 @@ int main(void)
                 bool isUnlit = (pr.lightAffect <= 0.f);
                 bool isOverlay = (pr.renderLayer == 2);
                 if (!isUnlit && !isOverlay) continue;
-                Texture2D* tex = (pr.texVariant == 0 && propTextures[0].id > 0) ? &propTextures[0] : nullptr;
+                Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
+                    ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
+                    : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
+                        ? &propTextures[pr.texVariant] : nullptr;
                 if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
                 else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
                     { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
@@ -2714,9 +2741,14 @@ int main(void)
                 if (anyGlow) {
                     BeginBlendMode(BLEND_ADDITIVE);
                     for (const auto& pr : currentLevelData.props) {
-                        if (pr.lightAffect <= 1.f || propTextures[0].id == 0) continue;
+                        if (pr.lightAffect <= 1.f) continue;
+                        Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
+                            ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
+                            : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
+                                ? &propTextures[pr.texVariant] : nullptr;
+                        if (!tex) continue;
                         unsigned char glowA = (unsigned char)Clamp((pr.lightAffect - 1.f) / 2.f * 255.f, 0.f, 255.f);
-                        DrawTexturePro(propTextures[0], { 0,0,(float)propTextures[0].width,(float)propTextures[0].height },
+                        DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
                             { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, { 255,255,255,glowA });
                     }
                     EndBlendMode();
@@ -2852,7 +2884,7 @@ int main(void)
     UnloadTexture(imgMarioClimbEnd1); UnloadTexture(imgMarioClimbEnd2);
     UnloadTexture(imgMarioClimbDown); UnloadTexture(background);
     UnloadTexture(beam);
-    for (int i = 0; i < 10; i++) if (beamVariants[i].id > 0) UnloadTexture(beamVariants[i]);
+    for (int i = 0; i < 12; i++) if (beamVariants[i].id > 0) UnloadTexture(beamVariants[i]);
     UnloadTexture(LadderPart);
     UnloadTexture(BarrelMov1);        UnloadTexture(BarrelMov2);
     UnloadTexture(BarrelMov3);        UnloadTexture(BarrelMov4);
@@ -2888,6 +2920,7 @@ int main(void)
     UnloadTexture(EButton);
     for (int i = 0; i < PROP_TEX_COUNT; i++)
         if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
+    if (propFireFrame2.id > 0) UnloadTexture(propFireFrame2);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
