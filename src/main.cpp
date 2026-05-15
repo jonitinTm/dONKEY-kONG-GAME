@@ -7,6 +7,7 @@
 #include "CinematicPlayer.h"
 #include "Lighting.h"
 #include <ctime>
+#include <algorithm>
 
 enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR, CARD_SELECT };
 
@@ -70,6 +71,96 @@ struct Enemy
     bool       facingRight = true;
     int        animFrame = 0;
     float      animTimer = 0.0f;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ─── Powerup system ──────────────────────────────────────────────────────────
+
+enum PowerupType {
+    PU_NONE = -1,
+    PU_RETURN_BY_DEATH = 0, PU_DASH, PU_EL_SHAMAK, PU_LARPER,
+    PU_REINHARD, PU_WHIP, PU_EXTRA_LIFE, PU_NUKE_PU,
+    PU_ONE_MORE_LARP, PU_SPEEDRUN, PU_SHIELD, PU_SHOP,
+    PU_BEATRICE,
+    PU_COUNT
+};
+
+struct PowerupInfo {
+    const char* name; const char* desc; const char* cdInfo;
+    int rarityIdx; int cost; bool passive; float maxCD; int maxCharges; int maxStack;
+};
+static const PowerupInfo PU_INFO[PU_COUNT] = {
+    {"RETURN BY DEATH","On death rewinds 5s. No life lost.","1 use",      2,25, true,  0.f,1,1},
+    {"DASH",           "Dash 4x forward. 0.5s invuln.",    "CD: 10s",     1,15, false,10.f,0,1},
+    {"EL SHAMAK",      "Kill all white enemies (Specters).","1 use",       4,50, false, 0.f,1,1},
+    {"LARPER",         "Place a ladder at feet. x4 stack.", "1 use (x4)", 2,10, false, 0.f,1,4},
+    {"REINHARD",       "Instantly win the level.",         "1 use",       5,100,false, 0.f,1,1},
+    {"WHIP",           "Kill enemies 5x forward.",         "CD: 25s",     0,10, false,25.f,0,1},
+    {"EXTRA LIFE",     "+1 life. Raises cap to 5.",        "1 use",       4,70, false, 0.f,1,1},
+    {"NUKE",           "Explosion: kills enemies.",        "1 use",       4,60, false, 0.f,1,1},
+    {"ONE MORE LARP",  "Restore 1 life.",                  "1 use",       2,50, false, 0.f,1,1},
+    {"SPEEDRUN",       "1.5x speed for 5s.",               "CD: 20s",     0,10, false,20.f,0,1},
+    {"SHIELD",         "Parry in 0.3s grace window.",      "CD: 10s",     1,20, false,10.f,0,1},
+    {"SHOP",           "Opens shop. Stops time.",          "1 use",       3,70, false, 0.f,1,1},
+    {"BEATRICE",       "Companion shoots at enemies 7s.", "1 use",       2,30, false, 0.f,1,1},
+};
+// Powerup pool per rarity
+static const PowerupType PU_BY_RARITY[6][4] = {
+    {PU_WHIP,           PU_SPEEDRUN,      PU_NONE,        PU_NONE},   // Common
+    {PU_DASH,           PU_SHIELD,        PU_NONE,        PU_NONE},   // Rare
+    {PU_RETURN_BY_DEATH, PU_LARPER, PU_ONE_MORE_LARP, PU_BEATRICE},  // Stairs
+    {PU_SHOP,           PU_NONE,          PU_NONE,        PU_NONE},   // Astolfo
+    {PU_EL_SHAMAK,      PU_EXTRA_LIFE,    PU_NUKE_PU,     PU_NONE},   // Legendary
+    {PU_REINHARD,       PU_NONE,          PU_NONE,        PU_NONE},   // Mythic
+};
+static const int PU_RARITY_COUNT[6] = {2,2,4,1,3,1};
+
+struct HotbarSlot {
+    PowerupType type    = PU_NONE;
+    float       cd      = 0.f;   // remaining cooldown
+    int         charges = 0;     // remaining uses (0=CD based)
+};
+
+// Card display / animation
+struct CardDisplay {
+    PowerupType type      = PU_NONE;
+    int         rarity    = 0;
+    float       scale     = 0.f;
+    float       appearT   = 0.f;   // 0→0.4 pop-in
+    bool        appeared  = false;
+    float       hoverLerp = 0.f;   // 0→1
+    bool        hovered   = false;
+    bool        selected  = false;
+    bool        dismissed = false;
+    float       exitT     = 0.f;   // 0→1 exit animation
+    float       spinPhase = 0.f;   // 0→1 x-axis spin for selected card
+};
+
+// Return-by-death snapshot
+struct RBDSnapshot {
+    Rectangle   player; float vx,vy; bool facingR,onLadder; int curLadder; float ladderProg;
+    int lives; unsigned score;
+    struct BS{Rectangle h;int node;float spd;bool active,isBlue,isFalling;};
+    struct ES{Rectangle h;Vector2 vel;EnemyType type;EnemyState st;float stT;bool active,grounded,facingR;};
+    vector<BS> barrels; vector<ES> enemies;
+    vector<NukeItem> nukes; vector<BeatriceItem> beatrices;
+    bool regThrowing,regPending,regForceBlue,regActive,regStunned;
+    float regThrowT; int regThrowFr; float regIdleT; int regIdleFr;
+};
+
+// Growing ladder (Larper)
+struct LarperLadder { float x,y,curH,targH,growSpeed; };
+
+// Hotbar drag item (during CARD_SELECT)
+struct HBDragItem {
+    bool        active   = false;
+    PowerupType type     = PU_NONE;
+    int         charges  = 0;
+    float       cd       = 0.f;
+    int         srcSlot  = -1;
+    float       x        = 0.f, y = 0.f;
+    float       velX     = 0.f, velY = 0.f;
+    bool        falling  = false;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -341,8 +432,44 @@ int main(void)
     LevelData      currentLevelData;
     LevelData      pendingLevelData;
     bool           hasPendingLevel = false;
-    int            cardRarityLeft  = 0;
-    int            cardRarityRight = 0;
+
+    // ── Card select system ───────────────────────────────────────────────────
+    static constexpr int MAX_DISP_CARDS = 5;
+    CardDisplay    displayCards[MAX_DISP_CARDS] = {};
+    int            numDispCards  = 0;
+    bool           anyCardPicked = false;
+    float          cardFadeOut   = 0.f;  // 0→1 fade to black after pick
+    enum { CSM_LEVEL, CSM_SHOP } cardSelectMode = CSM_LEVEL;
+
+    // ── Hotbar ───────────────────────────────────────────────────────────────
+    HotbarSlot     hotbar[3];
+    int            hotbarSlot    = 0;   // 0-2 active slot
+
+    // ── Powerup effect state ─────────────────────────────────────────────────
+    int            coins         = 50;  // starting coins for testing
+    int            maxLives      = 3;
+    bool           speedrunActive= false;
+    float          speedrunTimer = 0.f;
+    bool           shieldActive  = false;
+    float          shieldTimer   = 0.f;
+    bool           dashActive    = false;
+    float          dashInvulTimer= 0.f;
+
+    // ── Return-by-death ──────────────────────────────────────────────────────
+    static constexpr int RBD_BUF = 50;
+    RBDSnapshot    rbdBuf[RBD_BUF] = {};
+    int            rbdHead    = 0;
+    int            rbdCount   = 0;
+    float          rbdSaveTimer = 0.f;
+    bool           rbdTriggered = false;
+    float          rbdFadeTimer = 0.f;   // 2s fade-in after rewind
+    bool           rbdFading    = false;
+
+    // ── Larper ladders ───────────────────────────────────────────────────────
+    vector<LarperLadder> larperLadders;
+
+    // ── Hotbar drag (during CARD_SELECT) ─────────────────────────────────────
+    HBDragItem hbDrag;
 
     Rectangle wincondition = { 400, 150, 40, 40 };
 
@@ -650,6 +777,7 @@ int main(void)
     Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
     Sound nukeSound = LoadSound("Assets/Nuevo audio/mp3/Flash.mp3");
     Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
+    Sound rbdSound     = LoadSound("Assets/Nuevo audio/mp3/re-zero-return-by-death.mp3");
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, 1.0f);
@@ -1073,15 +1201,58 @@ int main(void)
             regulusStunEndTimer = 0.0f;
         };
 
-    // Weighted roll: Common=45%, Rare=20%, Stairs=15%, Astolfo=10%, Legendary=7%, Mythic=3%
-    auto RollCardRarity = [&]() -> int {
+    // Roll a random powerup (rarity weighted): Common45% Rare20% Stairs15% Astolfo10% Legendary7% Mythic3%
+    auto RollPowerup = [&]() -> PowerupType {
         int r = GetRandomValue(1, 100);
-        if (r <= 45) return 0;
-        if (r <= 65) return 1;
-        if (r <= 80) return 2;
-        if (r <= 90) return 3;
-        if (r <= 97) return 4;
-        return 5;
+        int ri = (r<=45)?0:(r<=65)?1:(r<=80)?2:(r<=90)?3:(r<=97)?4:5;
+        int cnt = PU_RARITY_COUNT[ri];
+        int pick = GetRandomValue(0, cnt - 1);
+        return PU_BY_RARITY[ri][pick];
+    };
+
+    // Initialise the card-select screen with n cards
+    auto InitCardSelect = [&](int n, bool shopMode) {
+        numDispCards = n;
+        anyCardPicked = false;
+        cardFadeOut = 0.f;
+        cardSelectMode = shopMode ? CSM_SHOP : CSM_LEVEL;
+        hbDrag = {};
+        for (int i = 0; i < n; i++) {
+            displayCards[i] = {};
+            displayCards[i].type    = RollPowerup();
+            displayCards[i].rarity  = PU_INFO[(int)displayCards[i].type].rarityIdx;
+            displayCards[i].scale   = 0.f;
+            displayCards[i].appearT = 0.f;
+            displayCards[i].appeared= false;
+        }
+    };
+
+    // Add powerup to hotbar; returns true if added
+    auto AddToHotbar = [&](PowerupType pu) -> bool {
+        const PowerupInfo& info = PU_INFO[(int)pu];
+        // For stackable: find existing slot of same type
+        if (info.maxStack > 1) {
+            for (auto& s : hotbar) {
+                if (s.type == pu && s.charges < info.maxStack) {
+                    s.charges++; return true;
+                }
+            }
+        }
+        // Find empty slot
+        for (auto& s : hotbar) {
+            if (s.type == PU_NONE) {
+                s.type    = pu;
+                s.cd      = 0.f;
+                s.charges = info.maxCharges > 0 ? 1 : 0;
+                return true;
+            }
+        }
+        // Replace active slot
+        auto& s = hotbar[hotbarSlot];
+        s.type    = pu;
+        s.cd      = 0.f;
+        s.charges = info.maxCharges > 0 ? 1 : 0;
+        return true;
     };
 
     auto ClearRoundEntities = [&]()
@@ -1138,6 +1309,15 @@ int main(void)
     auto TriggerDeath = [&]()
         {
             if (isDying) return;
+            // Return By Death intercept
+            for (auto& s : hotbar) {
+                if (s.type == PU_RETURN_BY_DEATH && s.charges > 0) {
+                    s.charges--;
+                    if (s.charges == 0) s.type = PU_NONE;
+                    rbdTriggered = true;
+                    return;
+                }
+            }
             lives--;
             isDying = true;
             deathTimer = 0.0f;
@@ -1456,6 +1636,191 @@ int main(void)
                 Cinematic::Global.Update(dt, _cinematicDummy);
             }
 
+            // ── RBD: save snapshot every 0.1s ────────────────────────────────
+            {
+                bool rbdEquipped = false;
+                for (auto& s : hotbar) if (s.type == PU_RETURN_BY_DEATH && s.charges > 0) rbdEquipped = true;
+                if (rbdEquipped && !isDying) {
+                    rbdSaveTimer += dt;
+                    if (rbdSaveTimer >= 0.1f) {
+                        rbdSaveTimer = 0.f;
+                        RBDSnapshot& snap = rbdBuf[rbdHead % RBD_BUF];
+                        snap.player = player; snap.vx = velocityX; snap.vy = velocityY;
+                        snap.facingR = facingRight; snap.onLadder = onLadder;
+                        snap.curLadder = currentLadder; snap.ladderProg = ladderProgress;
+                        snap.lives = lives; snap.score = score;
+                        snap.barrels.clear();
+                        for (auto& b : barrels) snap.barrels.push_back({b.hitbox,b.currentNode,b.speed,b.active,b.isBlue,b.isFalling});
+                        snap.enemies.clear();
+                        for (auto& e : enemies) snap.enemies.push_back({e.hitbox,e.velocity,e.type,e.state,e.stateTimer,e.active,e.grounded,e.facingRight});
+                        snap.nukes = nukes; snap.beatrices = beatrices;
+                        snap.regThrowing=regulusThrowing; snap.regPending=regulusSpawnPending;
+                        snap.regForceBlue=regulusForceBlue; snap.regActive=regulusIsActive;
+                        snap.regStunned=regulusIsStunned;
+                        snap.regThrowT=regulusThrowTimer; snap.regThrowFr=regulusThrowFrame;
+                        snap.regIdleT=regulusIdleTimer; snap.regIdleFr=regulusIdleFrame;
+                        rbdHead = (rbdHead + 1) % RBD_BUF;
+                        if (rbdCount < RBD_BUF) rbdCount++;
+                    }
+                }
+            }
+
+            // ── RBD rewind triggered ──────────────────────────────────────────
+            if (rbdTriggered) {
+                rbdTriggered = false;
+                int snapIdx = (rbdCount > 0) ? ((rbdHead - rbdCount + RBD_BUF) % RBD_BUF) : -1;
+                if (snapIdx >= 0) {
+                    const RBDSnapshot& s = rbdBuf[snapIdx];
+                    player = s.player; velocityX = s.vx; velocityY = s.vy;
+                    facingRight = s.facingR; onLadder = s.onLadder;
+                    currentLadder = s.curLadder; ladderProgress = s.ladderProg;
+                    lives = s.lives; score = s.score;
+                    for (int i = 0; i < (int)s.barrels.size() && i < (int)barrels.size(); i++) {
+                        barrels[i].hitbox=s.barrels[i].h; barrels[i].currentNode=s.barrels[i].node;
+                        barrels[i].speed=s.barrels[i].spd; barrels[i].active=s.barrels[i].active;
+                        barrels[i].isBlue=s.barrels[i].isBlue; barrels[i].isFalling=s.barrels[i].isFalling;
+                    }
+                    for (int i = 0; i < (int)s.enemies.size() && i < (int)enemies.size(); i++) {
+                        enemies[i].hitbox=s.enemies[i].h; enemies[i].velocity=s.enemies[i].vel;
+                        enemies[i].type=s.enemies[i].type; enemies[i].state=s.enemies[i].st;
+                        enemies[i].stateTimer=s.enemies[i].stT; enemies[i].active=s.enemies[i].active;
+                        enemies[i].grounded=s.enemies[i].grounded; enemies[i].facingRight=s.enemies[i].facingR;
+                    }
+                    nukes = s.nukes; beatrices = s.beatrices;
+                    regulusThrowing=s.regThrowing; regulusSpawnPending=s.regPending;
+                    regulusForceBlue=s.regForceBlue; regulusIsActive=s.regActive;
+                    regulusIsStunned=s.regStunned;
+                    regulusThrowTimer=s.regThrowT; regulusThrowFrame=s.regThrowFr;
+                    regulusIdleTimer=s.regIdleT; regulusIdleFrame=s.regIdleFr;
+                    rbdCount = 0; rbdHead = 0;
+                }
+                PlaySound(rbdSound);
+                rbdFading = true; rbdFadeTimer = 0.f;
+                ClearDeathState();
+                invincible = true; invincibleTimer = 2.0f;
+                ResumeMusicStream(music);
+            }
+
+            // ── RBD fade-in ───────────────────────────────────────────────────
+            if (rbdFading) {
+                rbdFadeTimer += dt;
+                if (rbdFadeTimer >= 2.f) rbdFading = false;
+            }
+
+            // ── Hotbar cooldown tick ──────────────────────────────────────────
+            for (auto& s : hotbar) {
+                if (s.type != PU_NONE && PU_INFO[(int)s.type].maxCD > 0.f && s.cd > 0.f)
+                    s.cd -= dt;
+            }
+
+            // ── Hotbar slot switching ─────────────────────────────────────────
+            if (IsKeyPressed(KEY_ONE))   hotbarSlot = 0;
+            if (IsKeyPressed(KEY_TWO))   hotbarSlot = 1;
+            if (IsKeyPressed(KEY_THREE)) hotbarSlot = 2;
+            {
+                float wheel = GetMouseWheelMove();
+                if (wheel > 0.f) hotbarSlot = (hotbarSlot + 2) % 3;
+                if (wheel < 0.f) hotbarSlot = (hotbarSlot + 1) % 3;
+            }
+
+            // ── Active powerup effects ────────────────────────────────────────
+            if (speedrunActive) { speedrunTimer -= dt; if (speedrunTimer <= 0.f) speedrunActive = false; }
+            if (dashActive) { dashInvulTimer -= dt; if (dashInvulTimer <= 0.f) { dashActive = false; } }
+            if (shieldActive) { shieldTimer -= dt; if (shieldTimer <= 0.f) shieldActive = false; }
+
+            // ── Larper: grow ladders ──────────────────────────────────────────
+            for (auto& ll : larperLadders) {
+                if (ll.curH < ll.targH) {
+                    ll.curH = fminf(ll.curH + ll.growSpeed * dt, ll.targH);
+                    if (ll.curH >= ll.targH) {
+                        ladders.push_back(Ladder::Make(ll.x, ll.y - ll.targH, 40.f, ll.targH));
+                        RebuildLayers();
+                    }
+                }
+            }
+            larperLadders.erase(
+                std::remove_if(larperLadders.begin(), larperLadders.end(),
+                    [](const LarperLadder& ll){ return ll.curH >= ll.targH; }),
+                larperLadders.end());
+
+            // ── Hotbar E key use ──────────────────────────────────────────────
+            bool ePressHandled = false;
+            if (!isDying && IsKeyPressed(KEY_E)) {
+                HotbarSlot& slot = hotbar[hotbarSlot];
+                if (slot.type != PU_NONE) {
+                    const PowerupInfo& info = PU_INFO[(int)slot.type];
+                    bool ready = info.maxCD > 0.f ? (slot.cd <= 0.f) : (slot.charges > 0);
+                    if (ready && !info.passive) {
+                        ePressHandled = true;
+                        // ── Apply powerup ──────────────────────────────────────
+                        switch(slot.type) {
+                        case PU_DASH: {
+                            float dist = player.width * 4.f;
+                            player.x += facingRight ? dist : -dist;
+                            dashActive = true; dashInvulTimer = 0.5f;
+                            invincible = true; invincibleTimer = 0.5f;
+                            slot.cd = info.maxCD; break; }
+                        case PU_EL_SHAMAK:
+                            for (auto& e : enemies) if (e.active && e.type == SPECTER) { e.active=false; score+=300; }
+                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                        case PU_LARPER: {
+                            float tH = player.height * 3.f;
+                            larperLadders.push_back({player.x + player.width*0.5f - 20.f, player.y + player.height, 0.f, tH, tH / 0.5f});
+                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
+                        case PU_REINHARD:
+                            { LevelData nextLv;
+                              if (LoadLevel(nextLv, currentLevelId+1)) {
+                                  currentLevelId++; pendingLevelData=nextLv; hasPendingLevel=true;
+                                  InitCardSelect(2,false); currentScreen=CARD_SELECT;
+                              } else { splashTimer=0.f; currentScreen=GAME_OVER; }
+                            }
+                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                        case PU_WHIP: {
+                            float reach = player.width * 5.f;
+                            Rectangle whipRect = facingRight
+                                ? Rectangle{player.x+player.width, player.y, reach, player.height}
+                                : Rectangle{player.x-reach, player.y, reach, player.height};
+                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; }
+                            slot.cd = info.maxCD; break; }
+                        case PU_EXTRA_LIFE:
+                            maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
+                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                        case PU_NUKE_PU: {
+                            PlaySound(nukeSound);
+                            float sc=3.8f*0.85f*1.05f;
+                            float nkW=NUKE_NATIVE_W*(NUKE_SCALE*0.25f)*sc, nkH=NUKE_NATIVE_H*(NUKE_SCALE*0.25f)*sc;
+                            nukeExplosionPos={player.x+player.width*0.5f-nkW*0.5f, player.y-nkH-2.f};
+                            nukeExplosionPlaying=true; nukeExplosionFrame=0; nukeExplosionTimer=0.f;
+                            nukeFlashTimer=0.f; nukeExtraDelay=3.f;
+                            for (auto& b:barrels){if(b.active){score+=100;b.active=false;}}
+                            for (auto& e:enemies){if(e.active){score+=300;e.active=false;}}
+                            regulusIsStunned=true; regulusStunEnding=false; regulusStunFrame=0;
+                            regulusStunTimer=0.f; regulusStunLoops=0;
+                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
+                        case PU_ONE_MORE_LARP:
+                            lives = (lives+1 <= maxLives) ? lives+1 : maxLives;
+                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                        case PU_SPEEDRUN:
+                            speedrunActive=true; speedrunTimer=5.f;
+                            slot.cd=info.maxCD; break;
+                        case PU_SHIELD:
+                            shieldActive=true; shieldTimer=0.3f;
+                            slot.cd=info.maxCD; break;
+                        case PU_SHOP: {
+                            InitCardSelect(5, true);
+                            slot.charges--; if(slot.charges<=0) slot.type=PU_NONE;
+                            currentScreen=CARD_SELECT; break; }
+                        case PU_BEATRICE:
+                            playerHasBeatrice = true;
+                            beatriceAbilityTimer = BEATRICE_DURATION;
+                            beaBulletShootTimer = 0.f;
+                            slot.charges--; if(slot.charges<=0) slot.type=PU_NONE; break;
+                        default: break;
+                        }
+                    }
+                }
+            }
+
             // ── Elevator children ─────────────────────────────────────────────
             struct ElevPlatSnapshot { int platIndex; float prevY; float newY; float platW; };
             vector<ElevPlatSnapshot> elevSnapshots;
@@ -1624,35 +1989,30 @@ int main(void)
                 }
             }
 
-            // ── Nuke pickup ───────────────────────────────────────────────────
-            if (!isDying && !playerHasNuke && IsKeyPressed(KEY_E))
+            // ── Nuke pickup (F key → hotbar) ──────────────────────────────────
+            if (!isDying && IsKeyPressed(KEY_F))
             {
                 float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
                 for (auto& nk : nukes)
                 {
                     if (!nk.active) continue;
                     Rectangle nkRect = { nk.pos.x, nk.pos.y, nkW, nkH };
-                    if (CheckCollisionRecs(player, nkRect)) { nk.active = false; playerHasNuke = true; break; }
+                    if (CheckCollisionRecs(player, nkRect)) { nk.active = false; AddToHotbar(PU_NUKE_PU); break; }
                 }
-            }
-
-            // ── Beatrice pickup ───────────────────────────────────────────────
-            if (!isDying && !playerHasBeatrice && IsKeyPressed(KEY_E))
-            {
-                float bcScale = 2.0f;
-                float bcW = Beatrice_Idle1.width * bcScale;
-                float bcH = Beatrice_Idle1.height * bcScale;
-                for (auto& bc : beatrices)
+                // Beatrice pickup (same F key)
+                if (!playerHasBeatrice)
                 {
-                    if (!bc.active) continue;
-                    Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
-                    if (CheckCollisionRecs(player, bcRect))
+                    float bcScale = 2.0f;
+                    float bcW = Beatrice_Idle1.width * bcScale;
+                    float bcH = Beatrice_Idle1.height * bcScale;
+                    for (auto& bc : beatrices)
                     {
-                        bc.active = false;
-                        playerHasBeatrice = true;
-                        beatriceAbilityTimer = BEATRICE_DURATION;
-                        beaBulletShootTimer = 0.0f;
-                        break;
+                        if (!bc.active) continue;
+                        Rectangle bcRect = { bc.pos.x, bc.pos.y - bcH, bcW, bcH };
+                        if (CheckCollisionRecs(player, bcRect))
+                        {
+                            bc.active = false; AddToHotbar(PU_BEATRICE); break;
+                        }
                     }
                 }
             }
@@ -1863,7 +2223,7 @@ int main(void)
                 }
             }
 
-            if (!isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
+            if (!ePressHandled && !isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
             {
                 regulusThrowing = true;
                 regulusThrowFrame = 0;
@@ -1875,13 +2235,14 @@ int main(void)
             // ── Barrel / player collision ─────────────────────────────────────
             if (!isDying && !invincible)
             {
-                for (const auto& b : barrels)
+                for (auto& b : barrels)
                 {
                     if (!b.active) continue;
                     if (!CheckCollisionRecs(PlayerHitbox(), b.hitbox)) continue;
                     bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
                         (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
                     if (fromBelow) continue;
+                    if (shieldActive) { b.active = false; score += 100; shieldActive = false; break; }
                     TriggerDeath();
                     break;
                 }
@@ -1893,8 +2254,10 @@ int main(void)
                 for (auto& en : enemies)
                 {
                     UpdateEnemy(en, player, platforms, dt);
-                    if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox))
-                        TriggerDeath();
+                    if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
+                        if (shieldActive) { en.active = false; score += 300; shieldActive = false; }
+                        else TriggerDeath();
+                    }
                 }
             }
 
@@ -2067,8 +2430,9 @@ int main(void)
                 }
                 else
                 {
-                    if (IsKeyDown(KEY_D)) { player.x += playerSpeed; playerIsMoving = true; facingRight = true; }
-                    if (IsKeyDown(KEY_A)) { player.x -= playerSpeed; playerIsMoving = true; facingRight = false; }
+                    { float spd = playerSpeed * (speedrunActive ? 1.5f : 1.f);
+                    if (IsKeyDown(KEY_D)) { player.x += spd; playerIsMoving = true; facingRight = true; }
+                    if (IsKeyDown(KEY_A)) { player.x -= spd; playerIsMoving = true; facingRight = false; } }
 
                     if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
                     {
@@ -2279,8 +2643,7 @@ int main(void)
                     currentLevelId++;
                     pendingLevelData = nextLv;
                     hasPendingLevel = true;
-                    cardRarityLeft  = RollCardRarity();
-                    cardRarityRight = RollCardRarity();
+                    InitCardSelect(2, false);
                     currentScreen = CARD_SELECT;
                 }
                 else {
@@ -2301,25 +2664,148 @@ int main(void)
         }
         else if (currentScreen == CARD_SELECT)
         {
-            const float cardMargin = 20.f;
-            const float cardTop    = 50.f;
-            const float cardH      = (float)950 - cardTop - cardMargin;
-            Rectangle leftCard  = { cardMargin,                       cardTop, (float)875 / 2.f - cardMargin * 1.5f, cardH };
-            Rectangle rightCard = { (float)875 / 2.f + cardMargin * 0.5f, cardTop, (float)875 / 2.f - cardMargin * 1.5f, cardH };
+            // ── Card sizes ────────────────────────────────────────────────────
+            float cardW, cardH;
+            bool  isShop = (cardSelectMode == CSM_SHOP);
+            if (isShop) { cardW = 150.f; cardH = 225.f; }
+            else        { cardW = 280.f; cardH = 420.f; }
+            float gapX  = 20.f;
+            float totalW = numDispCards * cardW + (numDispCards - 1) * gapX;
+            float startX = isShop
+                ? ((float)screenWidth - totalW) / 2.f + 40.f
+                : ((float)screenWidth - totalW) / 2.f;
+            float startY = 160.f;  // cards sit lower on screen
+
+            // ── Hotbar slot layout (horizontal, bottom-center) ────────────────
+            static const float HB_W = 64.f, HB_H = 96.f, HB_GAP = 8.f;
+            float hbTotalW = 3 * HB_W + 2 * HB_GAP;
+            float hbStartX = ((float)screenWidth - hbTotalW) * 0.5f;
+            float hbSlotY  = (float)screenHeight - 20.f - HB_H;
 
             Vector2 mouse = GetMousePosition();
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                bool picked = false;
-                if (CheckCollisionPointRec(mouse, leftCard))       picked = true;
-                else if (CheckCollisionPointRec(mouse, rightCard)) picked = true;
-                if (picked) {
-                    if (hasPendingLevel) {
-                        ApplyLevelData(pendingLevelData);
-                        hasPendingLevel = false;
+            static Vector2 prevMouse = {};
+            Vector2 mouseDelta = { mouse.x - prevMouse.x, mouse.y - prevMouse.y };
+            prevMouse = mouse;
+
+            // ── Hotbar drag ───────────────────────────────────────────────────
+            if (hbDrag.active) {
+                if (!hbDrag.falling) {
+                    hbDrag.x = mouse.x;
+                    hbDrag.y = mouse.y;
+                    if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+                        bool placed = false;
+                        for (int i = 0; i < 3; i++) {
+                            Rectangle slotR = { hbStartX + i * (HB_W + HB_GAP), hbSlotY, HB_W, HB_H };
+                            if (CheckCollisionPointRec(mouse, slotR)) {
+                                // Swap: put drag item in slot i, put slot i contents back in srcSlot
+                                HotbarSlot displaced = hotbar[i];
+                                hotbar[i] = { hbDrag.type, hbDrag.cd, hbDrag.charges };
+                                if (hbDrag.srcSlot >= 0 && hbDrag.srcSlot < 3)
+                                    hotbar[hbDrag.srcSlot] = displaced;
+                                hbDrag.active = false;
+                                placed = true;
+                                break;
+                            }
+                        }
+                        if (!placed) {
+                            hbDrag.falling = true;
+                            hbDrag.velX = mouseDelta.x * 60.f;
+                            hbDrag.velY = mouseDelta.y * 60.f + 60.f;
+                        }
                     }
-                    splashTimer = 0.0f;
-                    subaruFrame = 0; subaruTimer = 0.0f;
-                    currentScreen = HOW_HIGH;
+                } else {
+                    hbDrag.velY += 600.f * dt;
+                    hbDrag.x += hbDrag.velX * dt;
+                    hbDrag.y += hbDrag.velY * dt;
+                    if (hbDrag.y > (float)screenHeight + 150.f)
+                        hbDrag.active = false;
+                }
+            } else if (!anyCardPicked && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                // Check hotbar slot for drag start
+                for (int i = 0; i < 3; i++) {
+                    Rectangle slotR = { hbStartX + i * (HB_W + HB_GAP), hbSlotY, HB_W, HB_H };
+                    if (CheckCollisionPointRec(mouse, slotR) && hotbar[i].type != PU_NONE) {
+                        hbDrag = { true, hotbar[i].type, hotbar[i].charges, hotbar[i].cd,
+                                   i, mouse.x, mouse.y, 0.f, 0.f, false };
+                        hotbar[i] = { PU_NONE, 0.f, 0 };
+                        break;
+                    }
+                }
+            }
+
+            // ── Update card animations ────────────────────────────────────────
+            static const float APPEAR_PHASE1 = 0.2f;
+            static const float APPEAR_PHASE2 = 0.4f;
+            static const float EXIT_DUR      = 0.5f;
+            bool anyExiting = false;
+
+            for (int i = 0; i < numDispCards; i++) {
+                CardDisplay& c = displayCards[i];
+                if (!c.appeared) {
+                    c.appearT += dt;
+                    if (c.appearT < APPEAR_PHASE1)
+                        c.scale = Lerp(0.f, 1.1f, c.appearT / APPEAR_PHASE1);
+                    else if (c.appearT < APPEAR_PHASE2)
+                        c.scale = Lerp(1.1f, 1.0f, (c.appearT - APPEAR_PHASE1) / (APPEAR_PHASE2 - APPEAR_PHASE1));
+                    else { c.scale = 1.0f; c.appeared = true; }
+                }
+                if (c.selected || c.dismissed) {
+                    c.exitT += dt;
+                    anyExiting = true;
+                    if (c.selected) {
+                        float t = fminf(c.exitT / EXIT_DUR, 1.f);
+                        c.scale     = 1.f - t;
+                        c.spinPhase = t;
+                    } else {
+                        c.scale = Lerp(1.f, 0.f, fminf(c.exitT / (EXIT_DUR * 0.7f), 1.f));
+                    }
+                }
+                if (c.appeared && !c.selected && !c.dismissed) {
+                    float cx = startX + i * (cardW + gapX) + cardW * 0.5f;
+                    float cy = startY + cardH * 0.5f;
+                    Rectangle hitR = { cx - cardW * c.scale * 0.5f, cy - cardH * c.scale * 0.5f,
+                                       cardW * c.scale, cardH * c.scale };
+                    c.hovered = !hbDrag.active && CheckCollisionPointRec(mouse, hitR);
+                    float hTarget = c.hovered ? 1.f : 0.f;
+                    c.hoverLerp = Lerp(c.hoverLerp, hTarget, fminf(dt * 10.f, 1.f));
+                    c.scale = 1.0f + 0.1f * c.hoverLerp;
+                }
+            }
+
+            // ── Fade to black after pick ──────────────────────────────────────
+            bool allDone = anyCardPicked;
+            for (int i = 0; i < numDispCards && allDone; i++)
+                allDone = allDone && (displayCards[i].exitT >= EXIT_DUR || (!displayCards[i].selected && !displayCards[i].dismissed));
+            if (anyCardPicked) {
+                cardFadeOut += dt / 0.8f;
+                if (cardFadeOut >= 1.f) {
+                    cardFadeOut = 1.f;
+                    if (isShop) {
+                        currentScreen = GAMEPLAY;
+                    } else {
+                        if (hasPendingLevel) { ApplyLevelData(pendingLevelData); hasPendingLevel = false; }
+                        splashTimer = 0.f; subaruFrame = 0; subaruTimer = 0.f;
+                        currentScreen = HOW_HIGH;
+                    }
+                }
+            }
+
+            // ── Click to pick a card (only if not dragging) ───────────────────
+            if (!anyCardPicked && !hbDrag.active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                for (int i = 0; i < numDispCards; i++) {
+                    if (displayCards[i].appeared && displayCards[i].hovered) {
+                        anyCardPicked = true;
+                        displayCards[i].selected = true;
+                        if (isShop) {
+                            int cost = PU_INFO[(int)displayCards[i].type].cost;
+                            if (coins >= cost) { coins -= cost; AddToHotbar(displayCards[i].type); }
+                        } else {
+                            AddToHotbar(displayCards[i].type);
+                        }
+                        for (int j = 0; j < numDispCards; j++)
+                            if (j != i) displayCards[j].dismissed = true;
+                        break;
+                    }
                 }
             }
         }
@@ -2757,22 +3243,7 @@ int main(void)
                 }
             }
 
-            // 15. HUD
-            for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
-            {
-                const char* scoreTxt = TextFormat("SCORE: %u", score);
-                int sw = MeasureText(scoreTxt, 26);
-                DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW);
-            }
-            DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
-            if (onLadder) DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
-            {
-                int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
-                DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
-            }
-            if (playerHasBeatrice)
-                DrawText(TextFormat("BEATRICE: %.1fs", beatriceAbilityTimer), 10, screenHeight - 105, 18, MAGENTA);
-            if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
+            // (HUD drawn after lighting composite — see below)
 
             // 16. Nuke explosion
             if (nukeExplosionPlaying && nukeExplosionFrame < NUKE_EXPL_FRAME_COUNT) {
@@ -2832,23 +3303,16 @@ int main(void)
                 DrawTexturePro(Rain, { 0, 0, (float)Rain.width, (float)Rain.height }, { 0, -sH + rainScrollY, sW, sH }, {}, 0.f, rainTint);
             }
 
-            // 19. "Press E" prompt
+            // 19. "Press F" prompt near nuke / beatrice ground items
             if (!isDying)
             {
-                const float ebScale = 1.75f;
-                const float ebW = EButton.width * ebScale;
-                const float ebH = EButton.height * ebScale;
                 bool shown = false;
-
-                if (!playerHasNuke) {
-                    const float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                    for (const auto& nk : nukes) {
-                        if (!nk.active) continue;
-                        if (CheckCollisionRecs(player, { nk.pos.x, nk.pos.y, nkW, nkH })) {
-                            DrawTexturePro(EButton, { 0,0,(float)EButton.width,(float)EButton.height },
-                                { nk.pos.x + nkW * .5f - ebW * .5f, nk.pos.y - ebH + 5.0f, ebW, ebH }, {}, 0.f, WHITE);
-                            shown = true; break;
-                        }
+                const float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
+                for (const auto& nk : nukes) {
+                    if (!nk.active) continue;
+                    if (CheckCollisionRecs(player, { nk.pos.x, nk.pos.y, nkW, nkH })) {
+                        DrawText("[F]", (int)(nk.pos.x + nkW * .5f - 12), (int)(nk.pos.y - 22), 18, YELLOW);
+                        shown = true; break;
                     }
                 }
                 if (!shown && !playerHasBeatrice) {
@@ -2857,24 +3321,99 @@ int main(void)
                     for (const auto& bc : beatrices) {
                         if (!bc.active) continue;
                         if (CheckCollisionRecs(player, { bc.pos.x, bc.pos.y - bcH, bcW, bcH })) {
-                            DrawTexturePro(EButton, { 0,0,(float)EButton.width,(float)EButton.height },
-                                { bc.pos.x + bcW * .5f - ebW * .5f, bc.pos.y - bcH - ebH - 1.0f, ebW, ebH }, {}, 0.f, WHITE);
+                            DrawText("[F]", (int)(bc.pos.x + bcW * .5f - 12), (int)(bc.pos.y - bcH - 24), 18, YELLOW);
                             break;
                         }
                     }
                 }
             }
 
-            // 20. Beatrice ability bar
-            if (playerHasBeatrice)
+            // 20. HUD (after lighting — always full brightness)
             {
-                const float barMaxW = 180.0f, barH = 14.0f, barX = 20.0f;
-                const float barY = (float)screenHeight - 58.0f;
-                float frac = Clamp(beatriceAbilityTimer / BEATRICE_DURATION, 0.0f, 1.0f);
-                DrawRectangle((int)barX - 2, (int)barY - 2, (int)barMaxW + 4, (int)barH + 4, BLACK);
-                DrawRectangle((int)barX, (int)barY, (int)barMaxW, (int)barH, { 60,0,60,220 });
-                DrawRectangle((int)barX, (int)barY, (int)(barMaxW * frac), (int)barH, (frac > 0.3f) ? MAGENTA : RED);
-                DrawText("BEATRICE", (int)barX, (int)barY - 18, 14, MAGENTA);
+                // Lives
+                for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
+                // Score
+                { const char* scoreTxt = TextFormat("SCORE: %u", score);
+                  int sw = MeasureText(scoreTxt, 26);
+                  DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW); }
+                // Coins
+                { const char* coinStr = TextFormat("C:%d", coins);
+                  DrawText(coinStr, screenWidth / 2 - MeasureText(coinStr,20)/2, 10, 20, GOLD); }
+                // ── Hotbar (bottom-right, vertical) ──────────────────────────
+                {
+                    static const float HB_W = 64.f, HB_H = 96.f;
+                    static const float HB_GAP = 8.f, HB_MARGIN = 10.f;
+                    float totalHBH = 3 * HB_H + 2 * HB_GAP;
+                    float hbX = (float)screenWidth - HB_MARGIN - HB_W;
+                    float hbTopY = (float)screenHeight - HB_MARGIN - totalHBH;
+                    for (int i = 0; i < 3; i++) {
+                        float slotY = hbTopY + i * (HB_H + HB_GAP);
+                        const HotbarSlot& s = hotbar[i];
+                        Color bg = (i == hotbarSlot) ? Color{255,220,0,180} : Color{40,40,40,180};
+                        DrawRectangle((int)hbX, (int)slotY, (int)HB_W, (int)HB_H, bg);
+                        DrawRectangleLines((int)hbX, (int)slotY, (int)HB_W, (int)HB_H, i == hotbarSlot ? YELLOW : DARKGRAY);
+                        DrawText(TextFormat("%d", i+1), (int)hbX + 4, (int)slotY + 4, 12, WHITE);
+                        if (s.type != PU_NONE) {
+                            int ri = PU_INFO[(int)s.type].rarityIdx;
+                            if (ri>=0 && ri<CARD_TEX_COUNT && cardTextures[ri].id>0)
+                                DrawTexturePro(cardTextures[ri],
+                                    {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
+                                    {hbX,slotY,HB_W,HB_H},{0,0},0.f,WHITE);
+                            int nw = MeasureText(PU_INFO[(int)s.type].name, 9);
+                            DrawText(PU_INFO[(int)s.type].name, (int)(hbX + HB_W/2 - nw/2), (int)(slotY+HB_H-13), 9, WHITE);
+                            const PowerupInfo& info = PU_INFO[(int)s.type];
+                            if (info.passive) {
+                                DrawText("AUTO", (int)(hbX - 42), (int)(slotY + HB_H/2 - 8), 13, LIME);
+                            } else if (info.maxCD > 0.f) {
+                                Color cdColor = s.cd <= 0.f ? LIME : ORANGE;
+                                const char* cdStr = s.cd <= 0.f ? "READY" : TextFormat("%.0fs", s.cd + 0.5f);
+                                int cw = MeasureText(cdStr, 12);
+                                DrawText(cdStr, (int)(hbX - cw - 6), (int)(slotY + HB_H/2 - 7), 12, cdColor);
+                            } else {
+                                DrawText(TextFormat("x%d", s.charges), (int)(hbX - 30), (int)(slotY + HB_H/2 - 7), 14, SKYBLUE);
+                            }
+                        }
+                    }
+                }
+                // ── Ability bars (bottom-left, stacking upward) ───────────────
+                {
+                    struct ABar { const char* name; float cur; float maxV; Color col; };
+                    ABar abars[6]; int nABars = 0;
+                    if (playerHasBeatrice && beatriceAbilityTimer > 0.f)
+                        abars[nABars++] = {"BEATRICE", beatriceAbilityTimer, BEATRICE_DURATION, MAGENTA};
+                    if (speedrunActive && speedrunTimer > 0.f)
+                        abars[nABars++] = {"SPEEDRUN", speedrunTimer, 5.f, LIME};
+                    if (shieldActive && shieldTimer > 0.f)
+                        abars[nABars++] = {"SHIELD", shieldTimer, 0.3f, SKYBLUE};
+                    if (dashActive && dashInvulTimer > 0.f)
+                        abars[nABars++] = {"DASH", dashInvulTimer, 0.5f, GOLD};
+                    static const float AB_W = 150.f, AB_H = 16.f, AB_GAP = 4.f, AB_X = 10.f;
+                    for (int i = 0; i < nABars; i++) {
+                        float ay = (float)screenHeight - 95.f - (float)(nABars - i) * (AB_H + AB_GAP);
+                        float fill = (abars[i].maxV > 0.f) ? fminf(abars[i].cur / abars[i].maxV, 1.f) : 0.f;
+                        DrawRectangle((int)AB_X - 2, (int)ay - 2, (int)AB_W + 4, (int)AB_H + 4, {0,0,0,180});
+                        DrawRectangle((int)AB_X, (int)ay, (int)AB_W, (int)AB_H, {40,40,40,200});
+                        DrawRectangle((int)AB_X, (int)ay, (int)(AB_W * fill), (int)AB_H, abars[i].col);
+                        DrawText(abars[i].name, (int)AB_X + 4, (int)ay + 2, 11, WHITE);
+                        const char* ts = TextFormat("%.1fs", abars[i].cur);
+                        int tw = MeasureText(ts, 10);
+                        DrawText(ts, (int)(AB_X + AB_W - tw - 4), (int)(ay + 3), 10, WHITE);
+                    }
+                }
+                // ── RBD fade overlay ──────────────────────────────────────────
+                if (rbdFading) {
+                    float t = 1.f - rbdFadeTimer / 2.f;
+                    unsigned char a = (unsigned char)(t * 255.f);
+                    DrawRectangle(0, 0, screenWidth, screenHeight, {0,0,0,a});
+                }
+                // Debug text
+                DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
+                if (onLadder) DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
+                {
+                    int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
+                    DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
+                }
+                if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
             }
 
             // 21. Nuke flash
@@ -2936,41 +3475,143 @@ int main(void)
         }
         else if (currentScreen == CARD_SELECT)
         {
-            ClearBackground(BLACK);
+            bool  isShop = (cardSelectMode == CSM_SHOP);
+            float cardW  = isShop ? 150.f : 280.f;
+            float cardH  = isShop ? 225.f : 420.f;
+            float gapX   = 20.f;
+            float totalW = numDispCards * cardW + (numDispCards - 1) * gapX;
+            float startX = isShop
+                ? ((float)screenWidth - totalW) / 2.f + 40.f
+                : ((float)screenWidth - totalW) / 2.f;
+            float startY = 160.f;
 
-            const float cardMargin = 20.f;
-            const float cardTop    = 50.f;
-            const float cardH      = (float)screenHeight - cardTop - cardMargin;
-            float halfW = (float)screenWidth / 2.f;
-            Rectangle leftCard  = { cardMargin,              cardTop, halfW - cardMargin * 1.5f, cardH };
-            Rectangle rightCard = { halfW + cardMargin * 0.5f, cardTop, halfW - cardMargin * 1.5f, cardH };
+            // Hotbar layout (matches update block)
+            static const float HB_W2 = 64.f, HB_H2 = 96.f, HB_GAP2 = 8.f;
+            float hbTotalW2 = 3 * HB_W2 + 2 * HB_GAP2;
+            float hbStartX2 = ((float)screenWidth - hbTotalW2) * 0.5f;
+            float hbSlotY2  = (float)screenHeight - 20.f - HB_H2;
 
-            // Draw left card
-            if (cardRarityLeft >= 0 && cardRarityLeft < CARD_TEX_COUNT && cardTextures[cardRarityLeft].id > 0)
-                DrawTexturePro(cardTextures[cardRarityLeft],
-                    { 0, 0, (float)cardTextures[cardRarityLeft].width, (float)cardTextures[cardRarityLeft].height },
-                    leftCard, { 0, 0 }, 0.f, WHITE);
-            else
-                DrawRectangleRec(leftCard, DARKGRAY);
+            // Title
+            const char* title = isShop ? "SHOP - CHOOSE TO BUY" : "CHOOSE YOUR POWER";
+            int tw = MeasureText(title, 28);
+            DrawText(title, screenWidth / 2 - tw / 2, 50, 28, WHITE);
+            if (isShop) {
+                const char* coinTxt = TextFormat("Coins: %d", coins);
+                DrawText(coinTxt, screenWidth / 2 + tw / 2 + 20, 50, 22, GOLD);
+            }
 
-            // Draw right card
-            if (cardRarityRight >= 0 && cardRarityRight < CARD_TEX_COUNT && cardTextures[cardRarityRight].id > 0)
-                DrawTexturePro(cardTextures[cardRarityRight],
-                    { 0, 0, (float)cardTextures[cardRarityRight].width, (float)cardTextures[cardRarityRight].height },
-                    rightCard, { 0, 0 }, 0.f, WHITE);
-            else
-                DrawRectangleRec(rightCard, DARKGRAY);
+            // Draw each card
+            for (int i = 0; i < numDispCards; i++) {
+                const CardDisplay& c = displayCards[i];
+                if (c.scale <= 0.001f) continue;
+                float cx = startX + i * (cardW + gapX) + cardW * 0.5f;
+                float cy = startY + cardH * 0.5f;
 
-            // Hover highlight
-            Vector2 mouse = GetMousePosition();
-            if (CheckCollisionPointRec(mouse, leftCard))
-                DrawRectangleLinesEx(leftCard, 4, YELLOW);
-            if (CheckCollisionPointRec(mouse, rightCard))
-                DrawRectangleLinesEx(rightCard, 4, YELLOW);
+                float scaleX = c.scale;
+                bool  flipped = false;
+                if (c.selected && c.exitT > 0.f) {
+                    float spinF = cosf(c.spinPhase * 3.14159f * 3.f);
+                    scaleX = fabsf(spinF) * c.scale;
+                    flipped = spinF < 0.f;
+                }
 
-            const char* chooseTxt = "CHOOSE YOUR POWER";
-            int ctW = MeasureText(chooseTxt, 30);
-            DrawText(chooseTxt, screenWidth / 2 - ctW / 2, 10, 30, WHITE);
+                float dW = cardW * scaleX;
+                float dH = cardH * c.scale;
+                if (dW < 1.f) dW = 1.f;
+                if (dH < 1.f) dH = 1.f;
+                Rectangle dest = { cx - dW * 0.5f, cy - dH * 0.5f, dW, dH };
+
+                // Draw card texture
+                int ri = c.rarity;
+                static const Color rarityColors[6]={{180,180,180,255},{60,160,255,255},{120,80,255,255},{255,150,0,255},{255,200,50,255},{200,50,255,255}};
+                if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0) {
+                    float srcW = flipped ? -(float)cardTextures[ri].width : (float)cardTextures[ri].width;
+                    float srcX = flipped ? (float)cardTextures[ri].width : 0.f;
+                    DrawTexturePro(cardTextures[ri], { srcX, 0, srcW, (float)cardTextures[ri].height },
+                        dest, { 0, 0 }, 0.f, WHITE);
+                } else {
+                    DrawRectangleRec(dest, rarityColors[ri]);
+                }
+
+                // Hover highlight
+                if (c.hovered && !c.dismissed && !c.selected)
+                    DrawRectangleLinesEx(dest, 3, YELLOW);
+
+                // Text OUTSIDE card — name above, desc+cd below
+                if (c.scale > 0.2f && !c.selected) {
+                    float alpha = fminf((c.scale - 0.2f) / 0.5f, 1.f);
+                    unsigned char a = (unsigned char)(alpha * 255.f);
+                    int nameFS = isShop ? 13 : 17;
+                    int descFS = isShop ? 10 : 13;
+
+                    // Name above the card
+                    const char* nm = PU_INFO[(int)c.type].name;
+                    int nw = MeasureText(nm, nameFS);
+                    DrawText(nm, (int)(cx - nw * 0.5f), (int)(dest.y - nameFS - 6.f), nameFS, {255,255,255,a});
+
+                    // Desc below the card
+                    float belowY = dest.y + dH + 6.f;
+                    const char* ds = PU_INFO[(int)c.type].desc;
+                    int dw2 = MeasureText(ds, descFS);
+                    DrawText(ds, (int)(cx - dw2 * 0.5f), (int)belowY, descFS, {210,210,210,a});
+
+                    // CD info
+                    const char* cd = PU_INFO[(int)c.type].cdInfo;
+                    int cw = MeasureText(cd, descFS);
+                    DrawText(cd, (int)(cx - cw * 0.5f), (int)(belowY + descFS + 3.f), descFS, {200,200,100,a});
+
+                    // Cost (shop only)
+                    if (isShop) {
+                        const char* costStr = TextFormat("%dc", PU_INFO[(int)c.type].cost);
+                        int costW = MeasureText(costStr, descFS);
+                        Color costColor = (coins >= PU_INFO[(int)c.type].cost)
+                            ? Color{100,255,100,a} : Color{255,80,80,a};
+                        DrawText(costStr, (int)(cx - costW * 0.5f), (int)(belowY + (descFS + 3.f) * 2), descFS, costColor);
+                    }
+                }
+            }
+
+            // ── Hotbar (horizontal, bottom-center) ───────────────────────────
+            DrawText("YOUR ITEMS", (int)(hbStartX2), (int)(hbSlotY2 - 22), 14, GRAY);
+            for (int i = 0; i < 3; i++) {
+                float slotX = hbStartX2 + i * (HB_W2 + HB_GAP2);
+                const HotbarSlot& s = hotbar[i];
+                Color bg = (i == hotbarSlot) ? Color{255,220,0,130} : Color{40,40,40,150};
+                DrawRectangle((int)slotX, (int)hbSlotY2, (int)HB_W2, (int)HB_H2, bg);
+                DrawRectangleLines((int)slotX, (int)hbSlotY2, (int)HB_W2, (int)HB_H2, i == hotbarSlot ? YELLOW : DARKGRAY);
+                DrawText(TextFormat("%d", i+1), (int)slotX + 4, (int)hbSlotY2 + 4, 12, WHITE);
+                if (s.type != PU_NONE) {
+                    int ri = PU_INFO[(int)s.type].rarityIdx;
+                    if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0)
+                        DrawTexturePro(cardTextures[ri],
+                            {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
+                            {slotX, hbSlotY2, HB_W2, HB_H2}, {0,0}, 0.f, WHITE);
+                    int nw = MeasureText(PU_INFO[(int)s.type].name, 9);
+                    DrawText(PU_INFO[(int)s.type].name, (int)(slotX + HB_W2/2 - nw/2), (int)(hbSlotY2 + HB_H2 - 12), 9, WHITE);
+                }
+            }
+
+            // Dragged item (follows mouse or falls)
+            if (hbDrag.active) {
+                int ri = PU_INFO[(int)hbDrag.type].rarityIdx;
+                float dX = hbDrag.x - HB_W2 * 0.5f, dY = hbDrag.y - HB_H2 * 0.5f;
+                Color tint = { 255,255,255,200 };
+                if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0)
+                    DrawTexturePro(cardTextures[ri],
+                        {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
+                        {dX, dY, HB_W2, HB_H2}, {0,0}, 0.f, tint);
+                else
+                    DrawRectangle((int)dX, (int)dY, (int)HB_W2, (int)HB_H2, {120,80,200,200});
+                DrawRectangleLines((int)dX, (int)dY, (int)HB_W2, (int)HB_H2, WHITE);
+                int nw = MeasureText(PU_INFO[(int)hbDrag.type].name, 9);
+                DrawText(PU_INFO[(int)hbDrag.type].name, (int)(hbDrag.x - nw * 0.5f), (int)(hbDrag.y + HB_H2 * 0.5f - 12), 9, WHITE);
+            }
+
+            // Fade overlay
+            if (cardFadeOut > 0.f) {
+                unsigned char fa = (unsigned char)(fminf(cardFadeOut, 1.f) * 255.f);
+                DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, fa });
+            }
         }
 
         EndDrawing();
@@ -2982,6 +3623,7 @@ int main(void)
     UnloadSound(HitSound);
     UnloadSound(nukeSound);
     UnloadSound(jumpBrlSound);
+    UnloadSound(rbdSound);
 
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
