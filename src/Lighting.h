@@ -34,6 +34,8 @@ public:
     void    SetGlobalAmbient(float a) { _globalAmbient = a; }
     void    SetGlobalDarkness(float d) { _globalDarkness = d; }
     void    SetAmbientColor(Color c) { _ambientColor = c; }
+    void    SetBloom(bool en, float threshold = 0.7f, float intensity = 0.8f)
+                { _bloomEnabled = en; _bloomThreshold = threshold; _bloomIntensity = intensity; }
     Quality GetQuality() const { return _quality; }
 
     // ── Runtime (per-frame) light API ─────────────────────────────────────────
@@ -107,8 +109,16 @@ private:
     std::vector<LightData> _runtimeLights;
 
     void RunBlur(RenderTexture2D src, RenderTexture2D dst, Vector2 dir);
-    // Merges lv.lights + _runtimeLights and uploads them to the light shader.
     void UploadLights(const LevelData& lv);
+
+    bool    _bloomEnabled   = false;
+    float   _bloomThreshold = 0.7f;
+    float   _bloomIntensity = 0.8f;
+    RenderTexture2D _compositeRT = {};
+    RenderTexture2D _bloomRT     = {};
+    Shader  _bloomExtractShader  = {};
+    int     _locBE_threshold     = -1;
+    int     _locBE_intensity     = -1;
 
     // isFinalPass=false  raw direct light only, no ambient/floor (used as bounce source)
     // isFinalPass=true   full output: direct + bounce + ambient + floor clamp

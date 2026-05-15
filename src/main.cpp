@@ -421,9 +421,29 @@ int main(void)
     Rectangle btnPlay = { 340, 450, 200, 40 };
     Rectangle btnExit = { 340, 500, 200, 40 };
     Rectangle btnCtrl = { 340, 550, 200, 40 };
-    Rectangle btnEditor = { 340, 600, 200, 40 };
+    Rectangle btnEditor  = { 340, 600, 200, 40 };
+    Rectangle btnOptions = { 340, 650, 200, 40 };
 
     bool debugPath = false;
+
+    // ── Debug menu ────────────────────────────────────────────────────────────
+    bool  dbgMenuOpen      = false;
+    float dbgMenuScroll    = 0.f;
+    bool  dbgImmortal      = false;
+    bool  dbgFlight        = false;
+    bool  dbgFlightNoCol   = false;
+    int   dbgGivePUIdx     = 0;
+    bool  dbgBloomEnabled  = true;
+    float dbgBloomThreshold= 0.7f;
+    float dbgBloomIntensity= 0.8f;
+
+    // ── Heavy item equip state ─────────────────────────────────────────────────
+    float heavyEquipTimer  = 0.f;
+    bool  isCarryingHeavy  = false;
+
+    // ── Shield animation ──────────────────────────────────────────────────────
+    float shieldAnimTimer  = 0.f;
+    int   shieldAnimFrame  = 0;
 
     unsigned int score = 0;
     int          currentLevelId = 1;
@@ -921,7 +941,11 @@ int main(void)
     Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
     Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
-    Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
+    Texture2D FButton      = LoadTexture("Assets/Textures/UI/FButton.png");
+    Texture2D texGoldHeart = LoadTexture("Assets/Textures/Cards/GoldHeart.png");
+    Texture2D texHeart     = LoadTexture("Assets/Textures/Cards/heart.png");
+    Texture2D texShield1   = LoadTexture("Assets/Textures/Cards/Shield1.png");
+    Texture2D texShield2   = LoadTexture("Assets/Textures/Cards/Shield2.png");
 
     static constexpr int PROP_TEX_COUNT = 6;
     static constexpr int PROP_FIRE_VARIANT = 5;
@@ -1309,6 +1333,7 @@ int main(void)
     auto TriggerDeath = [&]()
         {
             if (isDying) return;
+            if (dbgImmortal) return;
             // Return By Death intercept
             for (auto& s : hotbar) {
                 if (s.type == PU_RETURN_BY_DEATH && s.charges > 0) {
@@ -1518,6 +1543,10 @@ int main(void)
             {
                 selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break;
             }
+            if (CheckCollisionPointRec(mouse, btnOptions))
+            {
+                selectedOption = 5; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgMenuOpen = !dbgMenuOpen;
+            }
         }
         else if (currentScreen == CONTROLS)
         {
@@ -1714,14 +1743,28 @@ int main(void)
             }
 
             // ── Hotbar slot switching ─────────────────────────────────────────
-            if (IsKeyPressed(KEY_ONE))   hotbarSlot = 0;
-            if (IsKeyPressed(KEY_TWO))   hotbarSlot = 1;
-            if (IsKeyPressed(KEY_THREE)) hotbarSlot = 2;
             {
-                float wheel = GetMouseWheelMove();
-                if (wheel > 0.f) hotbarSlot = (hotbarSlot + 2) % 3;
-                if (wheel < 0.f) hotbarSlot = (hotbarSlot + 1) % 3;
+                int prevSlot = hotbarSlot;
+                if (IsKeyPressed(KEY_ONE))   hotbarSlot = 0;
+                if (IsKeyPressed(KEY_TWO))   hotbarSlot = 1;
+                if (IsKeyPressed(KEY_THREE)) hotbarSlot = 2;
+                {
+                    float wheel = GetMouseWheelMove();
+                    if (wheel > 0.f) hotbarSlot = (hotbarSlot + 2) % 3;
+                    if (wheel < 0.f) hotbarSlot = (hotbarSlot + 1) % 3;
+                }
+                auto isHeavyItem = [](PowerupType t) -> bool {
+                    return t==PU_NUKE_PU || t==PU_LARPER || t==PU_EXTRA_LIFE || t==PU_ONE_MORE_LARP;
+                };
+                if (prevSlot != hotbarSlot && isHeavyItem(hotbar[hotbarSlot].type))
+                    heavyEquipTimer = 0.f;
             }
+            auto isHeavyItem = [](PowerupType t) -> bool {
+                return t==PU_NUKE_PU || t==PU_LARPER || t==PU_EXTRA_LIFE || t==PU_ONE_MORE_LARP;
+            };
+            isCarryingHeavy = isHeavyItem(hotbar[hotbarSlot].type);
+            if (isCarryingHeavy) heavyEquipTimer = fminf(heavyEquipTimer + dt, 1.f);
+            else                 heavyEquipTimer = 0.f;
 
             // ── Active powerup effects ────────────────────────────────────────
             if (speedrunActive) { speedrunTimer -= dt; if (speedrunTimer <= 0.f) speedrunActive = false; }
@@ -1750,7 +1793,8 @@ int main(void)
                 if (slot.type != PU_NONE) {
                     const PowerupInfo& info = PU_INFO[(int)slot.type];
                     bool ready = info.maxCD > 0.f ? (slot.cd <= 0.f) : (slot.charges > 0);
-                    if (ready && !info.passive) {
+                    bool heavyOK = !isHeavyItem(slot.type) || (heavyEquipTimer >= 1.f);
+                    if (ready && !info.passive && heavyOK) {
                         ePressHandled = true;
                         // ── Apply powerup ──────────────────────────────────────
                         switch(slot.type) {
@@ -2092,51 +2136,6 @@ int main(void)
                 }
             }
 
-            // ── Throw nuke (G) ────────────────────────────────────────────────
-            if (playerHasNuke && IsKeyPressed(KEY_G))
-            {
-                playerHasNuke = false;
-                float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                FlyingNuke fn;
-                fn.rect = { player.x + player.width * 0.5f - nkW * 0.5f,
-                               player.y + player.height * 0.5f - nkH * 0.5f, nkW, nkH };
-                fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };
-                fn.active = true;
-                flyingNukes.push_back(fn);
-            }
-
-            // ── Detonate nuke (F) ─────────────────────────────────────────────
-            if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
-            {
-                PlaySound(nukeSound);
-                float scale = 3.8f * 0.85f * 1.05f;
-                float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
-                float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                nukeExplosionPos = { player.x + image->width * scale * 0.5f - nkW * 0.5f,
-                                     player.y - nkH - 2.0f };
-                playerHasNuke = false;
-                nukeExplosionPlaying = true;
-                nukeExplosionFrame = 0;
-                nukeExplosionTimer = 0.0f;
-                nukeFlashTimer = 0.0f;
-                nukeExtraDelay = 3.0f;
-
-                for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
-                for (auto& en : enemies) { if (en.active) { score += 300; en.active = false; } }
-
-                regulusIsStunned = true;
-                regulusStunEnding = false;
-                regulusStunFrame = 0;
-                regulusStunTimer = 0.0f;
-                regulusStunLoops = 0;
-                regulusStunEndFrame = 0;
-                regulusStunEndTimer = 0.0f;
-                regulusThrowing = false;
-                regulusSpawnPending = false;
-                regulusForceBlue = false;
-                regulusThrowFrame = 0;
-                regulusActiveSpawnTimer = 0.0f;
-            }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
 
             if (nukeExplosionPlaying)
@@ -2221,15 +2220,6 @@ int main(void)
                         regulusForceBlue = false;
                     }
                 }
-            }
-
-            if (!ePressHandled && !isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
-            {
-                regulusThrowing = true;
-                regulusThrowFrame = 0;
-                regulusThrowTimer = 0.0f;
-                regulusSpawnPending = true;
-                regulusForceBlue = false;
             }
 
             // ── Barrel / player collision ─────────────────────────────────────
@@ -2344,6 +2334,7 @@ int main(void)
             // ── Player input ──────────────────────────────────────────────────
             if (!isDying)
             {
+                if ((dbgFlight || dbgFlightNoCol) && onLadder) { onLadder = false; currentLadder = -1; }
                 if (onLadder)
                 {
                     const Ladder& lad = ladders[currentLadder];
@@ -2430,14 +2421,15 @@ int main(void)
                 }
                 else
                 {
+                    bool flyMode = dbgFlight || dbgFlightNoCol;
                     { float spd = playerSpeed * (speedrunActive ? 1.5f : 1.f);
                     if (IsKeyDown(KEY_D)) { player.x += spd; playerIsMoving = true; facingRight = true; }
                     if (IsKeyDown(KEY_A)) { player.x -= spd; playerIsMoving = true; facingRight = false; } }
 
-                    if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
+                    if (!flyMode && (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S)))
                     {
                         bool entered = false;
-                        if (!playerHasNuke && !playerHasBeatrice)
+                        if (!isCarryingHeavy && !playerHasBeatrice)
                         {
                             for (int i = 0; i < (int)ladders.size(); i++)
                             {
@@ -2471,14 +2463,22 @@ int main(void)
                         }
                     }
 
-                    if (IsKeyPressed(KEY_SPACE) && !isJumping)
+                    if (!flyMode && IsKeyPressed(KEY_SPACE) && !isJumping)
                     {
                         velocityY = jumpForce; isJumping = true; isGrounded = false;
                     }
 
-                    if (!isGrounded) velocityY += gravity;
-                    player.y += velocityY;
+                    if (flyMode) {
+                        velocityX = 0; velocityY = 0;
+                        if (IsKeyDown(KEY_W)) player.y -= playerSpeed * 2.5f;
+                        if (IsKeyDown(KEY_S)) player.y += playerSpeed * 2.5f;
+                        isJumping = false;
+                    } else {
+                        if (!isGrounded) velocityY += gravity;
+                        player.y += velocityY;
+                    }
 
+                    if (!dbgFlightNoCol)
                     {
                         float colW = player.width * 0.5f;
                         float colH = player.height * 0.5f;
@@ -2494,6 +2494,7 @@ int main(void)
                         isGrounded = col.grounded;
                         if (col.grounded) isJumping = false;
                     }
+                    else { isGrounded = false; }
 
                     // Push player up when an elevator platform rises into them
                     if (!onLadder)
@@ -2542,9 +2543,9 @@ int main(void)
                     }
                     else if (isJumping)
                     {
-                        if (playerHasBeatrice) image = &Dk_Mario_Jump_Beatrice;
-                        else if (playerHasNuke)     image = &imgMarioJumpNuke;
-                        else                        image = &imgMarioJump;
+                        if (playerHasBeatrice)    image = &Dk_Mario_Jump_Beatrice;
+                        else if (isCarryingHeavy) image = &imgMarioJumpNuke;
+                        else                      image = &imgMarioJump;
                     }
                     else if (playerIsMoving)
                     {
@@ -2552,15 +2553,15 @@ int main(void)
                         {
                             walkFrame = (walkFrame + 1) % 2; animationTimer = fmod(animationTimer, animationSpeed);
                         }
-                        if (playerHasBeatrice) image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
-                        else if (playerHasNuke)     image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
-                        else                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
+                        if (playerHasBeatrice)    image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
+                        else if (isCarryingHeavy) image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
+                        else                      image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
                     }
                     else
                     {
-                        if (playerHasBeatrice) image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
-                        else if (playerHasNuke)     image = &imgMarioIdleNuke;
-                        else                        image = &imgMarioIdle;
+                        if (playerHasBeatrice)    image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
+                        else if (isCarryingHeavy) image = &imgMarioIdleNuke;
+                        else                      image = &imgMarioIdle;
                         walkFrame = 0;
                     }
 
@@ -2843,39 +2844,45 @@ int main(void)
             const char* exitText = "EXIT";
             const char* controlText = "CONTROLS";
             const char* editorText = "LEVEL EDITOR";
+            const char* optionsText = "OPTIONS";
             const char* subtitle = "1967 Bomboclat Industries LLC";
 
-            int titleW = MeasureText(title, titleFont);
-            int playW = MeasureText(playText, menuFont);
-            int exitW = MeasureText(exitText, menuFont);
+            int titleW   = MeasureText(title, titleFont);
+            int playW    = MeasureText(playText, menuFont);
+            int exitW    = MeasureText(exitText, menuFont);
             int controlW = MeasureText(controlText, menuFont);
-            int editorW = MeasureText(editorText, menuFont);
-            int subW = MeasureText(subtitle, smallFont);
+            int editorW  = MeasureText(editorText, menuFont);
+            int optionsW = MeasureText(optionsText, menuFont);
+            int subW     = MeasureText(subtitle, smallFont);
 
-            int startY = (screenHeight - (titleFont + spacing * 5 + menuFont * 4 + smallFont)) / 2;
-            int titleX = (screenWidth - titleW) / 2, titleY = startY;
-            int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
-            int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
+            int startY   = (screenHeight - (titleFont + spacing * 6 + menuFont * 5 + smallFont)) / 2;
+            int titleX   = (screenWidth - titleW) / 2,   titleY   = startY;
+            int playX    = (screenWidth - playW) / 2,    playY    = titleY + titleFont + spacing;
+            int exitX    = (screenWidth - exitW) / 2,    exitY    = playY + menuFont + spacing;
             int controlX = (screenWidth - controlW) / 2, controlY = exitY + menuFont + spacing;
-            int editorX = (screenWidth - editorW) / 2, editorY = controlY + menuFont + spacing;
-            int subX = (screenWidth - subW) / 2, subY = editorY + menuFont + spacing;
+            int editorX  = (screenWidth - editorW) / 2,  editorY  = controlY + menuFont + spacing;
+            int optionsX = (screenWidth - optionsW) / 2, optionsY = editorY + menuFont + spacing;
+            int subX     = (screenWidth - subW) / 2,     subY     = optionsY + menuFont + spacing;
 
-            btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)(menuFont + 6) };
-            btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)(menuFont + 6) };
-            btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)(menuFont + 6) };
-            btnEditor = { (float)(editorX - 10), (float)editorY,  (float)(editorW + 20), (float)(menuFont + 6) };
+            btnPlay    = { (float)(playX - 10),    (float)playY,    (float)(playW + 20),    (float)(menuFont + 6) };
+            btnExit    = { (float)(exitX - 10),    (float)exitY,    (float)(exitW + 20),    (float)(menuFont + 6) };
+            btnCtrl    = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)(menuFont + 6) };
+            btnEditor  = { (float)(editorX - 10),  (float)editorY,  (float)(editorW + 20),  (float)(menuFont + 6) };
+            btnOptions = { (float)(optionsX - 10), (float)optionsY, (float)(optionsW + 20), (float)(menuFont + 6) };
 
             if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
             if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
             if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
             if (selectedOption == 3) DrawText(">", editorX - 40, editorY, menuFont, dkOrange);
+            if (selectedOption == 5) DrawText(">", optionsX - 40, optionsY, menuFont, dkOrange);
 
-            DrawText(title, titleX, titleY, titleFont, dkRed);
-            DrawText(playText, playX, playY, menuFont, dkWhite);
-            DrawText(exitText, exitX, exitY, menuFont, dkWhite);
-            DrawText(controlText, controlX, controlY, menuFont, dkWhite);
-            DrawText(editorText, editorX, editorY, menuFont, dkOrange);
-            DrawText(subtitle, subX, subY, smallFont, dkOrange);
+            DrawText(title,       titleX,   titleY,   titleFont, dkRed);
+            DrawText(playText,    playX,    playY,    menuFont,  dkWhite);
+            DrawText(exitText,    exitX,    exitY,    menuFont,  dkWhite);
+            DrawText(controlText, controlX, controlY, menuFont,  dkWhite);
+            DrawText(editorText,  editorX,  editorY,  menuFont,  dkOrange);
+            DrawText(optionsText, optionsX, optionsY, menuFont,  { 80, 190, 255, 255 });
+            DrawText(subtitle,    subX,     subY,     smallFont, dkOrange);
         }
         else if (currentScreen == HOW_HIGH)
         {
@@ -3179,18 +3186,46 @@ int main(void)
                     if (!facingRight && !onLadder) src.width *= -1;
                     DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
 
-                    if (playerHasNuke && !isDying)
+                    // Heavy item sprite above player
+                    if (isCarryingHeavy && !isDying)
                     {
-                        float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
-                        float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                        float nkX = player.x + dest.width * 0.5f - nkW * 0.5f;
-                        float nukeOffsetY = 5.0f;
-                        bool  moving = (!onLadder && !isJumping && walkFrame != 0);
-                        if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
-                        float nkY = drawY - nkH - 2.0f + nukeOffsetY;
-                        Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
-                        if (!facingRight) nukeSrc.width *= -1;
-                        DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, {}, 0.f, WHITE);
+                        Texture2D* heavyTex = nullptr;
+                        switch (hotbar[hotbarSlot].type) {
+                        case PU_NUKE_PU:       heavyTex = &Nuke;         break;
+                        case PU_LARPER:        heavyTex = &LadderPart;   break;
+                        case PU_EXTRA_LIFE:    heavyTex = &texGoldHeart; break;
+                        case PU_ONE_MORE_LARP: heavyTex = &texHeart;     break;
+                        default: break;
+                        }
+                        if (heavyTex && heavyTex->id > 0) {
+                            float itemH = 40.f;
+                            float itemW = itemH * (float)heavyTex->width / (float)heavyTex->height;
+                            float itemX = player.x + dest.width * 0.5f - itemW * 0.5f;
+                            bool  moving = (!onLadder && !isJumping && walkFrame != 0);
+                            float bobY = moving ? 10.f : 4.f;
+                            float itemY = drawY - itemH - 2.f + bobY;
+                            Rectangle itemSrc = { 0, 0, (float)heavyTex->width, (float)heavyTex->height };
+                            if (!facingRight) itemSrc.width *= -1;
+                            DrawTexturePro(*heavyTex, itemSrc, { itemX, itemY, itemW, itemH }, {}, 0.f, WHITE);
+                        }
+                    }
+
+                    // Shield animation (drawn while inside scene RT)
+                    if (shieldActive && !isDying)
+                    {
+                        shieldAnimTimer += dt;
+                        if (shieldAnimTimer >= 0.1f) {
+                            shieldAnimTimer = fmodf(shieldAnimTimer, 0.1f);
+                            shieldAnimFrame = 1 - shieldAnimFrame;
+                        }
+                        Texture2D* shTex = (shieldAnimFrame == 0) ? &texShield1 : &texShield2;
+                        if (shTex->id > 0) {
+                            float shW = shTex->width * 2.f, shH = shTex->height * 2.f;
+                            float shX = player.x + dest.width * 0.5f - shW * 0.5f;
+                            float shY = player.y + player.height * 0.5f - shH * 0.5f;
+                            DrawTexturePro(*shTex, { 0,0,(float)shTex->width,(float)shTex->height },
+                                { shX, shY, shW, shH }, {}, 0.f, { 255,255,255,210 });
+                        }
                     }
                 }
             }
@@ -3257,6 +3292,18 @@ int main(void)
             // ── Lighting composite ────────────────────────────────────────────
             gameLighting.EndScene();
             gameLighting.BakeOccludersFromLevel(currentLevelData, cam);
+            if (shieldActive) {
+                LightData shieldGlow;
+                shieldGlow.x = player.x + player.width * 0.5f;
+                shieldGlow.y = player.y + player.height * 0.5f;
+                shieldGlow.radius = 130.f;
+                shieldGlow.r = 0.45f; shieldGlow.g = 0.75f; shieldGlow.b = 1.f;
+                shieldGlow.intensity = 0.8f;
+                shieldGlow.pulseFreq = 3.f; shieldGlow.pulseAmp = 0.25f;
+                shieldGlow.enabled = true;
+                gameLighting.AddRuntimeLight(shieldGlow);
+            }
+            gameLighting.SetBloom(dbgBloomEnabled, dbgBloomThreshold, dbgBloomIntensity);
             gameLighting.Composite(currentLevelData, cam);
 
             // 17. Props (unlit / overlay)
@@ -3306,12 +3353,23 @@ int main(void)
             // 19. "Press F" prompt near nuke / beatrice ground items
             if (!isDying)
             {
+                const float fbW = (FButton.id > 0) ? (float)FButton.width  * 2.f : 24.f;
+                const float fbH = (FButton.id > 0) ? (float)FButton.height * 2.f : 24.f;
+                auto DrawFPrompt = [&](float cx, float topY) {
+                    float dx = cx - fbW * 0.5f, dy = topY - fbH - 4.f;
+                    if (FButton.id > 0)
+                        DrawTexturePro(FButton,
+                            { 0, 0, (float)FButton.width, (float)FButton.height },
+                            { dx, dy, fbW, fbH }, { 0, 0 }, 0.f, WHITE);
+                    else
+                        DrawText("[F]", (int)dx, (int)dy, 18, YELLOW);
+                };
                 bool shown = false;
                 const float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
                 for (const auto& nk : nukes) {
                     if (!nk.active) continue;
                     if (CheckCollisionRecs(player, { nk.pos.x, nk.pos.y, nkW, nkH })) {
-                        DrawText("[F]", (int)(nk.pos.x + nkW * .5f - 12), (int)(nk.pos.y - 22), 18, YELLOW);
+                        DrawFPrompt(nk.pos.x + nkW * 0.5f, nk.pos.y);
                         shown = true; break;
                     }
                 }
@@ -3321,7 +3379,7 @@ int main(void)
                     for (const auto& bc : beatrices) {
                         if (!bc.active) continue;
                         if (CheckCollisionRecs(player, { bc.pos.x, bc.pos.y - bcH, bcW, bcH })) {
-                            DrawText("[F]", (int)(bc.pos.x + bcW * .5f - 12), (int)(bc.pos.y - bcH - 24), 18, YELLOW);
+                            DrawFPrompt(bc.pos.x + bcW * 0.5f, bc.pos.y - bcH);
                             break;
                         }
                     }
@@ -3330,8 +3388,20 @@ int main(void)
 
             // 20. HUD (after lighting — always full brightness)
             {
-                // Lives
-                for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
+                // Lives (heart.png for 1-3, GoldHeart.png for 4+)
+                {
+                    const float hW = 30.f, hH = 30.f, hGap = 6.f;
+                    for (int i = 0; i < lives; i++) {
+                        Texture2D* hTex = (i < 3) ? &texHeart : &texGoldHeart;
+                        float hx = 14.f + i * (hW + hGap);
+                        if (hTex->id > 0)
+                            DrawTexturePro(*hTex,
+                                { 0,0,(float)hTex->width,(float)hTex->height },
+                                { hx, 10.f, hW, hH }, {}, 0.f, WHITE);
+                        else
+                            DrawText(i < 3 ? "<3" : "G<3", (int)hx, 10, 24, i < 3 ? RED : GOLD);
+                    }
+                }
                 // Score
                 { const char* scoreTxt = TextFormat("SCORE: %u", score);
                   int sw = MeasureText(scoreTxt, 26);
@@ -3405,13 +3475,6 @@ int main(void)
                     float t = 1.f - rbdFadeTimer / 2.f;
                     unsigned char a = (unsigned char)(t * 255.f);
                     DrawRectangle(0, 0, screenWidth, screenHeight, {0,0,0,a});
-                }
-                // Debug text
-                DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
-                if (onLadder) DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
-                {
-                    int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
-                    DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
                 }
                 if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
             }
@@ -3614,6 +3677,192 @@ int main(void)
             }
         }
 
+        // ── Debug menu overlay ────────────────────────────────────────────────────
+        if (dbgMenuOpen)
+        {
+            const int  DBG_X = 5, DBG_Y = 5, DBG_W = 235, DBG_H = 355;
+            const int  DBG_TITLE_H = 22;
+            const int  DBG_ROW_H   = 30;
+            const int  DBG_PAD     = 4;
+            const int  DBG_CONT_Y  = DBG_Y + DBG_TITLE_H;
+            const int  DBG_CONT_H  = DBG_H - DBG_TITLE_H;
+
+            Vector2 dbgMouse = GetMousePosition();
+            float   mwheel   = GetMouseWheelMove();
+
+            if (CheckCollisionPointRec(dbgMouse, { (float)DBG_X,(float)DBG_Y,(float)DBG_W,(float)DBG_H }))
+                dbgMenuScroll -= mwheel * (float)DBG_ROW_H;
+
+            const int numRows    = 13;
+            const int totalContH = numRows * DBG_ROW_H + DBG_PAD * 2;
+            int maxScroll  = totalContH - DBG_CONT_H;
+            if (maxScroll < 0) maxScroll = 0;
+            if (dbgMenuScroll < 0.f) dbgMenuScroll = 0.f;
+            if (dbgMenuScroll > (float)maxScroll) dbgMenuScroll = (float)maxScroll;
+
+            // Panel background
+            DrawRectangle(DBG_X, DBG_Y, DBG_W, DBG_H, { 18, 18, 28, 230 });
+            DrawRectangleLines(DBG_X, DBG_Y, DBG_W, DBG_H, { 90, 90, 140, 255 });
+
+            // Title bar
+            DrawRectangle(DBG_X, DBG_Y, DBG_W, DBG_TITLE_H, { 35, 35, 75, 255 });
+            DrawText("DEBUG MENU", DBG_X + DBG_PAD + 2, DBG_Y + 4, 13, YELLOW);
+
+            // Close [X] button
+            Rectangle dbgCloseBtn = { (float)(DBG_X + DBG_W - 22), (float)(DBG_Y + 1), 21.f, (float)(DBG_TITLE_H - 2) };
+            bool dbgCloseHov = CheckCollisionPointRec(dbgMouse, dbgCloseBtn);
+            DrawRectangle((int)dbgCloseBtn.x,(int)dbgCloseBtn.y,(int)dbgCloseBtn.width,(int)dbgCloseBtn.height,
+                dbgCloseHov ? Color{200,50,50,255} : Color{110,30,30,255});
+            DrawText("X",(int)(dbgCloseBtn.x+5),(int)(dbgCloseBtn.y+3),13,WHITE);
+            if (dbgCloseHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgMenuOpen = false;
+
+            // Clip content
+            BeginScissorMode(DBG_X, DBG_CONT_Y, DBG_W, DBG_CONT_H);
+
+            auto dbgRowY = [&](int r) -> int {
+                return DBG_CONT_Y + DBG_PAD + r * DBG_ROW_H - (int)dbgMenuScroll;
+            };
+            auto dbgBtn = [&](Rectangle r, const char* txt, Color bg, Color fg) {
+                Rectangle clip = { (float)DBG_X,(float)DBG_CONT_Y,(float)DBG_W,(float)DBG_CONT_H };
+                bool hov = CheckCollisionPointRec(dbgMouse, r) && CheckCollisionPointRec(dbgMouse, clip);
+                auto addC = [](unsigned char v, int a) -> unsigned char { int x=(int)v+a; return x>255?255:(x<0?0:(unsigned char)x); };
+                Color bc = hov ? Color{addC(bg.r,50),addC(bg.g,50),addC(bg.b,50),bg.a} : bg;
+                DrawRectangle((int)r.x,(int)r.y,(int)r.width,(int)r.height,bc);
+                DrawRectangleLines((int)r.x,(int)r.y,(int)r.width,(int)r.height,{70,70,110,200});
+                int tw = MeasureText(txt,10);
+                DrawText(txt,(int)(r.x+r.width/2-tw/2),(int)(r.y+r.height/2-5),10,fg);
+            };
+            auto dbgClicked = [&](Rectangle r) -> bool {
+                Rectangle clip = { (float)DBG_X,(float)DBG_CONT_Y,(float)DBG_W,(float)DBG_CONT_H };
+                return IsMouseButtonPressed(MOUSE_LEFT_BUTTON)
+                    && CheckCollisionPointRec(dbgMouse,r)
+                    && CheckCollisionPointRec(dbgMouse,clip);
+            };
+
+            // Row 0 – Lives
+            { int ry = dbgRowY(0);
+              DrawText("Lives:", DBG_X+DBG_PAD+2, ry+9, 11, WHITE);
+              Rectangle mR = {(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR = {(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"<",{55,55,75,255},WHITE); dbgBtn(pR,">",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%d",lives),DBG_X+139,ry+9,12,YELLOW);
+              if (dbgClicked(mR) && lives>0) lives--;
+              if (dbgClicked(pR) && lives<maxLives) lives++; }
+
+            // Row 1 – Max Lives
+            { int ry = dbgRowY(1);
+              DrawText("Max Lives:", DBG_X+DBG_PAD+2, ry+9, 11, WHITE);
+              Rectangle mR = {(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR = {(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"<",{55,55,75,255},WHITE); dbgBtn(pR,">",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%d",maxLives),DBG_X+139,ry+9,12,YELLOW);
+              if (dbgClicked(mR) && maxLives>1) { maxLives--; if(lives>maxLives) lives=maxLives; }
+              if (dbgClicked(pR) && maxLives<10) maxLives++; }
+
+            // Row 2 – Spawn Barrel
+            { int ry = dbgRowY(2);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Spawn Barrel",{50,80,50,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) SpawnBarrelFromPool(barrels,barrelPath); }
+
+            // Row 3 – Spawn Enemy
+            { int ry = dbgRowY(3);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Spawn Enemy",{80,50,50,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) {
+                  for (auto& en:enemies) if(!en.active){
+                      en.active=true;
+                      en.hitbox={player.x+(facingRight?80.f:-80.f),player.y-50.f,44.f,44.f};
+                      en.velocity={0,0}; en.type=GRUNT; en.state=ES_IDLE;
+                      en.stateTimer=0; en.grounded=false; en.facingRight=facingRight; break;
+                  }
+              } }
+
+            // Row 4 – Summon Nuke
+            { int ry = dbgRowY(4);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Summon Nuke",{80,70,25,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) nukes.push_back({{player.x,player.y-60.f},true}); }
+
+            // Row 5 – Summon Beatrice
+            { int ry = dbgRowY(5);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Summon Beatrice",{50,50,100,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) beatrices.push_back({{player.x,player.y-60.f},true}); }
+
+            // Row 6 – Give Ability
+            { int ry = dbgRowY(6);
+              float bw = 22.f;
+              Rectangle prevR = {(float)(DBG_X+DBG_PAD),(float)ry,bw,(float)(DBG_ROW_H-2)};
+              Rectangle nextR = {(float)(DBG_X+DBG_W-DBG_PAD-bw),(float)ry,bw,(float)(DBG_ROW_H-2)};
+              Rectangle giveR = {(float)(DBG_X+DBG_PAD+bw+2),(float)ry,(float)(DBG_W-DBG_PAD*2-bw*2-4),(float)(DBG_ROW_H-2)};
+              dbgBtn(prevR,"<",{55,55,75,255},WHITE);
+              dbgBtn(nextR,">",{55,55,75,255},WHITE);
+              dbgBtn(giveR,PU_INFO[dbgGivePUIdx].name,{60,40,85,255},YELLOW);
+              if (dbgClicked(prevR)) dbgGivePUIdx=(dbgGivePUIdx+PU_COUNT-1)%PU_COUNT;
+              if (dbgClicked(nextR)) dbgGivePUIdx=(dbgGivePUIdx+1)%PU_COUNT;
+              if (dbgClicked(giveR)&&currentScreen==GAMEPLAY) AddToHotbar((PowerupType)dbgGivePUIdx); }
+
+            // Row 7 – Immortality
+            { int ry = dbgRowY(7);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("Immortality: %s",dbgImmortal?"ON":"OFF"),
+                  dbgImmortal?Color{0,115,0,255}:Color{75,0,0,255},WHITE);
+              if (dbgClicked(r)) dbgImmortal=!dbgImmortal; }
+
+            // Row 8 – Flight
+            { int ry = dbgRowY(8);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("Flight: %s",dbgFlight?"ON":"OFF"),
+                  dbgFlight?Color{0,70,160,255}:Color{30,30,80,255},WHITE);
+              if (dbgClicked(r)) { dbgFlight=!dbgFlight; if(dbgFlight) dbgFlightNoCol=false; } }
+
+            // Row 9 – No Clip
+            { int ry = dbgRowY(9);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("No Clip: %s",dbgFlightNoCol?"ON":"OFF"),
+                  dbgFlightNoCol?Color{0,105,145,255}:Color{30,30,80,255},WHITE);
+              if (dbgClicked(r)) { dbgFlightNoCol=!dbgFlightNoCol; if(dbgFlightNoCol) dbgFlight=false; } }
+
+            // Row 10 – Bloom ON/OFF
+            { int ry = dbgRowY(10);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("Bloom: %s",dbgBloomEnabled?"ON":"OFF"),
+                  dbgBloomEnabled?Color{80,0,160,255}:Color{30,30,80,255},WHITE);
+              if (dbgClicked(r)) dbgBloomEnabled=!dbgBloomEnabled; }
+
+            // Row 11 – Bloom Intensity
+            { int ry = dbgRowY(11);
+              DrawText("Bloom Inten:", DBG_X+DBG_PAD+2, ry+9, 10, WHITE);
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.1f",dbgBloomIntensity),DBG_X+134,ry+9,11,YELLOW);
+              if (dbgClicked(mR)) dbgBloomIntensity=fmaxf(0.f,dbgBloomIntensity-0.1f);
+              if (dbgClicked(pR)) dbgBloomIntensity=fminf(3.f,dbgBloomIntensity+0.1f); }
+
+            // Row 12 – Bloom Threshold
+            { int ry = dbgRowY(12);
+              DrawText("Bloom Thr:", DBG_X+DBG_PAD+2, ry+9, 10, WHITE);
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",dbgBloomThreshold),DBG_X+130,ry+9,11,YELLOW);
+              if (dbgClicked(mR)) dbgBloomThreshold=fmaxf(0.f,dbgBloomThreshold-0.05f);
+              if (dbgClicked(pR)) dbgBloomThreshold=fminf(1.f,dbgBloomThreshold+0.05f); }
+
+            EndScissorMode();
+
+            // Scrollbar
+            if (maxScroll > 0) {
+                float ratio  = (float)DBG_CONT_H / (float)totalContH;
+                float thumbH = (float)DBG_CONT_H * ratio;
+                float thumbY = (float)DBG_CONT_Y + (dbgMenuScroll/(float)maxScroll)*((float)DBG_CONT_H - thumbH);
+                DrawRectangle(DBG_X+DBG_W-6, DBG_CONT_Y, 5, DBG_CONT_H, {35,35,55,200});
+                DrawRectangle(DBG_X+DBG_W-6,(int)thumbY,5,(int)thumbH,{110,110,195,255});
+            }
+        }
+
         EndDrawing();
     }
 
@@ -3665,7 +3914,9 @@ int main(void)
     UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
     UnloadTexture(rabbitWalkBlack); UnloadTexture(rabbitJumpBlack);
     UnloadTexture(rabbitWalkWhite); UnloadTexture(rabbitJumpWhite);
-    UnloadTexture(EButton);
+    UnloadTexture(FButton);
+    UnloadTexture(texGoldHeart); UnloadTexture(texHeart);
+    UnloadTexture(texShield1);   UnloadTexture(texShield2);
     for (int i = 0; i < PROP_TEX_COUNT; i++)
         if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
     if (propFireFrame2.id > 0) UnloadTexture(propFireFrame2);
