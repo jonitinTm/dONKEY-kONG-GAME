@@ -6,7 +6,11 @@
       "Bash(Select-Object FullName)",
       "PowerShell(head *)",
       "Bash(mingw32-make config=debug_x64)",
-      "PowerShell(Get-Command *)"
+      "PowerShell(Get-Command *)",
+      "Bash(where mingw32-make *)",
+      "Bash(where make *)",
+      "Bash(where g++)",
+      "PowerShell($env:PATH -split ';' | Where-Object { $_ -match 'mingw|gcc|msys' } | Select-Object -First 10)"
     ]
   }
 }

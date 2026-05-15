@@ -8,7 +8,7 @@
 #include "Lighting.h"
 #include <ctime>
 
-enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR };
+enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR, CARD_SELECT };
 
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
@@ -339,6 +339,10 @@ int main(void)
 
     LightingSystem gameLighting;
     LevelData      currentLevelData;
+    LevelData      pendingLevelData;
+    bool           hasPendingLevel = false;
+    int            cardRarityLeft  = 0;
+    int            cardRarityRight = 0;
 
     Rectangle wincondition = { 400, 150, 40, 40 };
 
@@ -804,6 +808,17 @@ int main(void)
     Texture2D propFireFrame2 = LoadTexture("Assets/Textures/Items/Dk_Oil_Fire4.png");
     float propFireTimer = 0.f;
     int   propFireFrame = 0;
+
+    // ── Card textures (rarity order: Common, Rare, Stairs, Astolfo, Legendary, Mythic) ──
+    static constexpr int CARD_TEX_COUNT = 6;
+    Texture2D cardTextures[CARD_TEX_COUNT] = {
+        LoadTexture("Assets/Textures/Cards/Common_Template.png"),
+        LoadTexture("Assets/Textures/Cards/Rare_Template.png"),
+        LoadTexture("Assets/Textures/Cards/Stairs_Template.png"),
+        LoadTexture("Assets/Textures/Cards/Astolfo_Template.png"),
+        LoadTexture("Assets/Textures/Cards/Legendary_Template.png"),
+        LoadTexture("Assets/Textures/Cards/Mythic_Template.png"),
+    };
     {
         Texture2D* ptrs[PROP_TEX_COUNT];
         for (int i = 0; i < PROP_TEX_COUNT; i++) ptrs[i] = &propTextures[i];
@@ -1058,6 +1073,17 @@ int main(void)
             regulusStunEndTimer = 0.0f;
         };
 
+    // Weighted roll: Common=45%, Rare=20%, Stairs=15%, Astolfo=10%, Legendary=7%, Mythic=3%
+    auto RollCardRarity = [&]() -> int {
+        int r = GetRandomValue(1, 100);
+        if (r <= 45) return 0;
+        if (r <= 65) return 1;
+        if (r <= 80) return 2;
+        if (r <= 90) return 3;
+        if (r <= 97) return 4;
+        return 5;
+    };
+
     auto ClearRoundEntities = [&]()
         {
             for (auto& b : barrels)     b.active = false;
@@ -1147,12 +1173,10 @@ int main(void)
 
     auto FullReset = [&]()
         {
-            if (currentLevelId != 1) {
-                currentLevelId = 1;
-                LevelData lv1;
-                if (LoadLevel(lv1, 1)) ApplyLevelData(lv1);
-                else                   ApplyLevelData(GetDefaultLevel1());
-            }
+            currentLevelId = 1;
+            LevelData lv1;
+            if (LoadLevel(lv1, 1)) ApplyLevelData(lv1);
+            else                   ApplyLevelData(GetDefaultLevel1());
             ClearDeathState();
             ClearRoundEntities();
             ResetPlayerPos();
@@ -1296,11 +1320,11 @@ int main(void)
             Vector2 mouse = GetMousePosition();
             if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER))
             {
-                selectedOption = 0; currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f;
+                selectedOption = 0; FullReset(); currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f;
             }
             if (CheckCollisionPointRec(mouse, btnPlay))
             {
-                selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
+                selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { FullReset(); currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
             }
             if (CheckCollisionPointRec(mouse, btnCtrl))
             {
@@ -1387,7 +1411,40 @@ int main(void)
             }
             if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
             {
-                splashTimer = 0.0f; currentScreen = GAMEPLAY;
+                splashTimer = 0.0f;
+                ClearDeathState();
+                ClearRoundEntities();
+                ResetPlayerPos();
+                ResetRegulus();
+                invincible = true; invincibleTimer = invincibleDuration;
+                playerHasBeatrice = false;
+                beatriceAbilityTimer = 0.0f;
+                beaBulletShootTimer = 0.0f;
+                for (auto& bb : beaBullets) bb.active = false;
+                beatriceItemAnimTimer = 0.0f; beatriceItemAnimFrame = 0;
+                houseAnimPlaying = false; houseAnimFrame = 0;
+                houseAnimTimer = 0.0f; houseIsSnowed = false;
+                nukeExtraDelay = 0.0f; nukeExplosionPlaying = false;
+                nukeExplosionFrame = 0; nukeExplosionTimer = 0.0f;
+                nukeFlashTimer = 5.0f; nukeShakeOffset = { 0, 0 };
+                for (auto& nk : nukes) nk.active = false;
+                nukes.clear();
+                if (!nukeSpawnNodes.empty()) {
+                    int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
+                    nukes.push_back({ nukeSpawnNodes[idx], true });
+                }
+                beatrices.clear();
+                if (!beatriceSpawnNodes.empty()) {
+                    int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
+                    beatrices.push_back({ beatriceSpawnNodes[idx], true });
+                }
+                regulusThrowing = true; regulusThrowFrame = 0;
+                regulusThrowTimer = 0.0f; regulusSpawnPending = true;
+                regulusForceBlue = true; regulusIdleFrame = 0;
+                regulusIdleTimer = 0.0f;
+                subaruFrame = 0; subaruTimer = 0.0f;
+                ResumeMusicStream(music);
+                currentScreen = GAMEPLAY;
             }
         }
         else if (currentScreen == GAMEPLAY)
@@ -2220,24 +2277,11 @@ int main(void)
                 LevelData nextLv;
                 if (LoadLevel(nextLv, currentLevelId + 1)) {
                     currentLevelId++;
-                    ApplyLevelData(nextLv);
-                    ClearDeathState();
-                    ClearRoundEntities();
-                    ResetPlayerPos();
-                    ResetRegulus();
-                    invincible = true;
-                    invincibleTimer = invincibleDuration;
-                    nukes.clear();
-                    if (!nukeSpawnNodes.empty()) {
-                        int idx = GetRandomValue(0, (int)nukeSpawnNodes.size() - 1);
-                        nukes.push_back({ nukeSpawnNodes[idx], true });
-                    }
-                    beatrices.clear();
-                    if (!beatriceSpawnNodes.empty()) {
-                        int idx = GetRandomValue(0, (int)beatriceSpawnNodes.size() - 1);
-                        beatrices.push_back({ beatriceSpawnNodes[idx], true });
-                    }
-                    currentScreen = GAMEPLAY;
+                    pendingLevelData = nextLv;
+                    hasPendingLevel = true;
+                    cardRarityLeft  = RollCardRarity();
+                    cardRarityRight = RollCardRarity();
+                    currentScreen = CARD_SELECT;
                 }
                 else {
                     splashTimer = 0.0f;
@@ -2253,6 +2297,30 @@ int main(void)
             if (splashTimer >= splashDuration || IsKeyPressed(KEY_ENTER))
             {
                 splashTimer = 0.0f; FullReset(); currentScreen = MENU;
+            }
+        }
+        else if (currentScreen == CARD_SELECT)
+        {
+            const float cardMargin = 20.f;
+            const float cardTop    = 50.f;
+            const float cardH      = (float)950 - cardTop - cardMargin;
+            Rectangle leftCard  = { cardMargin,                       cardTop, (float)875 / 2.f - cardMargin * 1.5f, cardH };
+            Rectangle rightCard = { (float)875 / 2.f + cardMargin * 0.5f, cardTop, (float)875 / 2.f - cardMargin * 1.5f, cardH };
+
+            Vector2 mouse = GetMousePosition();
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                bool picked = false;
+                if (CheckCollisionPointRec(mouse, leftCard))       picked = true;
+                else if (CheckCollisionPointRec(mouse, rightCard)) picked = true;
+                if (picked) {
+                    if (hasPendingLevel) {
+                        ApplyLevelData(pendingLevelData);
+                        hasPendingLevel = false;
+                    }
+                    splashTimer = 0.0f;
+                    subaruFrame = 0; subaruTimer = 0.0f;
+                    currentScreen = HOW_HIGH;
+                }
             }
         }
 
@@ -2866,6 +2934,44 @@ int main(void)
                 DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
             }
         }
+        else if (currentScreen == CARD_SELECT)
+        {
+            ClearBackground(BLACK);
+
+            const float cardMargin = 20.f;
+            const float cardTop    = 50.f;
+            const float cardH      = (float)screenHeight - cardTop - cardMargin;
+            float halfW = (float)screenWidth / 2.f;
+            Rectangle leftCard  = { cardMargin,              cardTop, halfW - cardMargin * 1.5f, cardH };
+            Rectangle rightCard = { halfW + cardMargin * 0.5f, cardTop, halfW - cardMargin * 1.5f, cardH };
+
+            // Draw left card
+            if (cardRarityLeft >= 0 && cardRarityLeft < CARD_TEX_COUNT && cardTextures[cardRarityLeft].id > 0)
+                DrawTexturePro(cardTextures[cardRarityLeft],
+                    { 0, 0, (float)cardTextures[cardRarityLeft].width, (float)cardTextures[cardRarityLeft].height },
+                    leftCard, { 0, 0 }, 0.f, WHITE);
+            else
+                DrawRectangleRec(leftCard, DARKGRAY);
+
+            // Draw right card
+            if (cardRarityRight >= 0 && cardRarityRight < CARD_TEX_COUNT && cardTextures[cardRarityRight].id > 0)
+                DrawTexturePro(cardTextures[cardRarityRight],
+                    { 0, 0, (float)cardTextures[cardRarityRight].width, (float)cardTextures[cardRarityRight].height },
+                    rightCard, { 0, 0 }, 0.f, WHITE);
+            else
+                DrawRectangleRec(rightCard, DARKGRAY);
+
+            // Hover highlight
+            Vector2 mouse = GetMousePosition();
+            if (CheckCollisionPointRec(mouse, leftCard))
+                DrawRectangleLinesEx(leftCard, 4, YELLOW);
+            if (CheckCollisionPointRec(mouse, rightCard))
+                DrawRectangleLinesEx(rightCard, 4, YELLOW);
+
+            const char* chooseTxt = "CHOOSE YOUR POWER";
+            int ctW = MeasureText(chooseTxt, 30);
+            DrawText(chooseTxt, screenWidth / 2 - ctW / 2, 10, 30, WHITE);
+        }
 
         EndDrawing();
     }
@@ -2921,6 +3027,7 @@ int main(void)
     for (int i = 0; i < PROP_TEX_COUNT; i++)
         if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
     if (propFireFrame2.id > 0) UnloadTexture(propFireFrame2);
+    for (int i = 0; i < CARD_TEX_COUNT; i++) UnloadTexture(cardTextures[i]);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
