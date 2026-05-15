@@ -792,7 +792,7 @@ int main(void)
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
-    Music music = LoadMusicStream("Assets/Nuevo audio/mp3/PerfectLoopSubaru.mp3");
+    Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
     Sound deathSound = LoadSound("Assets/Nuevo audio/mp3/20. Dead.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
     Sound nukeSound = LoadSound("Assets/Nuevo audio/mp3/Flash.mp3");
