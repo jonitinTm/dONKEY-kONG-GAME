@@ -439,9 +439,14 @@ int main(void)
     float dbgBloomIntensity= 0.8f;
 
     // ── Audio volumes (music / sfx / ui) ─────────────────────────────────────
-    float volMusic = 1.f;   // background music
+    float volMusic = 0.8f;  // background music
     float volSFX   = 1.f;   // gameplay sounds (death, hit, nuke, jump barrel, RBD)
     float volUI    = 1.f;   // UI/card sounds
+
+    // ── Music fade-out state ──────────────────────────────────────────────────
+    static constexpr float MUSIC_FADE_DUR = 0.5f;
+    float musicFadeTimer    = 0.f;   // counts down from MUSIC_FADE_DUR to 0
+    bool  musicPendingPause = false; // pause stream once fade reaches 0
 
     // ── Heavy item equip state ─────────────────────────────────────────────────
     float heavyEquipTimer  = 0.f;
@@ -472,7 +477,7 @@ int main(void)
     int            hotbarSlot    = 0;   // 0-2 active slot
 
     // ── Powerup effect state ─────────────────────────────────────────────────
-    int            coins         = 50;  // starting coins for testing
+    int            coins         = 0;
     int            maxLives      = 3;
     bool           speedrunActive= false;
     float          speedrunTimer = 0.f;
@@ -808,7 +813,7 @@ int main(void)
     // Card / UI sounds (Balatro SFX)
     Sound cardFanSnd   = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardFan2.ogg");
     Sound cardSlideSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardSlide1.ogg");
-    Sound cardHoverSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/highlight1.ogg");
+    Sound cardHoverSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/paper1.ogg");
     Sound cardPickSnd  = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/card1.ogg");
     Sound cardThrowSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/whoosh1.ogg");
 
@@ -989,6 +994,8 @@ int main(void)
         for (int i = 0; i < PROP_TEX_COUNT; i++) ptrs[i] = &propTextures[i];
         editor.SetPropTextures(ptrs, PROP_TEX_COUNT);
     }
+
+    Texture2D texCoin = LoadTexture("Assets/Textures/UI/coin.png");  // coin icon (fallback to drawn circle)
 
     Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = { &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5 };
 
@@ -1263,7 +1270,7 @@ int main(void)
             displayCards[i].appearT   = -(float)i * 0.15f;  // stagger per card
             displayCards[i].appeared  = false;
         }
-        SetSoundVolume(cardFanSnd, volUI); PlaySound(cardFanSnd);
+        SetSoundVolume(cardFanSnd, volUI * 1.2f); PlaySound(cardFanSnd);
     };
 
     // Add powerup to hotbar; returns true if added
@@ -1375,7 +1382,8 @@ int main(void)
             for (auto& bb : beaBullets) bb.active = false;
             invincible = true;
             invincibleTimer = invincibleDuration;
-            PauseMusicStream(music);
+            musicFadeTimer    = MUSIC_FADE_DUR;  // start 0.5s fade-out
+            musicPendingPause = true;
             ResetRegulus();
             RespawnItems();
         };
@@ -1388,6 +1396,8 @@ int main(void)
             ResetRegulus();
             invincible = true;
             invincibleTimer = invincibleDuration;
+            musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
             ResumeMusicStream(music);
         };
 
@@ -1405,7 +1415,7 @@ int main(void)
             lives = 3;
             invincible = false;
             invincibleTimer = 0.0f;
-            score = 0;
+            score = 0; coins = 0;
 
             playerHasBeatrice = false;
             beatriceAbilityTimer = 0.0f;
@@ -1449,6 +1459,8 @@ int main(void)
             subaruFrame = 0;
             subaruTimer = 0.0f;
 
+            musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
             ResumeMusicStream(music);
         };
 
@@ -1593,7 +1605,7 @@ int main(void)
                     ClearRoundEntities();
                     ResetPlayerPos();
                     ResetRegulus();
-                    lives = 3; score = 0;
+                    lives = 3; score = 0; coins = 0;
                     invincible = true; invincibleTimer = invincibleDuration;
                     playerHasBeatrice = false;
                     beatriceAbilityTimer = 0.0f;
@@ -1621,7 +1633,9 @@ int main(void)
                     regulusForceBlue = true; regulusIdleFrame = 0;
                     regulusIdleTimer = 0.0f;
                     subaruFrame = 0; subaruTimer = 0.0f;
-                    ResumeMusicStream(music);
+                    musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
+            ResumeMusicStream(music);
                     currentScreen = GAMEPLAY;
                 }
             }
@@ -1668,13 +1682,27 @@ int main(void)
                 regulusForceBlue = true; regulusIdleFrame = 0;
                 regulusIdleTimer = 0.0f;
                 subaruFrame = 0; subaruTimer = 0.0f;
-                ResumeMusicStream(music);
+                musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
+            ResumeMusicStream(music);
                 currentScreen = GAMEPLAY;
             }
         }
         else if (currentScreen == GAMEPLAY)
         {
             UpdateMusicStream(music);
+
+            // ── Music fade-out (triggered on death) ───────────────────────────
+            if (musicFadeTimer > 0.f) {
+                musicFadeTimer -= dt;
+                float t = fmaxf(musicFadeTimer / MUSIC_FADE_DUR, 0.f);
+                SetMusicVolume(music, volMusic * t);
+                if (musicFadeTimer <= 0.f && musicPendingPause) {
+                    PauseMusicStream(music);
+                    musicPendingPause = false;
+                    SetMusicVolume(music, volMusic);
+                }
+            }
 
             {
                 static LevelData _cinematicDummy;
@@ -1719,7 +1747,7 @@ int main(void)
                     player = s.player; velocityX = s.vx; velocityY = s.vy;
                     facingRight = s.facingR; onLadder = s.onLadder;
                     currentLadder = s.curLadder; ladderProgress = s.ladderProg;
-                    lives = s.lives; score = s.score;
+                    lives = s.lives; score = s.score; coins = (int)s.score;
                     for (int i = 0; i < (int)s.barrels.size() && i < (int)barrels.size(); i++) {
                         barrels[i].hitbox=s.barrels[i].h; barrels[i].currentNode=s.barrels[i].node;
                         barrels[i].speed=s.barrels[i].spd; barrels[i].active=s.barrels[i].active;
@@ -1743,7 +1771,9 @@ int main(void)
                 rbdFading = true; rbdFadeTimer = 0.f;
                 ClearDeathState();
                 invincible = true; invincibleTimer = 2.0f;
-                ResumeMusicStream(music);
+                musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
+            ResumeMusicStream(music);
             }
 
             // ── RBD fade-in ───────────────────────────────────────────────────
@@ -1821,7 +1851,7 @@ int main(void)
                             invincible = true; invincibleTimer = 0.5f;
                             slot.cd = info.maxCD; break; }
                         case PU_EL_SHAMAK:
-                            for (auto& e : enemies) if (e.active && e.type == SPECTER) { e.active=false; score+=300; }
+                            for (auto& e : enemies) if (e.active && e.type == SPECTER) { e.active=false; score+=300; coins+=300; }
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_LARPER: {
                             float tH = player.height * 3.f;
@@ -1840,7 +1870,7 @@ int main(void)
                             Rectangle whipRect = facingRight
                                 ? Rectangle{player.x+player.width, player.y, reach, player.height}
                                 : Rectangle{player.x-reach, player.y, reach, player.height};
-                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; }
+                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=300; }
                             slot.cd = info.maxCD; break; }
                         case PU_EXTRA_LIFE:
                             maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
@@ -1852,8 +1882,8 @@ int main(void)
                             nukeExplosionPos={player.x+player.width*0.5f-nkW*0.5f, player.y-nkH-2.f};
                             nukeExplosionPlaying=true; nukeExplosionFrame=0; nukeExplosionTimer=0.f;
                             nukeFlashTimer=0.f; nukeExtraDelay=3.f;
-                            for (auto& b:barrels){if(b.active){score+=100;b.active=false;}}
-                            for (auto& e:enemies){if(e.active){score+=300;e.active=false;}}
+                            for (auto& b:barrels){if(b.active){score+=100;coins+=100;b.active=false;}}
+                            for (auto& e:enemies){if(e.active){score+=300;coins+=300;e.active=false;}}
                             regulusIsStunned=true; regulusStunEnding=false; regulusStunFrame=0;
                             regulusStunTimer=0.f; regulusStunLoops=0;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
@@ -2137,7 +2167,7 @@ int main(void)
                     if (!b.active) continue;
                     if (CheckCollisionRecs(bbRect, b.hitbox))
                     {
-                        b.active = false; bb.active = false; score += 100; break;
+                        b.active = false; bb.active = false; score += 100; coins += 100; break;
                     }
                 }
                 if (bb.active) {
@@ -2146,7 +2176,7 @@ int main(void)
                         if (!en.active) continue;
                         if (CheckCollisionRecs(bbRect, en.hitbox))
                         {
-                            en.active = false; bb.active = false; score += 300; break;
+                            en.active = false; bb.active = false; score += 300; coins += 300; break;
                         }
                     }
                 }
@@ -2248,7 +2278,7 @@ int main(void)
                     bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
                         (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
                     if (fromBelow) continue;
-                    if (shieldActive) { b.active = false; score += 100; shieldActive = false; break; }
+                    if (shieldActive) { b.active = false; score += 100; coins += 100; shieldActive = false; break; }
                     TriggerDeath();
                     break;
                 }
@@ -2261,7 +2291,7 @@ int main(void)
                 {
                     UpdateEnemy(en, player, platforms, dt);
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
-                        if (shieldActive) { en.active = false; score += 300; shieldActive = false; }
+                        if (shieldActive) { en.active = false; score += 300; coins += 300; shieldActive = false; }
                         else TriggerDeath();
                     }
                 }
@@ -2281,7 +2311,7 @@ int main(void)
                     };
                     if (CheckCollisionRecs(player, jumpZone))
                     {
-                        score += 100; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
+                        score += 100; coins += 100; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
                     }
                 }
             }
@@ -2769,7 +2799,7 @@ int main(void)
                         if (c.appearT >= APPEAR_DUR) {
                             c.heightFrac = 1.0f;
                             c.appeared = true;
-                            SetSoundVolume(cardSlideSnd, volUI); PlaySound(cardSlideSnd);
+                            SetSoundVolume(cardSlideSnd, volUI * 1.2f); PlaySound(cardSlideSnd);
                         }
                     }
                     c.scale = 1.0f;
@@ -2793,7 +2823,7 @@ int main(void)
                     bool wasHovered = c.hovered;
                     c.hovered = !hbDrag.active && CheckCollisionPointRec(mouse, hitR);
                     if (c.hovered && !wasHovered) {
-                        SetSoundVolume(cardHoverSnd, volUI); PlaySound(cardHoverSnd);
+                        SetSoundVolume(cardHoverSnd, volUI * 1.2f); PlaySound(cardHoverSnd);
                     }
                     float hTarget = c.hovered ? 1.f : 0.f;
                     c.hoverLerp = Lerp(c.hoverLerp, hTarget, fminf(dt * 10.f, 1.f));
@@ -2825,7 +2855,7 @@ int main(void)
                     if (displayCards[i].appeared && displayCards[i].hovered) {
                         anyCardPicked = true;
                         displayCards[i].selected = true;
-                        SetSoundVolume(cardPickSnd, volUI); PlaySound(cardPickSnd);
+                        SetSoundVolume(cardPickSnd, volUI * 1.2f); PlaySound(cardPickSnd);
                         if (isShop) {
                             int cost = PU_INFO[(int)displayCards[i].type].cost;
                             if (coins >= cost) { coins -= cost; AddToHotbar(displayCards[i].type); }
@@ -2835,7 +2865,7 @@ int main(void)
                         bool anyDismissed = false;
                         for (int j = 0; j < numDispCards; j++)
                             if (j != i) { displayCards[j].dismissed = true; anyDismissed = true; }
-                        if (anyDismissed) { SetSoundVolume(cardThrowSnd, volUI); PlaySound(cardThrowSnd); }
+                        if (anyDismissed) { SetSoundVolume(cardThrowSnd, volUI * 1.2f); PlaySound(cardThrowSnd); }
                         break;
                     }
                 }
@@ -3435,13 +3465,25 @@ int main(void)
                             DrawText(i < 3 ? "<3" : "G<3", (int)hx, 10, 24, i < 3 ? RED : GOLD);
                     }
                 }
-                // Score
-                { const char* scoreTxt = TextFormat("SCORE: %u", score);
-                  int sw = MeasureText(scoreTxt, 26);
-                  DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW); }
-                // Coins
-                { const char* coinStr = TextFormat("C:%d", coins);
-                  DrawText(coinStr, screenWidth / 2 - MeasureText(coinStr,20)/2, 10, 20, GOLD); }
+                // Coins (score = coins, displayed with icon)
+                {
+                    const char* coinTxt = TextFormat("%d", coins);
+                    int fontSize = 26;
+                    int iconSize = 26;
+                    int gap = 6;
+                    int txtW = MeasureText(coinTxt, fontSize);
+                    int totalW = iconSize + gap + txtW;
+                    int startX = screenWidth - totalW - 12;
+                    if (texCoin.id > 0) {
+                        DrawTexturePro(texCoin,
+                            { 0,0,(float)texCoin.width,(float)texCoin.height },
+                            { (float)startX, 7.f, (float)iconSize, (float)iconSize }, {}, 0.f, WHITE);
+                    } else {
+                        DrawCircle(startX + iconSize/2, 10 + iconSize/2, iconSize * 0.45f, GOLD);
+                        DrawCircle(startX + iconSize/2, 10 + iconSize/2, iconSize * 0.3f, Color{255,200,50,255});
+                    }
+                    DrawText(coinTxt, startX + iconSize + gap, 10, fontSize, GOLD);
+                }
                 // ── Hotbar (bottom-right, vertical) ──────────────────────────
                 {
                     static const float HB_W = 64.f, HB_H = 96.f;
@@ -3564,9 +3606,19 @@ int main(void)
             else
             {
                 DrawText("GAME OVER", 300, 380, 50, RED);
-                const char* scoreTxt = TextFormat("SCORE: %u", score);
-                int sw = MeasureText(scoreTxt, 32);
-                DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
+                {
+                    const char* coinTxt = TextFormat("%d", coins);
+                    int fontSize = 32, iconSize = 32, gap = 8;
+                    int txtW = MeasureText(coinTxt, fontSize);
+                    int totalW = iconSize + gap + txtW;
+                    int sx = screenWidth / 2 - totalW / 2;
+                    if (texCoin.id > 0)
+                        DrawTexturePro(texCoin, {0,0,(float)texCoin.width,(float)texCoin.height},
+                            {(float)sx, 450.f, (float)iconSize, (float)iconSize}, {}, 0.f, WHITE);
+                    else { DrawCircle(sx+iconSize/2, 450+iconSize/2, iconSize*0.45f, GOLD);
+                           DrawCircle(sx+iconSize/2, 450+iconSize/2, iconSize*0.3f, {255,200,50,255}); }
+                    DrawText(coinTxt, sx + iconSize + gap, 450, fontSize, GOLD);
+                }
             }
         }
         else if (currentScreen == CARD_SELECT)
@@ -3592,8 +3644,15 @@ int main(void)
             int tw = MeasureText(title, 28);
             DrawText(title, screenWidth / 2 - tw / 2, 50, 28, WHITE);
             if (isShop) {
-                const char* coinTxt = TextFormat("Coins: %d", coins);
-                DrawText(coinTxt, screenWidth / 2 + tw / 2 + 20, 50, 22, GOLD);
+                // Coin icon + count next to title
+                int iconSz = 22, gapSz = 4;
+                float iconX = (float)(screenWidth / 2 + tw / 2 + 20);
+                if (texCoin.id > 0)
+                    DrawTexturePro(texCoin, {0,0,(float)texCoin.width,(float)texCoin.height},
+                        {iconX, 52.f, (float)iconSz, (float)iconSz}, {}, 0.f, WHITE);
+                else { DrawCircle((int)iconX+iconSz/2, 63, iconSz/2, GOLD);
+                       DrawCircle((int)iconX+iconSz/2, 63, iconSz*5/14, {255,200,50,255}); }
+                DrawText(TextFormat("%d", coins), (int)(iconX + iconSz + gapSz), 52, 22, GOLD);
             }
 
             // Draw each card
@@ -4001,6 +4060,7 @@ int main(void)
         if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
     if (propFireFrame2.id > 0) UnloadTexture(propFireFrame2);
     for (int i = 0; i < CARD_TEX_COUNT; i++) UnloadTexture(cardTextures[i]);
+    if (texCoin.id > 0) UnloadTexture(texCoin);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);

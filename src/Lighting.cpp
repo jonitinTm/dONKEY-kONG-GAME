@@ -462,27 +462,16 @@ void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
 {
     BeginOccluders(cam);
 
-    for (const auto& p : lv.platforms) {
-        float h = (p.h <= 0.f) ? 8.f : p.h;
-        if (fabsf(p.tilt) > 0.05f) {
-            // AABB of tilted platform — conservative over-approximation for shadow purposes.
-            float tr = p.tilt * (3.14159265f / 180.f);
-            float yr = p.w * tanf(tr);
-            float yMin = fminf(0.f, yr);
-            float yMax = fmaxf(0.f, yr) + h;
-            DrawRectangleRec({ p.x, p.y + yMin, p.w, yMax - yMin }, WHITE);
-        }
-        else {
-            DrawRectangleRec({ p.x, p.y, p.w, h }, WHITE);
-        }
-    }
+    // Platforms are collision-only; light passes through them.
+    // Beams are the visual/architectural geometry that blocks light.
 
     // Beams rendered at scale=4 in the editor; match that footprint here.
     static constexpr float BEAM_SCALE = 4.f;
     static constexpr float BEAM_SPRITE_W = 16.f;
     static constexpr float BEAM_SPRITE_H = 16.f;
     for (const auto& b : lv.beams) {
-        if (b.transparent) continue;
+        // texVariant 11 = TransFloor, 12 = TransFloor2 — always pass light through
+        if (b.transparent || b.texVariant == 11 || b.texVariant == 12) continue;
         DrawRectangleRec({ b.x, b.y,
                            BEAM_SPRITE_W * BEAM_SCALE,
                            BEAM_SPRITE_H * BEAM_SCALE }, WHITE);
