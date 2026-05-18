@@ -92,7 +92,7 @@ struct PowerupInfo {
 static const PowerupInfo PU_INFO[PU_COUNT] = {
     {"RETURN BY DEATH","On death rewinds 5s. No life lost.","1 use",      2,25, true,  0.f,1,1},
     {"DASH",           "Dash 4x forward. 0.5s invuln.",    "CD: 10s",     1,15, false,10.f,0,1},
-    {"EL SHAMAK",      "Kill all white enemies (Specters).","1 use",       4,50, false, 0.f,1,1},
+    {"EL SHAMAK",      "Summon Beatrice for 7s.",          "1 use",       4,50, false, 0.f,1,1},
     {"LARPER",         "Place a ladder at feet. x4 stack.", "1 use (x4)", 2,10, false, 0.f,1,4},
     {"REINHARD",       "Instantly win the level.",         "1 use",       5,100,false, 0.f,1,1},
     {"WHIP",           "Kill enemies 5x forward.",         "CD: 25s",     0,10, false,25.f,0,1},
@@ -100,7 +100,7 @@ static const PowerupInfo PU_INFO[PU_COUNT] = {
     {"NUKE",           "Explosion: kills enemies.",        "1 use",       4,60, false, 0.f,1,1},
     {"ONE MORE LARP",  "Restore 1 life.",                  "1 use",       2,50, false, 0.f,1,1},
     {"SPEEDRUN",       "1.5x speed for 5s.",               "CD: 20s",     0,10, false,20.f,0,1},
-    {"SHIELD",         "Parry in 0.3s grace window.",      "CD: 10s",     1,20, false,10.f,0,1},
+    {"SHIELD",         "Block hits for 2s.",               "CD: 10s",     1,20, false,10.f,0,1},
     {"SHOP",           "Opens shop. Stops time.",          "1 use",       3,70, false, 0.f,1,1},
     {"BEATRICE",       "Companion shoots at enemies 7s.", "1 use",       2,30, false, 0.f,1,1},
 };
@@ -126,8 +126,8 @@ struct CardDisplay {
     PowerupType type       = PU_NONE;
     int         rarity     = 0;
     float       scale      = 1.f;
-    float       appearT    = 0.f;   // negative = stagger delay, 0→1s height grow
-    float       heightFrac = 0.f;   // 0→1 height reveal (bottom-up)
+    float       appearT    = 0.f;   // negative = stagger delay; 0→APPEAR_DUR scale grow
+    float       heightFrac = 0.f;   // 0→1 uniform appear scale (both axes)
     bool        appeared   = false;
     float       hoverLerp  = 0.f;   // 0→1
     bool        hovered   = false;
@@ -140,7 +140,7 @@ struct CardDisplay {
 // Return-by-death snapshot
 struct RBDSnapshot {
     Rectangle   player; float vx,vy; bool facingR,onLadder; int curLadder; float ladderProg;
-    int lives; unsigned score;
+    int lives; unsigned score; int coins;
     struct BS{Rectangle h;int node;float spd;bool active,isBlue,isFalling;};
     struct ES{Rectangle h;Vector2 vel;EnemyType type;EnemyState st;float stT;bool active,grounded,facingR;};
     vector<BS> barrels; vector<ES> enemies;
@@ -997,6 +997,52 @@ int main(void)
 
     Texture2D texCoin = LoadTexture("Assets/Textures/UI/coin.png");  // coin icon (fallback to drawn circle)
 
+    // ── Per-powerup item textures ──────────────────────────────────────────────
+    Texture2D itemTex_ReturnByDeath = LoadTexture("Assets/Textures/Cards/Card_ReturnByDeath.png");
+    Texture2D itemTex_Dash          = LoadTexture("Assets/Textures/Cards/Card_Dash.png");
+    Texture2D itemTex_Reinhard      = LoadTexture("Assets/Textures/Cards/Card_Reinhard.png");
+    Texture2D itemTex_Whip          = LoadTexture("Assets/Textures/Cards/Card_Whip.png");
+    Texture2D itemTex_Speedrun      = LoadTexture("Assets/Textures/Cards/Card_Speedrun.png");
+    Texture2D itemTex_Shield        = LoadTexture("Assets/Textures/Cards/Card_Shield.png");
+
+    // Returns the item texture for a given powerup type (animates Beatrice frames)
+    auto GetItemTex = [&](PowerupType pu) -> Texture2D* {
+        bool beaFrame2 = fmod(GetTime(), 0.6) > 0.3;
+        switch (pu) {
+            case PU_RETURN_BY_DEATH: return &itemTex_ReturnByDeath;
+            case PU_DASH:            return &itemTex_Dash;
+            case PU_EL_SHAMAK:       return beaFrame2 ? &Beatrice_Idle2 : &Beatrice_Idle1;
+            case PU_LARPER:          return &LadderPart;
+            case PU_REINHARD:        return &itemTex_Reinhard;
+            case PU_WHIP:            return &itemTex_Whip;
+            case PU_EXTRA_LIFE:      return &texGoldHeart;
+            case PU_NUKE_PU:         return &Nuke;
+            case PU_ONE_MORE_LARP:   return &texHeart;
+            case PU_SPEEDRUN:        return &itemTex_Speedrun;
+            case PU_SHIELD:          return &itemTex_Shield;
+            case PU_SHOP:            return texCoin.id > 0 ? &texCoin : nullptr;
+            case PU_BEATRICE:        return beaFrame2 ? &Beatrice_Idle2 : &Beatrice_Idle1;
+            default:                 return nullptr;
+        }
+    };
+
+    // Rarity border colors: Common, Rare, Stairs, Astolfo, Legendary, Mythic
+    static const Color rarityBorderCols[6] = {
+        {180,185,200,255},  // Common: gray/white
+        {60,160,255,255},   // Rare: blue
+        {30,110,45,255},    // Stairs: dark green
+        {255,140,190,255},  // Astolfo: pink
+        {255,170,30,255},   // Legendary: orange-yellow
+        {210,35,120,255},   // Mythic: red-purple
+    };
+
+    // Fit a texture inside dest preserving aspect ratio (letterbox/pillarbox)
+    auto FitTexRect = [](Rectangle dest, float texW, float texH) -> Rectangle {
+        float s = fminf(dest.width / texW, dest.height / texH);
+        float fw = texW * s, fh = texH * s;
+        return { dest.x + (dest.width - fw) * 0.5f, dest.y + (dest.height - fh) * 0.5f, fw, fh };
+    };
+
     Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = { &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5 };
 
     Texture2D* regulusIdleFrames[3] = { &RegulusIdle1,    &RegulusIdle2,    &RegulusIdle3 };
@@ -1721,7 +1767,7 @@ int main(void)
                         snap.player = player; snap.vx = velocityX; snap.vy = velocityY;
                         snap.facingR = facingRight; snap.onLadder = onLadder;
                         snap.curLadder = currentLadder; snap.ladderProg = ladderProgress;
-                        snap.lives = lives; snap.score = score;
+                        snap.lives = lives; snap.score = score; snap.coins = coins;
                         snap.barrels.clear();
                         for (auto& b : barrels) snap.barrels.push_back({b.hitbox,b.currentNode,b.speed,b.active,b.isBlue,b.isFalling});
                         snap.enemies.clear();
@@ -1747,7 +1793,7 @@ int main(void)
                     player = s.player; velocityX = s.vx; velocityY = s.vy;
                     facingRight = s.facingR; onLadder = s.onLadder;
                     currentLadder = s.curLadder; ladderProgress = s.ladderProg;
-                    lives = s.lives; score = s.score; coins = (int)s.score;
+                    lives = s.lives; score = s.score; coins = s.coins;
                     for (int i = 0; i < (int)s.barrels.size() && i < (int)barrels.size(); i++) {
                         barrels[i].hitbox=s.barrels[i].h; barrels[i].currentNode=s.barrels[i].node;
                         barrels[i].speed=s.barrels[i].spd; barrels[i].active=s.barrels[i].active;
@@ -1851,8 +1897,10 @@ int main(void)
                             invincible = true; invincibleTimer = 0.5f;
                             slot.cd = info.maxCD; break; }
                         case PU_EL_SHAMAK:
-                            for (auto& e : enemies) if (e.active && e.type == SPECTER) { e.active=false; score+=300; coins+=300; }
-                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                            playerHasBeatrice = true;
+                            beatriceAbilityTimer = BEATRICE_DURATION;
+                            beaBulletShootTimer = 0.f;
+                            slot.charges--; if(slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_LARPER: {
                             float tH = player.height * 3.f;
                             larperLadders.push_back({player.x + player.width*0.5f - 20.f, player.y + player.height, 0.f, tH, tH / 0.5f});
@@ -1870,7 +1918,7 @@ int main(void)
                             Rectangle whipRect = facingRight
                                 ? Rectangle{player.x+player.width, player.y, reach, player.height}
                                 : Rectangle{player.x-reach, player.y, reach, player.height};
-                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=300; }
+                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; }
                             slot.cd = info.maxCD; break; }
                         case PU_EXTRA_LIFE:
                             maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
@@ -1882,8 +1930,8 @@ int main(void)
                             nukeExplosionPos={player.x+player.width*0.5f-nkW*0.5f, player.y-nkH-2.f};
                             nukeExplosionPlaying=true; nukeExplosionFrame=0; nukeExplosionTimer=0.f;
                             nukeFlashTimer=0.f; nukeExtraDelay=3.f;
-                            for (auto& b:barrels){if(b.active){score+=100;coins+=100;b.active=false;}}
-                            for (auto& e:enemies){if(e.active){score+=300;coins+=300;e.active=false;}}
+                            for (auto& b:barrels){if(b.active){score+=100;coins+=5;b.active=false;}}
+                            for (auto& e:enemies){if(e.active){score+=300;coins+=15;e.active=false;}}
                             regulusIsStunned=true; regulusStunEnding=false; regulusStunFrame=0;
                             regulusStunTimer=0.f; regulusStunLoops=0;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
@@ -1894,7 +1942,7 @@ int main(void)
                             speedrunActive=true; speedrunTimer=5.f;
                             slot.cd=info.maxCD; break;
                         case PU_SHIELD:
-                            shieldActive=true; shieldTimer=0.3f;
+                            shieldActive=true; shieldTimer=2.f;
                             slot.cd=info.maxCD; break;
                         case PU_SHOP: {
                             InitCardSelect(5, true);
@@ -2167,7 +2215,7 @@ int main(void)
                     if (!b.active) continue;
                     if (CheckCollisionRecs(bbRect, b.hitbox))
                     {
-                        b.active = false; bb.active = false; score += 100; coins += 100; break;
+                        b.active = false; bb.active = false; score += 100; coins += 5; break;
                     }
                 }
                 if (bb.active) {
@@ -2176,7 +2224,7 @@ int main(void)
                         if (!en.active) continue;
                         if (CheckCollisionRecs(bbRect, en.hitbox))
                         {
-                            en.active = false; bb.active = false; score += 300; coins += 300; break;
+                            en.active = false; bb.active = false; score += 300; coins += 15; break;
                         }
                     }
                 }
@@ -2278,7 +2326,7 @@ int main(void)
                     bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
                         (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
                     if (fromBelow) continue;
-                    if (shieldActive) { b.active = false; score += 100; coins += 100; shieldActive = false; break; }
+                    if (shieldActive) { b.active = false; score += 100; coins += 5; shieldActive = false; break; }
                     TriggerDeath();
                     break;
                 }
@@ -2291,7 +2339,7 @@ int main(void)
                 {
                     UpdateEnemy(en, player, platforms, dt);
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
-                        if (shieldActive) { en.active = false; score += 300; coins += 300; shieldActive = false; }
+                        if (shieldActive) { en.active = false; score += 300; coins += 15; shieldActive = false; }
                         else TriggerDeath();
                     }
                 }
@@ -2311,7 +2359,7 @@ int main(void)
                     };
                     if (CheckCollisionRecs(player, jumpZone))
                     {
-                        score += 100; coins += 100; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
+                        score += 100; coins += 5; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
                     }
                 }
             }
@@ -3283,7 +3331,7 @@ int main(void)
                         }
                         Texture2D* shTex = (shieldAnimFrame == 0) ? &texShield1 : &texShield2;
                         if (shTex->id > 0) {
-                            float shW = shTex->width * 2.f, shH = shTex->height * 2.f;
+                            float shW = shTex->width * 3.5f, shH = shTex->height * 3.5f;
                             float shX = player.x + dest.width * 0.5f - shW * 0.5f;
                             float shY = player.y + player.height * 0.5f - shH * 0.5f;
                             DrawTexturePro(*shTex, { 0,0,(float)shTex->width,(float)shTex->height },
@@ -3496,16 +3544,27 @@ int main(void)
                         const HotbarSlot& s = hotbar[i];
                         Color bg = (i == hotbarSlot) ? Color{255,220,0,180} : Color{40,40,40,180};
                         DrawRectangle((int)hbX, (int)slotY, (int)HB_W, (int)HB_H, bg);
-                        DrawRectangleLines((int)hbX, (int)slotY, (int)HB_W, (int)HB_H, i == hotbarSlot ? YELLOW : DARKGRAY);
-                        DrawText(TextFormat("%d", i+1), (int)hbX + 4, (int)slotY + 4, 12, WHITE);
+                        // Rarity-colored border (yellow if selected slot)
+                        Color slotBorder = DARKGRAY;
                         if (s.type != PU_NONE) {
                             int ri = PU_INFO[(int)s.type].rarityIdx;
-                            if (ri>=0 && ri<CARD_TEX_COUNT && cardTextures[ri].id>0)
-                                DrawTexturePro(cardTextures[ri],
-                                    {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
-                                    {hbX,slotY,HB_W,HB_H},{0,0},0.f,WHITE);
-                            int nw = MeasureText(PU_INFO[(int)s.type].name, 9);
-                            DrawText(PU_INFO[(int)s.type].name, (int)(hbX + HB_W/2 - nw/2), (int)(slotY+HB_H-13), 9, WHITE);
+                            if (ri >= 0 && ri < 6) slotBorder = rarityBorderCols[ri];
+                        }
+                        DrawRectangleLinesEx({hbX, slotY, HB_W, HB_H},
+                            (i == hotbarSlot) ? 3.f : 2.f,
+                            i == hotbarSlot ? YELLOW : slotBorder);
+                        DrawText(TextFormat("%d", i+1), (int)hbX + 4, (int)slotY + 4, 12, WHITE);
+                        if (s.type != PU_NONE) {
+                            // Item texture only — no card background
+                            Texture2D* iTex = GetItemTex(s.type);
+                            if (iTex && iTex->id > 0) {
+                                float pad = 8.f;
+                                Rectangle slotInner = { hbX+pad, slotY+pad, HB_W-pad*2.f, HB_H-pad*2.f };
+                                Rectangle fitR = FitTexRect(slotInner, (float)iTex->width, (float)iTex->height);
+                                DrawTexturePro(*iTex,
+                                    {0.f, 0.f, (float)iTex->width, (float)iTex->height},
+                                    fitR, {}, 0.f, WHITE);
+                            }
                             const PowerupInfo& info = PU_INFO[(int)s.type];
                             if (info.passive) {
                                 DrawText("AUTO", (int)(hbX - 42), (int)(slotY + HB_H/2 - 8), 13, LIME);
@@ -3670,34 +3729,46 @@ int main(void)
                     flipped = spinF < 0.f;
                 }
 
-                // Height: grow from bottom-up during appear, full size after
+                // Scale pop-in on all axes: 0 → 1.x → 1 during appear, full size after
                 bool isAppearing = (!c.appeared && c.heightFrac < 1.f);
-                float effH = isAppearing ? c.heightFrac : c.scale;
-                float dW = cardW * scaleX;
-                float dH = cardH * effH;
+                float effScale = isAppearing ? c.heightFrac : c.scale;
+                float dW = cardW * scaleX * (isAppearing ? effScale : 1.f);
+                float dH = cardH * effScale;
                 if (dW < 1.f) dW = 1.f;
                 if (dH < 1.f) dH = 1.f;
-                // Bottom-fixed position during appear; centered otherwise
+                // Always centered
                 float destX = cx - dW * 0.5f;
-                float destY = isAppearing
-                    ? (startY + cardH - dH)
-                    : (cy - dH * 0.5f);
+                float destY = cy - dH * 0.5f;
                 Rectangle dest = { destX, destY, dW, dH };
 
                 // Draw card texture
                 int ri = c.rarity;
-                static const Color rarityColors[6]={{180,180,180,255},{60,160,255,255},{120,80,255,255},{255,150,0,255},{255,200,50,255},{200,50,255,255}};
                 if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0) {
-                    float texH = (float)cardTextures[ri].height;
-                    // During appear: show bottom portion of texture (card "rises" from below)
-                    float srcYtex = isAppearing ? texH * (1.f - c.heightFrac) : 0.f;
-                    float srcHtex = isAppearing ? texH * c.heightFrac : texH;
                     float srcWtex = flipped ? -(float)cardTextures[ri].width : (float)cardTextures[ri].width;
                     float srcXtex = flipped ? (float)cardTextures[ri].width : 0.f;
-                    DrawTexturePro(cardTextures[ri], { srcXtex, srcYtex, srcWtex, srcHtex },
+                    DrawTexturePro(cardTextures[ri],
+                        { srcXtex, 0.f, srcWtex, (float)cardTextures[ri].height },
                         dest, { 0, 0 }, 0.f, WHITE);
                 } else {
-                    DrawRectangleRec(dest, rarityColors[ri]);
+                    Color rc = (ri>=0&&ri<6) ? rarityBorderCols[ri] : GRAY;
+                    DrawRectangleRec(dest, rc);
+                }
+
+                // Item texture overlay: shadow + bobbing icon on top of card
+                if (c.type != PU_NONE && effScale > 0.1f) {
+                    Texture2D* iTex = GetItemTex(c.type);
+                    if (iTex && iTex->id > 0) {
+                        float bob = isAppearing ? 0.f : sinf((float)GetTime() * 2.f) * 3.f;
+                        float pad = dW * 0.15f;
+                        Rectangle itemArea = { destX + pad, destY + pad + bob, dW - pad*2.f, dH - pad*2.f };
+                        Rectangle fitR = FitTexRect(itemArea, (float)iTex->width, (float)iTex->height);
+                        Rectangle fitRShadow = { fitR.x + 4.f, fitR.y + 6.f, fitR.width, fitR.height };
+                        Rectangle src = {0.f, 0.f, (float)iTex->width, (float)iTex->height};
+                        // Shadow: black duplicate offset below-right
+                        DrawTexturePro(*iTex, src, fitRShadow, {}, 0.f, {0,0,0,110});
+                        // Item
+                        DrawTexturePro(*iTex, src, fitR, {}, 0.f, WHITE);
+                    }
                 }
 
                 // Hover highlight
@@ -3705,8 +3776,8 @@ int main(void)
                     DrawRectangleLinesEx(dest, 3, YELLOW);
 
                 // Text OUTSIDE card — name above, desc+cd below
-                if (effH > 0.2f && !c.selected) {
-                    float alpha = fminf((effH - 0.2f) / 0.5f, 1.f);
+                if (effScale > 0.2f && !c.selected) {
+                    float alpha = fminf((effScale - 0.2f) / 0.5f, 1.f);
                     unsigned char a = (unsigned char)(alpha * 255.f);
                     int nameFS = isShop ? 13 : 17;
                     int descFS = isShop ? 10 : 13;
@@ -3745,16 +3816,27 @@ int main(void)
                 const HotbarSlot& s = hotbar[i];
                 Color bg = (i == hotbarSlot) ? Color{255,220,0,130} : Color{40,40,40,150};
                 DrawRectangle((int)slotX, (int)hbSlotY2, (int)HB_W2, (int)HB_H2, bg);
-                DrawRectangleLines((int)slotX, (int)hbSlotY2, (int)HB_W2, (int)HB_H2, i == hotbarSlot ? YELLOW : DARKGRAY);
-                DrawText(TextFormat("%d", i+1), (int)slotX + 4, (int)hbSlotY2 + 4, 12, WHITE);
+                // Rarity-colored border
+                Color slotBorder2 = DARKGRAY;
                 if (s.type != PU_NONE) {
                     int ri = PU_INFO[(int)s.type].rarityIdx;
-                    if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0)
-                        DrawTexturePro(cardTextures[ri],
-                            {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
-                            {slotX, hbSlotY2, HB_W2, HB_H2}, {0,0}, 0.f, WHITE);
-                    int nw = MeasureText(PU_INFO[(int)s.type].name, 9);
-                    DrawText(PU_INFO[(int)s.type].name, (int)(slotX + HB_W2/2 - nw/2), (int)(hbSlotY2 + HB_H2 - 12), 9, WHITE);
+                    if (ri >= 0 && ri < 6) slotBorder2 = rarityBorderCols[ri];
+                }
+                DrawRectangleLinesEx({slotX, hbSlotY2, HB_W2, HB_H2},
+                    (i == hotbarSlot) ? 3.f : 2.f,
+                    i == hotbarSlot ? YELLOW : slotBorder2);
+                DrawText(TextFormat("%d", i+1), (int)slotX + 4, (int)hbSlotY2 + 4, 12, WHITE);
+                if (s.type != PU_NONE) {
+                    // Item texture only — no card background
+                    Texture2D* iTex = GetItemTex(s.type);
+                    if (iTex && iTex->id > 0) {
+                        float pad2 = 8.f;
+                        Rectangle slotInner2 = { slotX+pad2, hbSlotY2+pad2, HB_W2-pad2*2.f, HB_H2-pad2*2.f };
+                        Rectangle fitR2 = FitTexRect(slotInner2, (float)iTex->width, (float)iTex->height);
+                        DrawTexturePro(*iTex,
+                            {0.f, 0.f, (float)iTex->width, (float)iTex->height},
+                            fitR2, {}, 0.f, WHITE);
+                    }
                 }
             }
 
@@ -3762,14 +3844,19 @@ int main(void)
             if (hbDrag.active) {
                 int ri = PU_INFO[(int)hbDrag.type].rarityIdx;
                 float dX = hbDrag.x - HB_W2 * 0.5f, dY = hbDrag.y - HB_H2 * 0.5f;
-                Color tint = { 255,255,255,200 };
-                if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0)
-                    DrawTexturePro(cardTextures[ri],
-                        {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
-                        {dX, dY, HB_W2, HB_H2}, {0,0}, 0.f, tint);
+                Color dragBorder = (ri >= 0 && ri < 6) ? rarityBorderCols[ri] : WHITE;
+                // Item texture for dragged card
+                Texture2D* dTex = GetItemTex(hbDrag.type);
+                if (dTex && dTex->id > 0) {
+                    Rectangle dragInner = { dX, dY, HB_W2, HB_H2 };
+                    Rectangle dragFit = FitTexRect(dragInner, (float)dTex->width, (float)dTex->height);
+                    DrawTexturePro(*dTex,
+                        {0.f, 0.f, (float)dTex->width, (float)dTex->height},
+                        dragFit, {}, 0.f, {255,255,255,200});
+                }
                 else
                     DrawRectangle((int)dX, (int)dY, (int)HB_W2, (int)HB_H2, {120,80,200,200});
-                DrawRectangleLines((int)dX, (int)dY, (int)HB_W2, (int)HB_H2, WHITE);
+                DrawRectangleLinesEx({dX, dY, HB_W2, HB_H2}, 2.f, dragBorder);
                 int nw = MeasureText(PU_INFO[(int)hbDrag.type].name, 9);
                 DrawText(PU_INFO[(int)hbDrag.type].name, (int)(hbDrag.x - nw * 0.5f), (int)(hbDrag.y + HB_H2 * 0.5f - 12), 9, WHITE);
             }
@@ -4061,6 +4148,9 @@ int main(void)
     if (propFireFrame2.id > 0) UnloadTexture(propFireFrame2);
     for (int i = 0; i < CARD_TEX_COUNT; i++) UnloadTexture(cardTextures[i]);
     if (texCoin.id > 0) UnloadTexture(texCoin);
+    UnloadTexture(itemTex_ReturnByDeath); UnloadTexture(itemTex_Dash);
+    UnloadTexture(itemTex_Reinhard);      UnloadTexture(itemTex_Whip);
+    UnloadTexture(itemTex_Speedrun);      UnloadTexture(itemTex_Shield);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
