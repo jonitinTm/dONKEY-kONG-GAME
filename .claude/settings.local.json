@@ -13,7 +13,9 @@
       "PowerShell($env:PATH -split ';' | Where-Object { $_ -match 'mingw|gcc|msys' } | Select-Object -First 10)",
       "PowerShell($env:PATH -split \";\" | Where-Object { $_ -match \"mingw|gcc|msys|w64\" } | Select-Object -First 5)",
       "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 40)",
-      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 30)"
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 30)",
+      "Bash(where gcc *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /verbosity:minimal 2>&1 | Select-Object -Last 40)"
     ]
   }
 }

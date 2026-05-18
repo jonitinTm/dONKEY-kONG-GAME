@@ -1400,6 +1400,18 @@ void LevelEditor::DrawRegulusEnt(Vector2 pos, bool sel, bool msel) const {
     DrawCircleV(pos, 3.f, sel ? YELLOW : Color{ 160,32,240,255 });
 }
 void LevelEditor::DrawCaveEnt(Vector2 pos, bool sel, bool msel) const {
+    if (!_level.caveVisible) {
+        // Invisible cave: show spawn circle only
+        Vector2 center = { pos.x + 112.f, pos.y + 56.f };
+        float radius = 28.f;
+        DrawCircleV(center, radius, { 255,165,0,40 });
+        DrawCircleLinesV(center, radius, sel ? YELLOW : ORANGE);
+        if (msel && !sel) DrawCircleLinesV(center, radius + 3.f, { 255,200,0,180 });
+        int tw = MeasureText("SPAWN", 9);
+        DrawText("SPAWN", (int)(center.x - tw * 0.5f), (int)(center.y - 5), 9, sel ? YELLOW : ORANGE);
+        DrawText("(hidden)", (int)(center.x - 18), (int)(center.y + 6), 8, { 200,140,60,200 });
+        return;
+    }
     if (_caveTex && _caveTex->id > 0) {
         float w = 64.f * 3.5f, h = 32.f * 3.5f;
         DrawTexturePro(*_caveTex, { 0,0,64.f,32.f }, { pos.x,pos.y,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
@@ -1908,6 +1920,20 @@ void LevelEditor::DrawDataPanel() {
             DrawText(TextFormat("  • %s %d", ToolName((EditorTool)ce.type), ce.index),
                 (int)px, (int)cy, 9, ToolColor((EditorTool)ce.type)); cy += 12;
         }
+    }
+    if (_sel.type == (int)EditorTool::CAVE) {
+        SectionHeader("── Cave Options ───────────");
+        Rectangle visR = { px, cy, fw, 18 };
+        bool hVis = CheckCollisionPointRec(GetMousePosition(), visR);
+        bool isVis = _level.caveVisible;
+        DrawRectangleRec(visR, isVis ? Color{20,80,20,255} : (hVis ? Color{60,30,30,255} : Color{40,20,20,255}));
+        DrawRectangleLinesEx(visR, isVis ? 2.f : 1.f, isVis ? Color{80,220,80,255} : Color{200,80,80,255});
+        const char* visLbl = isVis ? "Visible: ON" : "Visible: OFF (circle only)";
+        int vlw = MeasureText(visLbl, 9);
+        DrawText(visLbl, (int)(visR.x + visR.width * 0.5f - vlw * 0.5f), (int)cy + 5, 9,
+            isVis ? Color{180,255,180,255} : Color{255,160,160,255});
+        if (hVis && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); _level.caveVisible = !_level.caveVisible; }
+        cy += 22;
     }
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Rotation ───────────────");

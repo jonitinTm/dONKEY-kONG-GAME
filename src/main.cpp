@@ -123,12 +123,13 @@ struct HotbarSlot {
 
 // Card display / animation
 struct CardDisplay {
-    PowerupType type      = PU_NONE;
-    int         rarity    = 0;
-    float       scale     = 0.f;
-    float       appearT   = 0.f;   // 0→0.4 pop-in
-    bool        appeared  = false;
-    float       hoverLerp = 0.f;   // 0→1
+    PowerupType type       = PU_NONE;
+    int         rarity     = 0;
+    float       scale      = 1.f;
+    float       appearT    = 0.f;   // negative = stagger delay, 0→1s height grow
+    float       heightFrac = 0.f;   // 0→1 height reveal (bottom-up)
+    bool        appeared   = false;
+    float       hoverLerp  = 0.f;   // 0→1
     bool        hovered   = false;
     bool        selected  = false;
     bool        dismissed = false;
@@ -436,6 +437,11 @@ int main(void)
     bool  dbgBloomEnabled  = true;
     float dbgBloomThreshold= 0.7f;
     float dbgBloomIntensity= 0.8f;
+
+    // ── Audio volumes (music / sfx / ui) ─────────────────────────────────────
+    float volMusic = 1.f;   // background music
+    float volSFX   = 1.f;   // gameplay sounds (death, hit, nuke, jump barrel, RBD)
+    float volUI    = 1.f;   // UI/card sounds
 
     // ── Heavy item equip state ─────────────────────────────────────────────────
     float heavyEquipTimer  = 0.f;
@@ -799,8 +805,15 @@ int main(void)
     Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
     Sound rbdSound     = LoadSound("Assets/Nuevo audio/mp3/re-zero-return-by-death.mp3");
 
+    // Card / UI sounds (Balatro SFX)
+    Sound cardFanSnd   = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardFan2.ogg");
+    Sound cardSlideSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardSlide1.ogg");
+    Sound cardHoverSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/highlight1.ogg");
+    Sound cardPickSnd  = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/card1.ogg");
+    Sound cardThrowSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/whoosh1.ogg");
+
     SetMasterVolume(1.0f);
-    SetMusicVolume(music, 1.0f);
+    SetMusicVolume(music, volMusic);
     SetMusicPan(music, 0.0f);
     PlayMusicStream(music);
 
@@ -1243,12 +1256,14 @@ int main(void)
         hbDrag = {};
         for (int i = 0; i < n; i++) {
             displayCards[i] = {};
-            displayCards[i].type    = RollPowerup();
-            displayCards[i].rarity  = PU_INFO[(int)displayCards[i].type].rarityIdx;
-            displayCards[i].scale   = 0.f;
-            displayCards[i].appearT = 0.f;
-            displayCards[i].appeared= false;
+            displayCards[i].type      = RollPowerup();
+            displayCards[i].rarity    = PU_INFO[(int)displayCards[i].type].rarityIdx;
+            displayCards[i].scale     = 1.f;
+            displayCards[i].heightFrac = 0.f;
+            displayCards[i].appearT   = -(float)i * 0.15f;  // stagger per card
+            displayCards[i].appeared  = false;
         }
+        SetSoundVolume(cardFanSnd, volUI); PlaySound(cardFanSnd);
     };
 
     // Add powerup to hotbar; returns true if added
@@ -1507,6 +1522,7 @@ int main(void)
             currentScreen = MENU;
         }
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
+        if (IsKeyPressed(KEY_M)) dbgMenuOpen = !dbgMenuOpen;
 
         if (currentScreen == SPLASH_SCREEN)
         {
@@ -1723,7 +1739,7 @@ int main(void)
                     regulusIdleTimer=s.regIdleT; regulusIdleFrame=s.regIdleFr;
                     rbdCount = 0; rbdHead = 0;
                 }
-                PlaySound(rbdSound);
+                SetSoundVolume(rbdSound, volSFX); PlaySound(rbdSound);
                 rbdFading = true; rbdFadeTimer = 0.f;
                 ClearDeathState();
                 invincible = true; invincibleTimer = 2.0f;
@@ -1830,7 +1846,7 @@ int main(void)
                             maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_NUKE_PU: {
-                            PlaySound(nukeSound);
+                            SetSoundVolume(nukeSound, volSFX); PlaySound(nukeSound);
                             float sc=3.8f*0.85f*1.05f;
                             float nkW=NUKE_NATIVE_W*(NUKE_SCALE*0.25f)*sc, nkH=NUKE_NATIVE_H*(NUKE_SCALE*0.25f)*sc;
                             nukeExplosionPos={player.x+player.width*0.5f-nkW*0.5f, player.y-nkH-2.f};
@@ -2265,7 +2281,7 @@ int main(void)
                     };
                     if (CheckCollisionRecs(player, jumpZone))
                     {
-                        score += 100; b.jumpScored = true; PlaySound(jumpBrlSound);
+                        score += 100; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
                     }
                 }
             }
@@ -2274,8 +2290,8 @@ int main(void)
             if (isDying)
             {
                 deathTimer += dt;
-                if (!hitPlayed) { PlaySound(HitSound);   hitPlayed = true; }
-                if (deathTimer > 0.5f && !deathPlayed) { PlaySound(deathSound); deathPlayed = true; }
+                if (!hitPlayed) { SetSoundVolume(HitSound, volSFX); PlaySound(HitSound); hitPlayed = true; }
+                if (deathTimer > 0.5f && !deathPlayed) { SetSoundVolume(deathSound, volSFX); PlaySound(deathSound); deathPlayed = true; }
 
                 if (deathShakeTimer > 0.0f)
                 {
@@ -2735,8 +2751,7 @@ int main(void)
             }
 
             // ── Update card animations ────────────────────────────────────────
-            static const float APPEAR_PHASE1 = 0.2f;
-            static const float APPEAR_PHASE2 = 0.4f;
+            static const float APPEAR_DUR    = 1.0f;
             static const float EXIT_DUR      = 0.5f;
             bool anyExiting = false;
 
@@ -2744,11 +2759,20 @@ int main(void)
                 CardDisplay& c = displayCards[i];
                 if (!c.appeared) {
                     c.appearT += dt;
-                    if (c.appearT < APPEAR_PHASE1)
-                        c.scale = Lerp(0.f, 1.1f, c.appearT / APPEAR_PHASE1);
-                    else if (c.appearT < APPEAR_PHASE2)
-                        c.scale = Lerp(1.1f, 1.0f, (c.appearT - APPEAR_PHASE1) / (APPEAR_PHASE2 - APPEAR_PHASE1));
-                    else { c.scale = 1.0f; c.appeared = true; }
+                    if (c.appearT > 0.f) {
+                        float t = fminf(c.appearT / APPEAR_DUR, 1.f);
+                        // ease-out with slight overshoot on height
+                        if (t < 0.85f)
+                            c.heightFrac = Lerp(0.f, 1.05f, t / 0.85f);
+                        else
+                            c.heightFrac = Lerp(1.05f, 1.0f, (t - 0.85f) / 0.15f);
+                        if (c.appearT >= APPEAR_DUR) {
+                            c.heightFrac = 1.0f;
+                            c.appeared = true;
+                            SetSoundVolume(cardSlideSnd, volUI); PlaySound(cardSlideSnd);
+                        }
+                    }
+                    c.scale = 1.0f;
                 }
                 if (c.selected || c.dismissed) {
                     c.exitT += dt;
@@ -2766,7 +2790,11 @@ int main(void)
                     float cy = startY + cardH * 0.5f;
                     Rectangle hitR = { cx - cardW * c.scale * 0.5f, cy - cardH * c.scale * 0.5f,
                                        cardW * c.scale, cardH * c.scale };
+                    bool wasHovered = c.hovered;
                     c.hovered = !hbDrag.active && CheckCollisionPointRec(mouse, hitR);
+                    if (c.hovered && !wasHovered) {
+                        SetSoundVolume(cardHoverSnd, volUI); PlaySound(cardHoverSnd);
+                    }
                     float hTarget = c.hovered ? 1.f : 0.f;
                     c.hoverLerp = Lerp(c.hoverLerp, hTarget, fminf(dt * 10.f, 1.f));
                     c.scale = 1.0f + 0.1f * c.hoverLerp;
@@ -2797,14 +2825,17 @@ int main(void)
                     if (displayCards[i].appeared && displayCards[i].hovered) {
                         anyCardPicked = true;
                         displayCards[i].selected = true;
+                        SetSoundVolume(cardPickSnd, volUI); PlaySound(cardPickSnd);
                         if (isShop) {
                             int cost = PU_INFO[(int)displayCards[i].type].cost;
                             if (coins >= cost) { coins -= cost; AddToHotbar(displayCards[i].type); }
                         } else {
                             AddToHotbar(displayCards[i].type);
                         }
+                        bool anyDismissed = false;
                         for (int j = 0; j < numDispCards; j++)
-                            if (j != i) displayCards[j].dismissed = true;
+                            if (j != i) { displayCards[j].dismissed = true; anyDismissed = true; }
+                        if (anyDismissed) { SetSoundVolume(cardThrowSnd, volUI); PlaySound(cardThrowSnd); }
                         break;
                     }
                 }
@@ -3080,11 +3111,13 @@ int main(void)
                     { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
             }
 
-            // 6. House
+            // 6. House (only render when cave is visible)
+            if (!currentLevelData.hasCave || currentLevelData.caveVisible)
             {
                 Texture2D& houseTex = houseIsSnowed ? House2 : House1;
                 DrawTexturePro(houseTex, { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H }, { houseX, houseY, houseW, houseH }, {}, 0.f, WHITE);
-                if (houseIsSnowed) {
+                if (houseIsSnowed && currentLevelId == 1) {
+                    // Snow floor only on level 1
                     float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE, sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
                     DrawTexturePro(SnowFloor, { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H }, { houseX, 865.0f, sfW, sfH }, {}, 0.f, WHITE);
                 }
@@ -3578,19 +3611,31 @@ int main(void)
                     flipped = spinF < 0.f;
                 }
 
+                // Height: grow from bottom-up during appear, full size after
+                bool isAppearing = (!c.appeared && c.heightFrac < 1.f);
+                float effH = isAppearing ? c.heightFrac : c.scale;
                 float dW = cardW * scaleX;
-                float dH = cardH * c.scale;
+                float dH = cardH * effH;
                 if (dW < 1.f) dW = 1.f;
                 if (dH < 1.f) dH = 1.f;
-                Rectangle dest = { cx - dW * 0.5f, cy - dH * 0.5f, dW, dH };
+                // Bottom-fixed position during appear; centered otherwise
+                float destX = cx - dW * 0.5f;
+                float destY = isAppearing
+                    ? (startY + cardH - dH)
+                    : (cy - dH * 0.5f);
+                Rectangle dest = { destX, destY, dW, dH };
 
                 // Draw card texture
                 int ri = c.rarity;
                 static const Color rarityColors[6]={{180,180,180,255},{60,160,255,255},{120,80,255,255},{255,150,0,255},{255,200,50,255},{200,50,255,255}};
                 if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0) {
-                    float srcW = flipped ? -(float)cardTextures[ri].width : (float)cardTextures[ri].width;
-                    float srcX = flipped ? (float)cardTextures[ri].width : 0.f;
-                    DrawTexturePro(cardTextures[ri], { srcX, 0, srcW, (float)cardTextures[ri].height },
+                    float texH = (float)cardTextures[ri].height;
+                    // During appear: show bottom portion of texture (card "rises" from below)
+                    float srcYtex = isAppearing ? texH * (1.f - c.heightFrac) : 0.f;
+                    float srcHtex = isAppearing ? texH * c.heightFrac : texH;
+                    float srcWtex = flipped ? -(float)cardTextures[ri].width : (float)cardTextures[ri].width;
+                    float srcXtex = flipped ? (float)cardTextures[ri].width : 0.f;
+                    DrawTexturePro(cardTextures[ri], { srcXtex, srcYtex, srcWtex, srcHtex },
                         dest, { 0, 0 }, 0.f, WHITE);
                 } else {
                     DrawRectangleRec(dest, rarityColors[ri]);
@@ -3601,8 +3646,8 @@ int main(void)
                     DrawRectangleLinesEx(dest, 3, YELLOW);
 
                 // Text OUTSIDE card — name above, desc+cd below
-                if (c.scale > 0.2f && !c.selected) {
-                    float alpha = fminf((c.scale - 0.2f) / 0.5f, 1.f);
+                if (effH > 0.2f && !c.selected) {
+                    float alpha = fminf((effH - 0.2f) / 0.5f, 1.f);
                     unsigned char a = (unsigned char)(alpha * 255.f);
                     int nameFS = isShop ? 13 : 17;
                     int descFS = isShop ? 10 : 13;
@@ -3693,7 +3738,7 @@ int main(void)
             if (CheckCollisionPointRec(dbgMouse, { (float)DBG_X,(float)DBG_Y,(float)DBG_W,(float)DBG_H }))
                 dbgMenuScroll -= mwheel * (float)DBG_ROW_H;
 
-            const int numRows    = 13;
+            const int numRows    = 16;
             const int totalContH = numRows * DBG_ROW_H + DBG_PAD * 2;
             int maxScroll  = totalContH - DBG_CONT_H;
             if (maxScroll < 0) maxScroll = 0;
@@ -3851,6 +3896,36 @@ int main(void)
               if (dbgClicked(mR)) dbgBloomThreshold=fmaxf(0.f,dbgBloomThreshold-0.05f);
               if (dbgClicked(pR)) dbgBloomThreshold=fminf(1.f,dbgBloomThreshold+0.05f); }
 
+            // Row 13 – Music Volume
+            { int ry = dbgRowY(13);
+              DrawText("Music Vol:", DBG_X+DBG_PAD+2, ry+9, 10, {180,220,255,255});
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",volMusic),DBG_X+130,ry+9,11,{180,220,255,255});
+              if (dbgClicked(mR)) { volMusic=fmaxf(0.f,volMusic-0.05f); SetMusicVolume(music,volMusic); }
+              if (dbgClicked(pR)) { volMusic=fminf(1.f,volMusic+0.05f); SetMusicVolume(music,volMusic); } }
+
+            // Row 14 – SFX Volume (gameplay sounds: death, hit, nuke, barrel jump, RBD)
+            { int ry = dbgRowY(14);
+              DrawText("SFX Vol:", DBG_X+DBG_PAD+2, ry+9, 10, {255,200,160,255});
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",volSFX),DBG_X+130,ry+9,11,{255,200,160,255});
+              if (dbgClicked(mR)) volSFX=fmaxf(0.f,volSFX-0.05f);
+              if (dbgClicked(pR)) volSFX=fminf(1.f,volSFX+0.05f); }
+
+            // Row 15 – UI Volume (card sounds)
+            { int ry = dbgRowY(15);
+              DrawText("UI Vol:", DBG_X+DBG_PAD+2, ry+9, 10, {200,255,200,255});
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",volUI),DBG_X+130,ry+9,11,{200,255,200,255});
+              if (dbgClicked(mR)) volUI=fmaxf(0.f,volUI-0.05f);
+              if (dbgClicked(pR)) volUI=fminf(1.f,volUI+0.05f); }
+
             EndScissorMode();
 
             // Scrollbar
@@ -3873,6 +3948,11 @@ int main(void)
     UnloadSound(nukeSound);
     UnloadSound(jumpBrlSound);
     UnloadSound(rbdSound);
+    UnloadSound(cardFanSnd);
+    UnloadSound(cardSlideSnd);
+    UnloadSound(cardHoverSnd);
+    UnloadSound(cardPickSnd);
+    UnloadSound(cardThrowSnd);
 
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
