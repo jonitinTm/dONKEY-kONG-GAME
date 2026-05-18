@@ -1382,9 +1382,11 @@ void LevelEditor::DrawBeamEnt(const BeamData& b, bool sel, bool msel) const {
 }
 void LevelEditor::DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const {
     if (_playerTex && _playerTex->id > 0) {
-        float s = 3.5f, w = _playerTex->width * s, h = _playerTex->height * s;
-        DrawTexturePro(*_playerTex, { 0,0,(float)_playerTex->width,(float)_playerTex->height }, { pos.x - w * .5f,pos.y - h,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x - w * .5f,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
+        // Match game draw: top-left at pos, y+10 offset, same scale as gameplay
+        float s = 3.8f * 0.85f * 1.05f, w = _playerTex->width * s, h = _playerTex->height * s;
+        Rectangle dest = { pos.x, pos.y + 10.f, w, h };
+        DrawTexturePro(*_playerTex, { 0,0,(float)_playerTex->width,(float)_playerTex->height }, dest, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx(dest, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
     else DrawCircEnt(pos, 12.f, GREEN, sel, msel, "P");
     DrawCircleV(pos, 4.f, sel ? YELLOW : GREEN);
@@ -1392,9 +1394,11 @@ void LevelEditor::DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const {
 }
 void LevelEditor::DrawRegulusEnt(Vector2 pos, bool sel, bool msel) const {
     if (_regulusTex && _regulusTex->id > 0) {
+        // Match game draw: regX = pos.x + w*0.5f, regY = pos.y - h + 20
         float s = 3.5f * .7f * 1.2f, w = _regulusTex->width * s, h = _regulusTex->height * s;
-        DrawTexturePro(*_regulusTex, { 0,0,(float)_regulusTex->width,(float)_regulusTex->height }, { pos.x,pos.y - h,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
+        Rectangle dest = { pos.x + w * 0.5f, pos.y - h + 20.f, w, h };
+        DrawTexturePro(*_regulusTex, { 0,0,(float)_regulusTex->width,(float)_regulusTex->height }, dest, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx(dest, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
     else DrawCircEnt(pos, 16.f, { 160,32,240,255 }, sel, msel, "R");
     DrawCircleV(pos, 3.f, sel ? YELLOW : Color{ 160,32,240,255 });
