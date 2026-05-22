@@ -76,6 +76,8 @@ struct Enemy
     bool       onLadder = false;
     int        ladderIdx = -1;
     float      ladderProgress = 0.f;
+    float      ladderCooldown = 0.f;
+    bool       justJumped = false;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +142,7 @@ struct CardDisplay {
     bool        dismissed = false;
     float       exitT     = 0.f;   // 0→1 exit animation
     float       spinPhase = 0.f;   // 0→1 x-axis spin for selected card
+    float       shakeTimer = 0.f; // > 0 while shake animation plays
 };
 
 // Return-by-death snapshot
@@ -260,6 +263,10 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     // ── Fall-off-map kill ─────────────────────────────────────────────────────
     if (e.hitbox.y > 1050.0f) { e.active = false; e.onLadder = false; return; }
 
+    // ── Timers ────────────────────────────────────────────────────────────────
+    if (e.ladderCooldown > 0.f) e.ladderCooldown -= delta;
+    e.justJumped = false;
+
     // ── Ladder climbing ───────────────────────────────────────────────────────
     // Player ladder speed is 2.1*0.75 = 1.575; bunny climbs at 0.5x that = 0.7875
     static constexpr float BUNNY_CLIMB_SPEED = 2.1f * 0.75f * 0.5f;
@@ -274,14 +281,15 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
             e.hitbox.y = lad.PlayerYAtProgress(e.ladderProgress, e.hitbox.height);
             e.velocity = { 0.f, 0.f };
             e.grounded = false;
-            if (e.ladderProgress >= 0.95f) {
-                // Snap to ladder top so the collision resolver grounds us on the platform above
-                e.hitbox.y = lad.y - e.hitbox.height;
-                e.velocity   = { 0.f, 0.f };
+            if (e.ladderProgress >= 0.92f) {
+                // Push the bunny clear above the ladder top, then let physics land it
+                e.hitbox.y   = lad.y - e.hitbox.height - 6.f;
+                e.velocity   = { 0.f, -1.5f };
                 e.onLadder   = false;
                 e.ladderIdx  = -1;
                 e.ladderProgress = 0.f;
                 e.grounded   = false;
+                e.ladderCooldown = 0.6f; // prevent immediate re-entry
             }
         }
         // Animation while climbing
@@ -292,7 +300,7 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     }
 
     // ── Enter ladder if grounded and overlapping ──────────────────────────────
-    if (e.grounded) {
+    if (e.grounded && e.ladderCooldown <= 0.f) {
         for (int i = 0; i < (int)lads.size(); i++) {
             Rectangle lhb = lads[i].GetHitbox();
             if (CheckCollisionRecs(e.hitbox, lhb)) {
@@ -333,6 +341,7 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
             e.velocity.x = playerRight ? speedToward : -speedToward;
             e.facingRight = playerRight;
             e.grounded = false;
+            e.justJumped = true;
         }
         break;
 
@@ -395,9 +404,9 @@ static void DrawEnemy(const Enemy& e,
 {
     if (!e.active) return;
 
-    // idle = grounded or on ladder; jump = airborne
+    // Show jump sprite only when actually in a jumping state (not briefly after ladder exit)
     Texture2D* tex = nullptr;
-    bool airborne = !e.grounded && !e.onLadder;
+    bool airborne = !e.onLadder && (e.state == ES_JUMP_TOWARD || e.state == ES_JUMP_BACK);
     if (e.type == GRUNT)
         tex = airborne ? &jumpGrunt   : &idleGrunt;
     else
@@ -583,6 +592,7 @@ int main(void)
     bool      isJumping = false;
     bool      facingRight = true;
     bool      isGrounded = false;
+    float     playerStepDist = 0.f;
 
     int         lives = 3;
     bool        invincible = false;
@@ -879,14 +889,56 @@ int main(void)
     Sound sndShield        = LoadSound(TextFormat("%s%s", WAV,     "Shield.wav"));
     Sound sndDash          = LoadSound(TextFormat("%s%s", WAV,     "Dash.wav"));
     Sound sndBeatrice      = LoadSound(TextFormat("%s%s", WAV,     "BeatriceCarry.wav"));
-    Sound sndBeatriceAtk   = LoadSound(TextFormat("%s%s", WAV,     "BeatriceAttack.wav"));
+    static const char* NEWSFX = "Assets/Nuevo audio/NewSFX/";
+    Sound sndBeatriceAtk   = LoadSound(TextFormat("%s%s", NEWSFX,  "MagicShot.wav"));
     Sound sndLarper        = LoadSound(TextFormat("%s%s", WAV,     "Larper.wav"));
     Sound sndSpeedrun      = LoadSound(TextFormat("%s%s", BALATRO, "generic1.ogg"));
-    Sound sndWhip          = LoadSound(TextFormat("%s%s", BALATRO, "slice1.ogg"));
+    Sound sndWhip[3] = {
+        LoadSound(TextFormat("%s%s", NEWSFX, "WhipStart1.wav")),
+        LoadSound(TextFormat("%s%s", NEWSFX, "WhipStart2.wav")),
+        LoadSound(TextFormat("%s%s", NEWSFX, "WhipStart3.wav")),
+    };
+    Sound sndEnemyKill     = LoadSound(TextFormat("%s%s", NEWSFX, "NPC_Killed_1.wav"));
     Sound sndExtraLife     = LoadSound(TextFormat("%s%s", BALATRO, "gold_seal.ogg"));
     Sound sndOneLarp       = LoadSound(TextFormat("%s%s", BALATRO, "coin1.ogg"));
     Sound sndError         = LoadSound(TextFormat("%s%s", BALATRO, "cancel.ogg"));
     Sound sndReinhard      = LoadSound(TextFormat("%s%s", BALATRO, "gong.ogg"));
+    Sound sndBunnyJump     = LoadSound(TextFormat("%s%s", WAV, "Arcade - Donkey Kong - Sound Effects_grunt.wav"));
+
+    // ── Footstep sounds ───────────────────────────────────────────────────────
+    static const char* MINE = "Assets/Nuevo audio/Mine/";
+    struct FootstepSounds { std::vector<Sound> walk, run; };
+    // Indexed by BeamMaterial (0=NONE, 1=BLUNTWOOD … 16=SQUEAKYWOOD)
+    static const struct { const char* name; int walkN, runN; } MAT_INFO[] = {
+        { "",           0,  0 },  // NONE
+        { "bluntwood", 11,  0 },
+        { "concrete",  11, 11 },
+        { "deckwood",   0, 11 },
+        { "dirt",      11, 11 },
+        { "grass",     10,  4 },
+        { "gravel",    11, 11 },
+        { "lino",       8,  6 },
+        { "marble",    11, 11 },
+        { "metalbar",  11, 11 },
+        { "metalbox",   9, 10 },
+        { "mud",        6,  0 },
+        { "sand",      11, 11 },
+        { "snow",      11, 11 },
+        { "stone",     11, 11 },
+        { "wood",      11,  0 },
+        { "squeakywood",11, 0 },
+    };
+    static const int MAT_COUNT = 17;
+    FootstepSounds footsteps[MAT_COUNT];
+    for (int mi = 1; mi < MAT_COUNT; mi++) {
+        const char* mat = MAT_INFO[mi].name;
+        footsteps[mi].walk.resize(MAT_INFO[mi].walkN);
+        for (int n = 0; n < MAT_INFO[mi].walkN; n++)
+            footsteps[mi].walk[n] = LoadSound(TextFormat("%s%s/%s_walk%d.ogg", MINE, mat, mat, n + 1));
+        footsteps[mi].run.resize(MAT_INFO[mi].runN);
+        for (int n = 0; n < MAT_INFO[mi].runN; n++)
+            footsteps[mi].run[n] = LoadSound(TextFormat("%s%s/%s_run%d.ogg", MINE, mat, mat, n + 1));
+    }
 
     // Card / UI sounds (Balatro SFX)
     Sound cardFanSnd   = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardFan2.ogg");
@@ -1430,7 +1482,7 @@ int main(void)
         {
             for (auto& b : barrels)     b.active = false;
             for (auto& bb : beaBullets)  bb.active = false;
-            for (auto& en : enemies)     { en.active = false; en.onLadder = false; en.ladderIdx = -1; }
+            for (auto& en : enemies)     { en.active = false; en.onLadder = false; en.ladderIdx = -1; en.ladderCooldown = 0.f; en.justJumped = false; }
             for (auto& fn : flyingNukes) fn.active = false;
             flyingNukes.clear();
             playerHasNuke = false;
@@ -1608,6 +1660,7 @@ int main(void)
                 en.animTimer = 0.0f;
                 en.facingRight = (GetRandomValue(0, 1) == 1);
                 en.onLadder = false; en.ladderIdx = -1; en.ladderProgress = 0.f;
+                en.ladderCooldown = 0.f; en.justJumped = false;
                 en.active = true;
                 break;
             }
@@ -1633,6 +1686,7 @@ int main(void)
                     en.animTimer = 0.0f;
                     en.facingRight = (GetRandomValue(0, 1) == 1);
                     en.onLadder = false; en.ladderIdx = -1; en.ladderProgress = 0.f;
+                    en.ladderCooldown = 0.f; en.justJumped = false;
                     en.active = true;
                     break;
                 }
@@ -2037,8 +2091,8 @@ int main(void)
                             Rectangle whipRect = facingRight
                                 ? Rectangle{player.x+player.width, player.y, reach, player.height}
                                 : Rectangle{player.x-reach, player.y, reach, player.height};
-                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; }
-                            SetSoundVolume(sndWhip, volAbility); PlaySound(sndWhip);
+                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; SetSoundVolume(sndEnemyKill, volSFX); PlaySound(sndEnemyKill); }
+                            { int wi=GetRandomValue(0,2); SetSoundVolume(sndWhip[wi], volAbility); PlaySound(sndWhip[wi]); }
                             slot.cd = info.maxCD; break; }
                         case PU_EXTRA_LIFE:
                             maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
@@ -2052,7 +2106,7 @@ int main(void)
                             nukeExplosionPlaying=true; nukeExplosionFrame=0; nukeExplosionTimer=0.f;
                             nukeFlashTimer=0.f; nukeExtraDelay=3.f;
                             for (auto& b:barrels){if(b.active){score+=100;coins+=5;b.active=false;}}
-                            for (auto& e:enemies){if(e.active){score+=300;coins+=15;e.active=false;}}
+                            for (auto& e:enemies){if(e.active){score+=300;coins+=15;e.active=false; SetSoundVolume(sndEnemyKill,volSFX); PlaySound(sndEnemyKill);}}
                             regulusIsStunned=true; regulusStunEnding=false; regulusStunFrame=0;
                             regulusStunTimer=0.f; regulusStunLoops=0;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
@@ -2366,7 +2420,8 @@ int main(void)
                         if (!en.active) continue;
                         if (CheckCollisionRecs(bbRect, en.hitbox))
                         {
-                            en.active = false; bb.active = false; score += 300; coins += 15; break;
+                            en.active = false; bb.active = false; score += 300; coins += 15;
+                            SetSoundVolume(sndEnemyKill, volSFX); PlaySound(sndEnemyKill); break;
                         }
                     }
                 }
@@ -2480,6 +2535,10 @@ int main(void)
                 for (auto& en : enemies)
                 {
                     UpdateEnemy(en, player, platforms, ladders, dt);
+                    if (en.justJumped) {
+                        SetSoundVolume(sndBunnyJump, volSFX * 0.6f);
+                        PlaySound(sndBunnyJump);
+                    }
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
                         if (shieldActive) { en.active = false; score += 300; coins += 15; shieldActive = false; }
                         else TriggerDeath();
@@ -2774,6 +2833,41 @@ int main(void)
                         }
                     }
 
+                    // ── Footstep sounds ───────────────────────────────────────
+                    if (isGrounded && !onLadder && !isDying) {
+                        float stepped = fabsf(player.x - prevX);
+                        playerStepDist += stepped;
+                        static constexpr float STEP_DIST = 48.f;
+                        if (playerStepDist >= STEP_DIST && stepped > 0.1f) {
+                            playerStepDist = 0.f;
+                            // Find the beam directly below the player
+                            float pcx = player.x + player.width * 0.5f;
+                            float pbot = player.y + player.height;
+                            int bestMat = 0;
+                            float bestDist = 80.f;
+                            for (const auto& bm : beamPositions) {
+                                Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant - 1].id > 0)
+                                    ? &beamVariants[bm.texVariant - 1] : &beam;
+                                float bw = bt->width * 4.f, bh = bt->height * 4.f;
+                                if (pcx >= bm.x && pcx <= bm.x + bw) {
+                                    float d = bm.y - pbot;
+                                    if (d >= -bh && d < bestDist) { bestDist = d; bestMat = bm.soundMaterial; }
+                                }
+                            }
+                            if (bestMat > 0 && bestMat < MAT_COUNT) {
+                                bool useRun = speedrunActive && !footsteps[bestMat].run.empty();
+                                const auto& pool = useRun ? footsteps[bestMat].run : footsteps[bestMat].walk;
+                                if (!pool.empty()) {
+                                    int idx = GetRandomValue(0, (int)pool.size() - 1);
+                                    SetSoundVolume(pool[idx], volSFX * 0.5f);
+                                    PlaySound(pool[idx]);
+                                }
+                            }
+                        }
+                    } else {
+                        playerStepDist = 0.f;
+                    }
+
                     // ── Player animation ──────────────────────────────────────
                     if (IsKeyPressed(KEY_B) && !isDying && isGrounded && !onLadder && !playerIsMoving)
                     {
@@ -3019,6 +3113,7 @@ int main(void)
                         c.scale = Lerp(1.f, 0.f, fminf(c.exitT / (EXIT_DUR * 0.7f), 1.f));
                     }
                 }
+                if (c.shakeTimer > 0.f) c.shakeTimer -= dt;
                 if (c.appeared && !c.selected && !c.dismissed) {
                     float cx = startX + i * (cardW + gapX) + cardW * 0.5f;
                     float cy = startY + cardH * 0.5f;
@@ -3057,15 +3152,22 @@ int main(void)
             if (!anyCardPicked && !hbDrag.active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 for (int i = 0; i < numDispCards; i++) {
                     if (displayCards[i].appeared && displayCards[i].hovered) {
-                        anyCardPicked = true;
-                        displayCards[i].selected = true;
-                        SetSoundVolume(cardPickSnd, volUI * 1.2f); PlaySound(cardPickSnd);
                         if (isShop) {
                             int cost = PU_INFO[(int)displayCards[i].type].cost;
-                            if (coins >= cost) { coins -= cost; AddToHotbar(displayCards[i].type); }
+                            if (coins < cost) {
+                                // Can't afford — shake and play error sound
+                                displayCards[i].shakeTimer = 0.45f;
+                                SetSoundVolume(sndError, volUI * 1.5f); PlaySound(sndError);
+                                break;
+                            }
+                            coins -= cost;
+                            AddToHotbar(displayCards[i].type);
                         } else {
                             AddToHotbar(displayCards[i].type);
                         }
+                        anyCardPicked = true;
+                        displayCards[i].selected = true;
+                        SetSoundVolume(cardPickSnd, volUI * 1.2f); PlaySound(cardPickSnd);
                         bool anyDismissed = false;
                         for (int j = 0; j < numDispCards; j++)
                             if (j != i) { displayCards[j].dismissed = true; anyDismissed = true; }
@@ -4374,7 +4476,9 @@ int main(void)
             for (int i = 0; i < numDispCards; i++) {
                 const CardDisplay& c = displayCards[i];
                 if (c.scale <= 0.001f) continue;
-                float cx = startX + i * (cardW + gapX) + cardW * 0.5f;
+                float shakeOff = (c.shakeTimer > 0.f)
+                    ? sinf(c.shakeTimer * 22.f) * 9.f * (c.shakeTimer / 0.45f) : 0.f;
+                float cx = startX + i * (cardW + gapX) + cardW * 0.5f + shakeOff;
                 float cy = startY + cardH * 0.5f;
 
                 float scaleX = c.scale;
@@ -4756,11 +4860,17 @@ int main(void)
     UnloadSound(sndBeatriceAtk);
     UnloadSound(sndLarper);
     UnloadSound(sndSpeedrun);
-    UnloadSound(sndWhip);
+    for (int wi = 0; wi < 3; wi++) UnloadSound(sndWhip[wi]);
+    UnloadSound(sndEnemyKill);
     UnloadSound(sndExtraLife);
     UnloadSound(sndOneLarp);
     UnloadSound(sndError);
     UnloadSound(sndReinhard);
+    UnloadSound(sndBunnyJump);
+    for (int mi = 1; mi < MAT_COUNT; mi++) {
+        for (auto& s : footsteps[mi].walk) UnloadSound(s);
+        for (auto& s : footsteps[mi].run)  UnloadSound(s);
+    }
     UnloadSound(cardFanSnd);
     UnloadSound(cardSlideSnd);
     UnloadSound(cardHoverSnd);

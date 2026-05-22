@@ -319,6 +319,90 @@ void LevelEditor::SelectEnt(SelectedEnt e) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Select all of same type (K key)
+// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::SelectAllOfSameType() {
+    if (!_sel.valid()) return;
+    _multiSel.clear();
+    int t = _sel.type;
+    auto et = (EditorTool)t;
+    if (et == EditorTool::PLATFORM)
+        for (int i = 0; i < (int)_level.platforms.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::LADDER)
+        for (int i = 0; i < (int)_level.ladders.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::BEAM)
+        for (int i = 0; i < (int)_level.beams.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::KILL_ZONE)
+        for (int i = 0; i < (int)_level.killZones.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::CONVEYOR)
+        for (int i = 0; i < (int)_level.conveyors.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::ELEVATOR)
+        for (int i = 0; i < (int)_level.elevators.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::PROP)
+        for (int i = 0; i < (int)_level.props.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::PATH_NODE)
+        for (int i = 0; i < (int)_level.pathNodes.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::NUKE_SPAWN)
+        for (int i = 0; i < (int)_level.nukeSpawns.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::BEATRICE_SPAWN)
+        for (int i = 0; i < (int)_level.beatriceSpawns.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::ENEMY_SPAWN)
+        for (int i = 0; i < (int)_level.enemySpawns.size(); i++) _multiSel.push_back({t,i});
+    else if (et == EditorTool::POINT_LIGHT || et == EditorTool::SPOT_LIGHT || et == EditorTool::SKY_LIGHT)
+        for (int i = 0; i < (int)_level.lights.size(); i++) {
+            EditorTool lt = (_level.lights[i].type == LightType::POINT) ? EditorTool::POINT_LIGHT
+                : (_level.lights[i].type == LightType::SPOT) ? EditorTool::SPOT_LIGHT : EditorTool::SKY_LIGHT;
+            _multiSel.push_back({(int)lt, i});
+        }
+    SetStatus(TextFormat("K: selected all %d of type", (int)_multiSel.size()));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Sync non-positional properties from primary selection to rest of multi-sel
+// ─────────────────────────────────────────────────────────────────────────────
+void LevelEditor::SyncPropertiesFromPrimary() {
+    if (_multiSel.size() <= 1 || !_sel.valid()) return;
+    auto et = (EditorTool)_sel.type;
+    int  pi = _sel.index;
+    for (auto& e : _multiSel) {
+        if (e.index == pi && e.type == _sel.type) continue;
+        if (e.type != _sel.type) continue;
+        int ii = e.index;
+        if (et == EditorTool::BEAM && pi < (int)_level.beams.size() && ii < (int)_level.beams.size()) {
+            auto& dst = _level.beams[ii]; const auto& src = _level.beams[pi];
+            dst.texVariant = src.texVariant; dst.renderLayer = src.renderLayer;
+            dst.flipX = src.flipX; dst.transparent = src.transparent; dst.soundMaterial = src.soundMaterial;
+        } else if (et == EditorTool::PLATFORM && pi < (int)_level.platforms.size() && ii < (int)_level.platforms.size()) {
+            auto& dst = _level.platforms[ii]; const auto& src = _level.platforms[pi];
+            dst.w = src.w; dst.h = src.h; dst.tilt = src.tilt;
+        } else if (et == EditorTool::LADDER && pi < (int)_level.ladders.size() && ii < (int)_level.ladders.size()) {
+            auto& dst = _level.ladders[ii]; const auto& src = _level.ladders[pi];
+            dst.w = src.w; dst.h = src.h;
+        } else if (et == EditorTool::KILL_ZONE && pi < (int)_level.killZones.size() && ii < (int)_level.killZones.size()) {
+            auto& dst = _level.killZones[ii]; const auto& src = _level.killZones[pi];
+            dst.w = src.w; dst.h = src.h; dst.rotation = src.rotation; dst.texId = src.texId; dst.renderLayer = src.renderLayer;
+        } else if (et == EditorTool::CONVEYOR && pi < (int)_level.conveyors.size() && ii < (int)_level.conveyors.size()) {
+            auto& dst = _level.conveyors[ii]; const auto& src = _level.conveyors[pi];
+            dst.length = src.length; dst.speed = src.speed; dst.direction = src.direction;
+            dst.rotation = src.rotation; dst.endCapW = src.endCapW; dst.beltH = src.beltH;
+        } else if (et == EditorTool::ELEVATOR && pi < (int)_level.elevators.size() && ii < (int)_level.elevators.size()) {
+            auto& dst = _level.elevators[ii]; const auto& src = _level.elevators[pi];
+            dst.w = src.w; dst.h = src.h; dst.speed = src.speed; dst.direction = src.direction;
+        } else if (et == EditorTool::PROP && pi < (int)_level.props.size() && ii < (int)_level.props.size()) {
+            auto& dst = _level.props[ii]; const auto& src = _level.props[pi];
+            dst.width = src.width; dst.height = src.height; dst.rotation = src.rotation;
+            dst.hasCollision = src.hasCollision; dst.lightAffect = src.lightAffect;
+            dst.renderLayer = src.renderLayer; dst.texVariant = src.texVariant;
+        } else if ((et == EditorTool::POINT_LIGHT || et == EditorTool::SPOT_LIGHT || et == EditorTool::SKY_LIGHT)
+            && pi < (int)_level.lights.size() && ii < (int)_level.lights.size()) {
+            float ox = _level.lights[ii].x, oy = _level.lights[ii].y;
+            _level.lights[ii] = _level.lights[pi];
+            _level.lights[ii].x = ox; _level.lights[ii].y = oy;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Delete
 // ─────────────────────────────────────────────────────────────────────────────
 void LevelEditor::DeleteSelected() {
@@ -949,6 +1033,7 @@ void LevelEditor::UpdateToolbar() {
             }
             if (IsKeyPressed(KEY_B)) { _wantsEmote = true; SetStatus("Emote!"); }
             if (IsKeyPressed(KEY_N)) { _wantsMenu = true; }
+            if (IsKeyPressed(KEY_K) && _sel.valid()) SelectAllOfSameType();
         }
     } // end !_fieldTyping
 
@@ -2100,6 +2185,32 @@ void LevelEditor::DrawDataPanel() {
             if (hTr && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.transparent = !bm.transparent; }
             cy += 22;
         }
+        // ── Sound material selector ───────────────────────────────────────────
+        SectionHeader("── Sound Material ─────────");
+        {
+            static const char* matNames[] = {
+                "NONE","BLUNTWOOD","CONCRETE","DECKWOOD","DIRT","GRASS",
+                "GRAVEL","LINO","MARBLE","METALBAR","METALBOX","MUD",
+                "SAND","SNOW","STONE","WOOD","SQUEAKY"
+            };
+            static const int MAT_COUNT = 17;
+            static const int MCOLS = 3;
+            float tbw = (fw - (MCOLS - 1) * 2.f) / MCOLS;
+            for (int mi = 0; mi < MAT_COUNT; mi++) {
+                int col = mi % MCOLS;
+                if (col == 0 && mi > 0) cy += 18;
+                Rectangle mb = { px + col * (tbw + 2.f), cy, tbw, 16 };
+                bool isActive = (bm.soundMaterial == mi);
+                bool hov = CheckCollisionPointRec(GetMousePosition(), mb);
+                DrawRectangleRec(mb, isActive ? Color{ 30,60,20,255 } : (hov ? Color{ 45,48,68,255 } : Color{ 28,32,48,255 }));
+                DrawRectangleLinesEx(mb, isActive ? 2.f : 1.f, isActive ? Color{ 100,220,60,255 } : Color{ 70,75,100,255 });
+                int nlw = MeasureText(matNames[mi], 8);
+                DrawText(matNames[mi], (int)(mb.x + mb.width / 2 - nlw / 2), (int)mb.y + 4, 8,
+                    isActive ? Color{ 140,255,80,255 } : Color{ 150,155,180,255 });
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.soundMaterial = mi; }
+            }
+            cy += 20;
+        }
     }   // end BEAM section
     if (_sel.type == (int)EditorTool::WIN_ZONE) {
         auto& wz = _level.winZone;
@@ -2389,6 +2500,9 @@ void LevelEditor::DrawDataPanel() {
         float rv = n.rollThreshold;
         if (NumField("Roll", rv, 0.05f, 0, 10, px, cy, fw)) { PushUndo(); n.rollThreshold = (int)roundf(rv); } cy += rowH;
     }
+    // Propagate non-positional properties from primary to all other selected entities
+    SyncPropertiesFromPrimary();
+
     Rectangle delR = { px,dr.y + dr.height - 22,fw,18 };
     bool delH = CheckCollisionPointRec(GetMousePosition(), delR);
     DrawRectangleRec(delR, delH ? Color{ 180,30,30,255 } : Color{ 100,20,20,255 });

@@ -44,6 +44,14 @@ struct WinZoneData {
 
 // ── Beam ──────────────────────────────────────────────────────────────────────
 
+enum class BeamMaterial : int {
+    NONE = 0,
+    BLUNTWOOD, CONCRETE, DECKWOOD, DIRT, GRASS, GRAVEL,
+    LINO, MARBLE, METALBAR, METALBOX, MUD, SAND, SNOW,
+    STONE, WOOD, SQUEAKYWOOD,
+    COUNT
+};
+
 struct BeamData {
     float x = 0.f;
     float y = 0.f;
@@ -51,6 +59,7 @@ struct BeamData {
     int   renderLayer = 0;
     bool  flipX = false;
     bool  transparent = false; // if true, beam does not block light
+    int   soundMaterial = 0;   // BeamMaterial cast to int
 };
 
 // ── Kill zone ─────────────────────────────────────────────────────────────────

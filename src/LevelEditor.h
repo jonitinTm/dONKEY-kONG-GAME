@@ -333,6 +333,8 @@ private:
     void BoxSelectEntities(Rectangle box);
     void DeleteSelected(); void DeleteMultiSelected();
     void SelectEnt(SelectedEnt e);
+    void SelectAllOfSameType();
+    void SyncPropertiesFromPrimary();
 
     Vector2 GetSelPos() const { return GetEntPos(_sel); }
     void    SetSelPos(Vector2 p) { SetEntPos(_sel, p); }

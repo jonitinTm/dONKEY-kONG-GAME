@@ -57,8 +57,8 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "LADDER %.2f %.2f %.2f %.2f\n", l.x, l.y, l.w, l.h);
 
     for (const auto& b : lv.beams)
-        fprintf(f, "BEAM %.2f %.2f %d %d %d %d\n",
-            b.x, b.y, b.texVariant, b.renderLayer, b.flipX ? 1 : 0, b.transparent ? 1 : 0);
+        fprintf(f, "BEAM %.2f %.2f %d %d %d %d %d\n",
+            b.x, b.y, b.texVariant, b.renderLayer, b.flipX ? 1 : 0, b.transparent ? 1 : 0, b.soundMaterial);
 
     for (const auto& n : lv.pathNodes)
         fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d\n",
@@ -167,12 +167,13 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         else if (strcmp(tag, "BEAM") == 0) {
             BeamData b;
             int flipXi = 0, transi = 0;
-            int parsed = fscanf(f, "%f %f %d %d %d %d",
-                &b.x, &b.y, &b.texVariant, &b.renderLayer, &flipXi, &transi);
+            int parsed = fscanf(f, "%f %f %d %d %d %d %d",
+                &b.x, &b.y, &b.texVariant, &b.renderLayer, &flipXi, &transi, &b.soundMaterial);
             if (parsed < 3) b.texVariant = 0;
             if (parsed < 4) b.renderLayer = 0;
             b.flipX = (parsed >= 5 && flipXi != 0);
             b.transparent = (parsed >= 6 && transi != 0);
+            if (parsed < 7) b.soundMaterial = 0;
             out.beams.push_back(b);
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
