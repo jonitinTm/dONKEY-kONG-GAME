@@ -44,8 +44,11 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "PLAYER_SPAWN %.2f %.2f\n", lv.playerSpawn.x, lv.playerSpawn.y);
     if (lv.hasRegulus)
         fprintf(f, "REGULUS %.2f %.2f\n", lv.regulusPos.x, lv.regulusPos.y);
-    if (lv.hasCave)
+    if (lv.hasCave) {
         fprintf(f, "CAVE %.2f %.2f %d\n", lv.cavePos.x, lv.cavePos.y, lv.caveVisible ? 1 : 0);
+        if (lv.caveSpawnEnabled)
+            fprintf(f, "CAVE_SPAWN %.2f\n", lv.caveSpawnRate);
+    }
 
     for (const auto& p : lv.platforms)
         fprintf(f, "PLATFORM %.2f %.2f %.2f %.2f %.2f\n", p.x, p.y, p.w, p.h, p.tilt);
@@ -146,6 +149,10 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             (void)fscanf(f, "%f %f %d", &out.cavePos.x, &out.cavePos.y, &vis);
             out.hasCave = true;
             out.caveVisible = (vis != 0);
+        }
+        else if (strcmp(tag, "CAVE_SPAWN") == 0) {
+            (void)fscanf(f, "%f", &out.caveSpawnRate);
+            out.caveSpawnEnabled = true;
         }
         else if (strcmp(tag, "PLATFORM") == 0) {
             PlatformData p;

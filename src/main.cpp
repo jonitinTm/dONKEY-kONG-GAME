@@ -73,6 +73,9 @@ struct Enemy
     bool       facingRight = true;
     int        animFrame = 0;
     float      animTimer = 0.0f;
+    bool       onLadder = false;
+    int        ladderIdx = -1;
+    float      ladderProgress = 0.f;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,9 +253,57 @@ static void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
 }
 
 static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
-    vector<Platform>& platforms, float delta)
+    vector<Platform>& platforms, const vector<Ladder>& lads, float delta)
 {
     if (!e.active) return;
+
+    // ── Fall-off-map kill ─────────────────────────────────────────────────────
+    if (e.hitbox.y > 1050.0f) { e.active = false; e.onLadder = false; return; }
+
+    // ── Ladder climbing ───────────────────────────────────────────────────────
+    // Player ladder speed is 2.1*0.75 = 1.575; bunny climbs at 0.5x that = 0.7875
+    static constexpr float BUNNY_CLIMB_SPEED = 2.1f * 0.75f * 0.5f;
+
+    if (e.onLadder) {
+        if (e.ladderIdx < 0 || e.ladderIdx >= (int)lads.size()) {
+            e.onLadder = false;
+        } else {
+            const Ladder& lad = lads[e.ladderIdx];
+            e.ladderProgress += BUNNY_CLIMB_SPEED / lad.ClimbHeight();
+            e.hitbox.x = lad.x + lad.width * 0.5f - e.hitbox.width * 0.5f;
+            e.hitbox.y = lad.PlayerYAtProgress(e.ladderProgress, e.hitbox.height);
+            e.velocity = { 0.f, 0.f };
+            e.grounded = false;
+            if (e.ladderProgress >= 0.9f) {
+                e.onLadder = false;
+                e.ladderIdx = -1;
+                e.ladderProgress = 0.f;
+                e.velocity.y = -2.f;
+            }
+        }
+        // Animation while climbing
+        static constexpr float climbAnimSpd = 0.18f;
+        e.animTimer += delta;
+        if (e.animTimer >= climbAnimSpd) { e.animTimer = 0.f; e.animFrame = (e.animFrame+1)%2; }
+        return;
+    }
+
+    // ── Enter ladder if grounded and overlapping ──────────────────────────────
+    if (e.grounded) {
+        for (int i = 0; i < (int)lads.size(); i++) {
+            Rectangle lhb = lads[i].GetHitbox();
+            if (CheckCollisionRecs(e.hitbox, lhb)) {
+                e.onLadder = true;
+                e.ladderIdx = i;
+                e.ladderProgress = Clamp(
+                    lads[i].ProgressFromPlayerY(e.hitbox.y, e.hitbox.height), 0.f, 0.85f);
+                e.velocity = { 0.f, 0.f };
+                e.state = ES_IDLE;
+                e.stateTimer = 0.f;
+                return;
+            }
+        }
+    }
 
     float jumpForce = (e.type == GRUNT) ? -5.5f : -5.0f;
     float speedToward = 4.0f;
@@ -327,8 +378,6 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     e.grounded = col.grounded;
     if (col.grounded) e.velocity.y = 0.0f;
 
-    if (e.hitbox.y > 1050.0f) e.active = false;
-
     e.animTimer += delta;
     if (e.animTimer >= animSpeed)
     {
@@ -338,16 +387,19 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
 }
 
 static void DrawEnemy(const Enemy& e,
-    Texture2D& walkGrunt, Texture2D& jumpGrunt,
-    Texture2D& walkSpecter, Texture2D& jumpSpecter)
+    Texture2D& walkGrunt1, Texture2D& walkGrunt2, Texture2D& jumpGrunt,
+    Texture2D& walkSpecter1, Texture2D& walkSpecter2, Texture2D& jumpSpecter)
 {
     if (!e.active) return;
 
     Texture2D* tex = nullptr;
-    if (e.type == GRUNT)
-        tex = e.grounded ? &walkGrunt : &jumpGrunt;
-    else
-        tex = e.grounded ? &walkSpecter : &jumpSpecter;
+    if (e.type == GRUNT) {
+        if (!e.grounded && !e.onLadder) tex = &jumpGrunt;
+        else tex = (e.animFrame == 0) ? &walkGrunt1 : &walkGrunt2;
+    } else {
+        if (!e.grounded && !e.onLadder) tex = &jumpSpecter;
+        else tex = (e.animFrame == 0) ? &walkSpecter1 : &walkSpecter2;
+    }
 
     float scale = 2.5f;
     float drawW = tex->width * scale;
@@ -587,6 +639,7 @@ int main(void)
     int       houseAnimFrame = 0;
     float     houseAnimTimer = 0.0f;
     bool      houseIsSnowed = false;
+    float     caveSpawnTimer = 0.f;
 
     // ── Nuke ──────────────────────────────────────────────────────────────────
     const float NUKE_SCALE = 1.5f;
@@ -830,6 +883,7 @@ int main(void)
     Sound sndWhip          = LoadSound(TextFormat("%s%s", BALATRO, "slice1.ogg"));
     Sound sndExtraLife     = LoadSound(TextFormat("%s%s", BALATRO, "gold_seal.ogg"));
     Sound sndOneLarp       = LoadSound(TextFormat("%s%s", BALATRO, "coin1.ogg"));
+    Sound sndError         = LoadSound(TextFormat("%s%s", BALATRO, "cancel.ogg"));
     Sound sndReinhard      = LoadSound(TextFormat("%s%s", BALATRO, "gong.ogg"));
 
     // Card / UI sounds (Balatro SFX)
@@ -976,10 +1030,12 @@ int main(void)
     Texture2D Subaru5 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru5.png");
     Texture2D Subaru_Background = LoadTexture("Assets/Textures/Characters/Subaru/Subaru_Background.png");
 
-    Texture2D rabbitWalkBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Blue1.png");
-    Texture2D rabbitJumpBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump_Blue1.png");
-    Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
-    Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
+    Texture2D rabbitWalkBlack  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Blue1.png");
+    Texture2D rabbitWalkBlack2 = LoadTexture("Assets/Textures/Characters/FireSprites/OLD/Dk_FireSprite_Blue2.png");
+    Texture2D rabbitJumpBlack  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump_Blue1.png");
+    Texture2D rabbitWalkWhite  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
+    Texture2D rabbitWalkWhite2 = LoadTexture("Assets/Textures/Characters/FireSprites/OLD/Dk_FireSprite2.png");
+    Texture2D rabbitJumpWhite  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
     Texture2D FButton      = LoadTexture("Assets/Textures/UI/FButton.png");
     Texture2D texGoldHeart = LoadTexture("Assets/Textures/Cards/GoldHeart.png");
@@ -1373,13 +1429,14 @@ int main(void)
         {
             for (auto& b : barrels)     b.active = false;
             for (auto& bb : beaBullets)  bb.active = false;
-            for (auto& en : enemies)     en.active = false;
+            for (auto& en : enemies)     { en.active = false; en.onLadder = false; en.ladderIdx = -1; }
             for (auto& fn : flyingNukes) fn.active = false;
             flyingNukes.clear();
             playerHasNuke = false;
             playerHasBeatrice = false;
             beatriceAbilityTimer = 0.0f;
             beaBulletShootTimer = 0.0f;
+            caveSpawnTimer = 0.f;
         };
 
     auto ResetPlayerPos = [&]()
@@ -1549,8 +1606,33 @@ int main(void)
                 en.animFrame = 0;
                 en.animTimer = 0.0f;
                 en.facingRight = (GetRandomValue(0, 1) == 1);
+                en.onLadder = false; en.ladderIdx = -1; en.ladderProgress = 0.f;
                 en.active = true;
                 break;
+            }
+        };
+
+    auto SpawnInitialEnemies = [&]()
+        {
+            for (const auto& pos : enemySpawnPositions)
+            {
+                for (auto& en : enemies)
+                {
+                    if (en.active) continue;
+                    float hw = 30.8f, hh = 30.8f;
+                    en.hitbox = { pos.x - hw * 0.5f, pos.y - hh, hw, hh };
+                    en.type = GRUNT;
+                    en.state = ES_IDLE;
+                    en.stateTimer = 0.0f;
+                    en.velocity = { 0.0f, 0.0f };
+                    en.grounded = false;
+                    en.animFrame = 0;
+                    en.animTimer = 0.0f;
+                    en.facingRight = (GetRandomValue(0, 1) == 1);
+                    en.onLadder = false; en.ladderIdx = -1; en.ladderProgress = 0.f;
+                    en.active = true;
+                    break;
+                }
             }
         };
 
@@ -1702,6 +1784,7 @@ int main(void)
                     regulusForceBlue = true; regulusIdleFrame = 0;
                     regulusIdleTimer = 0.0f;
                     subaruFrame = 0; subaruTimer = 0.0f;
+                    SpawnInitialEnemies();
                     musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
             ResumeMusicStream(music);
@@ -1751,6 +1834,7 @@ int main(void)
                 regulusForceBlue = true; regulusIdleFrame = 0;
                 regulusIdleTimer = 0.0f;
                 subaruFrame = 0; subaruTimer = 0.0f;
+                SpawnInitialEnemies();
                 musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
             ResumeMusicStream(music);
@@ -1970,9 +2054,14 @@ int main(void)
                             regulusStunTimer=0.f; regulusStunLoops=0;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
                         case PU_ONE_MORE_LARP:
-                            lives = (lives+1 <= maxLives) ? lives+1 : maxLives;
-                            SetSoundVolume(sndOneLarp, volAbility); PlaySound(sndOneLarp);
-                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                            if (lives >= maxLives) {
+                                SetSoundVolume(sndError, volAbility); PlaySound(sndError);
+                            } else {
+                                lives++;
+                                SetSoundVolume(sndOneLarp, volAbility); PlaySound(sndOneLarp);
+                                slot.charges--; if (slot.charges<=0) slot.type=PU_NONE;
+                            }
+                            break;
                         case PU_SPEEDRUN:
                             speedrunActive=true; speedrunTimer=5.f;
                             SetSoundVolume(sndSpeedrun, volAbility); PlaySound(sndSpeedrun);
@@ -2061,6 +2150,17 @@ int main(void)
                     UpdateBarrel(b, barrelPath, dt);
                     if (wasActive && !b.active && b.reachedEnd)
                         SpawnEnemyAtEnd(b.hitbox.x + b.hitbox.width * 0.5f);
+                }
+            }
+
+            // ── Cave timed enemy spawn ────────────────────────────────────────
+            if (!isDying && currentLevelData.hasCave && currentLevelData.caveSpawnEnabled)
+            {
+                caveSpawnTimer += dt;
+                if (caveSpawnTimer >= currentLevelData.caveSpawnRate)
+                {
+                    caveSpawnTimer = 0.f;
+                    SpawnEnemyAtEnd(houseX + houseW * 0.5f);
                 }
             }
 
@@ -2376,7 +2476,7 @@ int main(void)
             {
                 for (auto& en : enemies)
                 {
-                    UpdateEnemy(en, player, platforms, dt);
+                    UpdateEnemy(en, player, platforms, ladders, dt);
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
                         if (shieldActive) { en.active = false; score += 300; coins += 15; shieldActive = false; }
                         else TriggerDeath();
@@ -2449,7 +2549,7 @@ int main(void)
                     if (deathBlackTimer >= (DEATH_BLACK_HOLD + 0.5f))
                     {
                         if (lives <= 0) currentScreen = GAME_OVER;
-                        else            ResetRound();
+                        else            { ResetRound(); SpawnInitialEnemies(); }
                     }
                 }
             }
@@ -2529,8 +2629,8 @@ int main(void)
                     else
                     {
                         bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
-                        if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed / lad.ClimbHeight();
-                        if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed / lad.ClimbHeight();
+                        if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed * 0.75f / lad.ClimbHeight();
+                        if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed * 0.75f / lad.ClimbHeight();
                         ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
                         player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
                         player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
@@ -3057,9 +3157,14 @@ int main(void)
                 { imgX, imgY, imgW, imgH }, { 0, 0 }, 0.f, bgTint);
 
             Texture2D* subTex = subaruFrames[subaruFrame];
+            float subScale = 3.8f * 0.85f * 1.05f;
+            float subW = subTex->width  * subScale;
+            float subH = subTex->height * subScale;
+            float subX = (screenWidth - subW) * 0.5f;
+            float subY = screenHeight * 0.65f;
             DrawTexturePro(*subTex,
                 { 0, 0, (float)subTex->width, (float)subTex->height },
-                { imgX, imgY, imgW, imgH }, { 0, 0 }, 0.f, WHITE);
+                { subX, subY, subW, subH }, { 0, 0 }, 0.f, WHITE);
         }
         else if (currentScreen == CONTROLS)
         {
@@ -3577,8 +3682,10 @@ int main(void)
 
                 float regW = regTex->width * REGULUS_SCALE;
                 float regH = regTex->height * REGULUS_SCALE;
-                float regY = 225.0f - regH + 20.0f;
-                float regX = REGULUS_X + regW * 0.5f;
+                float baseRegX = currentLevelData.hasRegulus ? currentLevelData.regulusPos.x : REGULUS_X;
+                float baseRegY = currentLevelData.hasRegulus ? currentLevelData.regulusPos.y : 225.0f;
+                float regY = baseRegY - regH + 20.0f;
+                float regX = baseRegX + regW * 0.5f;
 
                 if (!regulusIsStunned && regulusThrowing)
                 {
@@ -3687,7 +3794,7 @@ int main(void)
 
             // 12. Enemies
             for (const auto& en : enemies)
-                DrawEnemy(en, rabbitWalkBlack, rabbitJumpBlack, rabbitWalkWhite, rabbitJumpWhite);
+                DrawEnemy(en, rabbitWalkBlack, rabbitWalkBlack2, rabbitJumpBlack, rabbitWalkWhite, rabbitWalkWhite2, rabbitJumpWhite);
 
             // 13. Props (layer 1, lit)
             for (const auto& pr : currentLevelData.props) {
@@ -4649,6 +4756,7 @@ int main(void)
     UnloadSound(sndWhip);
     UnloadSound(sndExtraLife);
     UnloadSound(sndOneLarp);
+    UnloadSound(sndError);
     UnloadSound(sndReinhard);
     UnloadSound(cardFanSnd);
     UnloadSound(cardSlideSnd);
@@ -4694,8 +4802,8 @@ int main(void)
     UnloadTexture(texBeaBullet);
     UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
     UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
-    UnloadTexture(rabbitWalkBlack); UnloadTexture(rabbitJumpBlack);
-    UnloadTexture(rabbitWalkWhite); UnloadTexture(rabbitJumpWhite);
+    UnloadTexture(rabbitWalkBlack); UnloadTexture(rabbitWalkBlack2); UnloadTexture(rabbitJumpBlack);
+    UnloadTexture(rabbitWalkWhite); UnloadTexture(rabbitWalkWhite2); UnloadTexture(rabbitJumpWhite);
     UnloadTexture(FButton);
     UnloadTexture(texGoldHeart); UnloadTexture(texHeart);
     UnloadTexture(texShield1);   UnloadTexture(texShield2);

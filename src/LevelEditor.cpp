@@ -1938,6 +1938,23 @@ void LevelEditor::DrawDataPanel() {
             isVis ? Color{180,255,180,255} : Color{255,160,160,255});
         if (hVis && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); _level.caveVisible = !_level.caveVisible; }
         cy += 22;
+
+        Rectangle spawnTogR = { px, cy, fw, 18 };
+        bool hSpawnTog = CheckCollisionPointRec(GetMousePosition(), spawnTogR);
+        bool isSpawn = _level.caveSpawnEnabled;
+        DrawRectangleRec(spawnTogR, isSpawn ? Color{20,60,20,255} : (hSpawnTog ? Color{60,40,20,255} : Color{40,30,20,255}));
+        DrawRectangleLinesEx(spawnTogR, isSpawn ? 2.f : 1.f, isSpawn ? Color{80,220,80,255} : Color{255,160,80,255});
+        const char* spawnLbl = isSpawn ? "EnemySpawn: ON" : "EnemySpawn: OFF";
+        int spawnLblW = MeasureText(spawnLbl, 9);
+        DrawText(spawnLbl, (int)(spawnTogR.x + spawnTogR.width*0.5f - spawnLblW*0.5f), (int)cy+5, 9,
+            isSpawn ? Color{180,255,180,255} : Color{255,200,140,255});
+        if (hSpawnTog && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); _level.caveSpawnEnabled = !_level.caveSpawnEnabled; }
+        cy += 22;
+
+        if (_level.caveSpawnEnabled) {
+            if (NumField("Rate(s)", _level.caveSpawnRate, 0.1f, 2.f, 120.f, px, cy, fw)) {}
+            cy += rowH;
+        }
     }
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Rotation ───────────────");
