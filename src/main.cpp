@@ -274,11 +274,14 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
             e.hitbox.y = lad.PlayerYAtProgress(e.ladderProgress, e.hitbox.height);
             e.velocity = { 0.f, 0.f };
             e.grounded = false;
-            if (e.ladderProgress >= 0.9f) {
-                e.onLadder = false;
-                e.ladderIdx = -1;
+            if (e.ladderProgress >= 0.95f) {
+                // Snap to ladder top so the collision resolver grounds us on the platform above
+                e.hitbox.y = lad.y - e.hitbox.height;
+                e.velocity   = { 0.f, 0.f };
+                e.onLadder   = false;
+                e.ladderIdx  = -1;
                 e.ladderProgress = 0.f;
-                e.velocity.y = -2.f;
+                e.grounded   = false;
             }
         }
         // Animation while climbing
@@ -387,19 +390,18 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
 }
 
 static void DrawEnemy(const Enemy& e,
-    Texture2D& walkGrunt1, Texture2D& walkGrunt2, Texture2D& jumpGrunt,
-    Texture2D& walkSpecter1, Texture2D& walkSpecter2, Texture2D& jumpSpecter)
+    Texture2D& idleGrunt, Texture2D& jumpGrunt,
+    Texture2D& idleSpecter, Texture2D& jumpSpecter)
 {
     if (!e.active) return;
 
+    // idle = grounded or on ladder; jump = airborne
     Texture2D* tex = nullptr;
-    if (e.type == GRUNT) {
-        if (!e.grounded && !e.onLadder) tex = &jumpGrunt;
-        else tex = (e.animFrame == 0) ? &walkGrunt1 : &walkGrunt2;
-    } else {
-        if (!e.grounded && !e.onLadder) tex = &jumpSpecter;
-        else tex = (e.animFrame == 0) ? &walkSpecter1 : &walkSpecter2;
-    }
+    bool airborne = !e.grounded && !e.onLadder;
+    if (e.type == GRUNT)
+        tex = airborne ? &jumpGrunt   : &idleGrunt;
+    else
+        tex = airborne ? &jumpSpecter : &idleSpecter;
 
     float scale = 2.5f;
     float drawW = tex->width * scale;
@@ -1030,12 +1032,10 @@ int main(void)
     Texture2D Subaru5 = LoadTexture("Assets/Textures/Characters/Subaru/Subaru5.png");
     Texture2D Subaru_Background = LoadTexture("Assets/Textures/Characters/Subaru/Subaru_Background.png");
 
-    Texture2D rabbitWalkBlack  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Blue1.png");
-    Texture2D rabbitWalkBlack2 = LoadTexture("Assets/Textures/Characters/FireSprites/OLD/Dk_FireSprite_Blue2.png");
-    Texture2D rabbitJumpBlack  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump_Blue1.png");
-    Texture2D rabbitWalkWhite  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
-    Texture2D rabbitWalkWhite2 = LoadTexture("Assets/Textures/Characters/FireSprites/OLD/Dk_FireSprite2.png");
-    Texture2D rabbitJumpWhite  = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
+    Texture2D rabbitIdleBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Blue1.png");
+    Texture2D rabbitJumpBlack = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump_Blue1.png");
+    Texture2D rabbitIdleWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
+    Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
     Texture2D FButton      = LoadTexture("Assets/Textures/UI/FButton.png");
     Texture2D texGoldHeart = LoadTexture("Assets/Textures/Cards/GoldHeart.png");
@@ -1082,6 +1082,7 @@ int main(void)
     Texture2D itemTex_Whip          = LoadTexture("Assets/Textures/Cards/Card_Whip.png");
     Texture2D itemTex_Speedrun      = LoadTexture("Assets/Textures/Cards/Card_Speedrun.png");
     Texture2D itemTex_Shield        = LoadTexture("Assets/Textures/Cards/Card_Shield.png");
+    Texture2D itemTex_Shop          = LoadTexture("Assets/Textures/Cards/Card_astolfoShop.png");
 
     // Returns the item texture for a given powerup type (animates Beatrice frames)
     auto GetItemTex = [&](PowerupType pu) -> Texture2D* {
@@ -1098,7 +1099,7 @@ int main(void)
             case PU_ONE_MORE_LARP:   return &texHeart;
             case PU_SPEEDRUN:        return &itemTex_Speedrun;
             case PU_SHIELD:          return &itemTex_Shield;
-            case PU_SHOP:            return texCoin.id > 0 ? &texCoin : nullptr;
+            case PU_SHOP:            return itemTex_Shop.id > 0 ? &itemTex_Shop : (texCoin.id > 0 ? &texCoin : nullptr);
             case PU_BEATRICE:        return beaFrame2 ? &Beatrice_Idle2 : &Beatrice_Idle1;
             default:                 return nullptr;
         }
@@ -1589,15 +1590,15 @@ int main(void)
             ResumeMusicStream(music);
         };
 
-    auto SpawnEnemyAtEnd = [&](float barrelCX)
+    auto SpawnEnemyAtEnd = [&](float spawnCX, float spawnFloorY = 880.0f)
         {
             for (auto& en : enemies)
             {
                 if (en.active) continue;
-                EnemyType t = (GetRandomValue(0, 1) == 0) ? GRUNT : SPECTER;
+                EnemyType t = (GetRandomValue(0, 9) == 0) ? GRUNT : SPECTER;  // 10% black, 90% white
                 float     hw = (t == GRUNT) ? 30.8f : 26.6f;
                 float     hh = (t == GRUNT) ? 30.8f : 35.0f;
-                en.hitbox = { barrelCX - hw * 0.5f, 880.0f - hh, hw, hh };
+                en.hitbox = { spawnCX - hw * 0.5f, spawnFloorY - hh, hw, hh };
                 en.type = t;
                 en.state = ES_IDLE;
                 en.stateTimer = 0.0f;
@@ -1619,9 +1620,11 @@ int main(void)
                 for (auto& en : enemies)
                 {
                     if (en.active) continue;
-                    float hw = 30.8f, hh = 30.8f;
+                    EnemyType t2 = (GetRandomValue(0, 9) == 0) ? GRUNT : SPECTER;  // 10% black, 90% white
+                    float hw = (t2 == GRUNT) ? 30.8f : 26.6f;
+                    float hh = (t2 == GRUNT) ? 30.8f : 35.0f;
                     en.hitbox = { pos.x - hw * 0.5f, pos.y - hh, hw, hh };
-                    en.type = GRUNT;
+                    en.type = t2;
                     en.state = ES_IDLE;
                     en.stateTimer = 0.0f;
                     en.velocity = { 0.0f, 0.0f };
@@ -2160,7 +2163,7 @@ int main(void)
                 if (caveSpawnTimer >= currentLevelData.caveSpawnRate)
                 {
                     caveSpawnTimer = 0.f;
-                    SpawnEnemyAtEnd(houseX + houseW * 0.5f);
+                    SpawnEnemyAtEnd(houseX + houseW * 0.5f, houseY + houseH);
                 }
             }
 
@@ -3157,11 +3160,11 @@ int main(void)
                 { imgX, imgY, imgW, imgH }, { 0, 0 }, 0.f, bgTint);
 
             Texture2D* subTex = subaruFrames[subaruFrame];
-            float subScale = 3.8f * 0.85f * 1.05f;
+            float subScale = (screenHeight * 0.92f) / subTex->height;
             float subW = subTex->width  * subScale;
             float subH = subTex->height * subScale;
             float subX = (screenWidth - subW) * 0.5f;
-            float subY = screenHeight * 0.65f;
+            float subY = (screenHeight - subH) * 0.5f;
             DrawTexturePro(*subTex,
                 { 0, 0, (float)subTex->width, (float)subTex->height },
                 { subX, subY, subW, subH }, { 0, 0 }, 0.f, WHITE);
@@ -3794,7 +3797,7 @@ int main(void)
 
             // 12. Enemies
             for (const auto& en : enemies)
-                DrawEnemy(en, rabbitWalkBlack, rabbitWalkBlack2, rabbitJumpBlack, rabbitWalkWhite, rabbitWalkWhite2, rabbitJumpWhite);
+                DrawEnemy(en, rabbitIdleBlack, rabbitJumpBlack, rabbitIdleWhite, rabbitJumpWhite);
 
             // 13. Props (layer 1, lit)
             for (const auto& pr : currentLevelData.props) {
@@ -4802,8 +4805,8 @@ int main(void)
     UnloadTexture(texBeaBullet);
     UnloadTexture(Subaru1); UnloadTexture(Subaru2); UnloadTexture(Subaru3);
     UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
-    UnloadTexture(rabbitWalkBlack); UnloadTexture(rabbitWalkBlack2); UnloadTexture(rabbitJumpBlack);
-    UnloadTexture(rabbitWalkWhite); UnloadTexture(rabbitWalkWhite2); UnloadTexture(rabbitJumpWhite);
+    UnloadTexture(rabbitIdleBlack); UnloadTexture(rabbitJumpBlack);
+    UnloadTexture(rabbitIdleWhite); UnloadTexture(rabbitJumpWhite);
     UnloadTexture(FButton);
     UnloadTexture(texGoldHeart); UnloadTexture(texHeart);
     UnloadTexture(texShield1);   UnloadTexture(texShield2);
@@ -4815,6 +4818,7 @@ int main(void)
     UnloadTexture(itemTex_ReturnByDeath); UnloadTexture(itemTex_Dash);
     UnloadTexture(itemTex_Reinhard);      UnloadTexture(itemTex_Whip);
     UnloadTexture(itemTex_Speedrun);      UnloadTexture(itemTex_Shield);
+    UnloadTexture(itemTex_Shop);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);
