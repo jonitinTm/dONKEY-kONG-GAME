@@ -199,6 +199,7 @@ struct LevelData {
 
     bool    hasCave = false;
     Vector2 cavePos = { 35.f, 768.f };
+    bool    caveVisible = true;
 
     std::vector<PlatformData>        platforms;
     std::vector<LadderData>          ladders;

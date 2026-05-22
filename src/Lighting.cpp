@@ -307,6 +307,25 @@ void main() {
 )GLSL";
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  BLOOM EXTRACT FRAGMENT SHADER
+//  Isolates pixels brighter than `bloomThreshold` and scales them.
+// ─────────────────────────────────────────────────────────────────────────────
+static const char* BLOOM_EXTRACT_FS = R"GLSL(
+#version 330
+in  vec2 fragTexCoord;
+out vec4 finalColor;
+uniform sampler2D texture0;
+uniform float bloomThreshold;
+uniform float bloomIntensity;
+void main() {
+    vec3 col  = texture(texture0, fragTexCoord).rgb;
+    vec3 bright = max(col - vec3(bloomThreshold), vec3(0.0))
+                  / max(1.0 - bloomThreshold, 0.001);
+    finalColor = vec4(bright * bloomIntensity, 1.0);
+}
+)GLSL";
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  LightingSystem implementation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -360,6 +379,15 @@ void LightingSystem::Init(int rtW, int rtH, Quality q)
     // Blur shader uniforms
     _locBL_dir = GetShaderLocation(_blurShader, "blurDir");
 
+    // Bloom
+    _compositeRT = LoadRenderTexture(_rtW, _rtH);
+    _bloomRT     = LoadRenderTexture(_liW, _liH);
+    SetTextureFilter(_compositeRT.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(_bloomRT.texture,     TEXTURE_FILTER_BILINEAR);
+    _bloomExtractShader = LoadShaderFromMemory(nullptr, BLOOM_EXTRACT_FS);
+    _locBE_threshold    = GetShaderLocation(_bloomExtractShader, "bloomThreshold");
+    _locBE_intensity    = GetShaderLocation(_bloomExtractShader, "bloomIntensity");
+
     printf("[Lighting v7] lightShader.id=%u  blurShader.id=%u  rtW=%d rtH=%d  liW=%d liH=%d\n",
         _lightShader.id, _blurShader.id, _rtW, _rtH, _liW, _liH);
     printf("[Lighting v7] uniforms: count=%d pos=%d col=%d extra=%d anim=%d res=%d "
@@ -384,6 +412,9 @@ void LightingSystem::Shutdown()
     UnloadRenderTexture(_finalLightRT);
     UnloadShader(_lightShader);
     UnloadShader(_blurShader);
+    UnloadRenderTexture(_compositeRT);
+    UnloadRenderTexture(_bloomRT);
+    UnloadShader(_bloomExtractShader);
     _runtimeLights.clear();
     _ready = false;
 }
@@ -431,27 +462,16 @@ void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
 {
     BeginOccluders(cam);
 
-    for (const auto& p : lv.platforms) {
-        float h = (p.h <= 0.f) ? 8.f : p.h;
-        if (fabsf(p.tilt) > 0.05f) {
-            // AABB of tilted platform — conservative over-approximation for shadow purposes.
-            float tr = p.tilt * (3.14159265f / 180.f);
-            float yr = p.w * tanf(tr);
-            float yMin = fminf(0.f, yr);
-            float yMax = fmaxf(0.f, yr) + h;
-            DrawRectangleRec({ p.x, p.y + yMin, p.w, yMax - yMin }, WHITE);
-        }
-        else {
-            DrawRectangleRec({ p.x, p.y, p.w, h }, WHITE);
-        }
-    }
+    // Platforms are collision-only; light passes through them.
+    // Beams are the visual/architectural geometry that blocks light.
 
     // Beams rendered at scale=4 in the editor; match that footprint here.
     static constexpr float BEAM_SCALE = 4.f;
     static constexpr float BEAM_SPRITE_W = 16.f;
     static constexpr float BEAM_SPRITE_H = 16.f;
     for (const auto& b : lv.beams) {
-        if (b.transparent) continue;
+        // texVariant 11 = TransFloor, 12 = TransFloor2 — always pass light through
+        if (b.transparent || b.texVariant == 11 || b.texVariant == 12) continue;
         DrawRectangleRec({ b.x, b.y,
                            BEAM_SPRITE_W * BEAM_SCALE,
                            BEAM_SPRITE_H * BEAM_SCALE }, WHITE);
@@ -664,15 +684,57 @@ void LightingSystem::Composite(const LevelData& lv, Camera2D cam, Rectangle dst)
     if (blitDst.width <= 0.f || blitDst.height <= 0.f)
         blitDst = { 0.f, 0.f, (float)_rtW, (float)_rtH };
 
-    DrawTexturePro(_sceneRT.texture,
-        { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
-        blitDst, { 0, 0 }, 0.f, WHITE);
+    if (_bloomEnabled && _bloomExtractShader.id > 0 && _compositeRT.id > 0) {
+        // Composite scene × light to intermediate full-res RT
+        BeginTextureMode(_compositeRT);
+        ClearBackground(BLACK);
+        DrawTexturePro(_sceneRT.texture,
+            { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
+            { 0, 0, (float)_rtW, (float)_rtH }, { 0, 0 }, 0.f, WHITE);
+        BeginBlendMode(BLEND_MULTIPLIED);
+        DrawTexturePro(_finalLightRT.texture,
+            { 0, 0, (float)_finalLightRT.texture.width, -(float)_finalLightRT.texture.height },
+            { 0, 0, (float)_rtW, (float)_rtH }, { 0, 0 }, 0.f, WHITE);
+        EndBlendMode();
+        EndTextureMode();
 
-    BeginBlendMode(BLEND_MULTIPLIED);
-    DrawTexturePro(_finalLightRT.texture,
-        { 0, 0, (float)_finalLightRT.texture.width, -(float)_finalLightRT.texture.height },
-        blitDst, { 0, 0 }, 0.f, WHITE);
-    EndBlendMode();
+        // Extract bright areas from composite → half-res bloom RT
+        BeginTextureMode(_bloomRT);
+        ClearBackground(BLACK);
+        BeginShaderMode(_bloomExtractShader);
+        SetShaderValue(_bloomExtractShader, _locBE_threshold, &_bloomThreshold, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(_bloomExtractShader, _locBE_intensity, &_bloomIntensity, SHADER_UNIFORM_FLOAT);
+        DrawTexturePro(_compositeRT.texture,
+            { 0, 0, (float)_compositeRT.texture.width, -(float)_compositeRT.texture.height },
+            { 0, 0, (float)_liW, (float)_liH }, { 0, 0 }, 0.f, WHITE);
+        EndShaderMode();
+        EndTextureMode();
+
+        // Blur bloom (2 H+V passes using _scratchRT)
+        RunBlur(_bloomRT,    _scratchRT, { 2.0f / (float)_liW, 0.f });
+        RunBlur(_scratchRT,  _bloomRT,   { 0.f, 2.0f / (float)_liH });
+        RunBlur(_bloomRT,    _scratchRT, { 3.5f / (float)_liW, 0.f });
+        RunBlur(_scratchRT,  _bloomRT,   { 0.f, 3.5f / (float)_liH });
+
+        // Draw composite, then additive bloom overlay
+        DrawTexturePro(_compositeRT.texture,
+            { 0, 0, (float)_compositeRT.texture.width, -(float)_compositeRT.texture.height },
+            blitDst, { 0, 0 }, 0.f, WHITE);
+        BeginBlendMode(BLEND_ADDITIVE);
+        DrawTexturePro(_bloomRT.texture,
+            { 0, 0, (float)_bloomRT.texture.width, -(float)_bloomRT.texture.height },
+            blitDst, { 0, 0 }, 0.f, WHITE);
+        EndBlendMode();
+    } else {
+        DrawTexturePro(_sceneRT.texture,
+            { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
+            blitDst, { 0, 0 }, 0.f, WHITE);
+        BeginBlendMode(BLEND_MULTIPLIED);
+        DrawTexturePro(_finalLightRT.texture,
+            { 0, 0, (float)_finalLightRT.texture.width, -(float)_finalLightRT.texture.height },
+            blitDst, { 0, 0 }, 0.f, WHITE);
+        EndBlendMode();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

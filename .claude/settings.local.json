@@ -10,7 +10,28 @@
       "Bash(where mingw32-make *)",
       "Bash(where make *)",
       "Bash(where g++)",
-      "PowerShell($env:PATH -split ';' | Where-Object { $_ -match 'mingw|gcc|msys' } | Select-Object -First 10)"
+      "PowerShell($env:PATH -split ';' | Where-Object { $_ -match 'mingw|gcc|msys' } | Select-Object -First 10)",
+      "PowerShell($env:PATH -split \";\" | Where-Object { $_ -match \"mingw|gcc|msys|w64\" } | Select-Object -First 5)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 40)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 30)",
+      "Bash(where gcc *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /verbosity:minimal 2>&1 | Select-Object -Last 40)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /verbosity:minimal 2>&1 | Select-Object -Last 15)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /verbosity:minimal 2>&1 | Select-Object -Last 20)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /verbosity:minimal 2>&1 | Select-Object -Last 8)",
+      "PowerShell($msb = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msb \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /m /nologo 2>&1 | Select-Object -Last 40)",
+      "PowerShell($msb = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msb \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /m /nologo 2>&1 | Select-Object -Last 50)",
+      "PowerShell($msb = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msb \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /m /nologo 2>&1 | Select-Object -Last 20)",
+      "PowerShell($msb = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msb \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /m /nologo 2>&1 | Select-Object -Last 15)",
+      "PowerShell($msb = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msb \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /m /nologo 2>&1 | Select-Object -Last 12)",
+      "Bash(MSBuild dONKEY-kONG-GAME.sln /p:Configuration=Debug /p:Platform=x64 /t:Build /m)",
+      "PowerShell(Test-Path *)",
+      "PowerShell($msbuild = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msbuild \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m 2>&1 | Select-Object -Last 35)",
+      "PowerShell($msbuild = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msbuild \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m 2>&1 | Select-Object -Last 25)",
+      "PowerShell($msbuild = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\"; & $msbuild \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m 2>&1 | Select-Object -Last 12)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /nologo /v:minimal)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" dONKEY-kONG-GAME.sln /p:Configuration=Debug /p:Platform=x64 /nologo /v:minimal)",
+      "Bash(Get-ChildItem *)"
     ]
   }
 }

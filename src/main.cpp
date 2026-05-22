@@ -9,7 +9,7 @@
 #include <ctime>
 #include <algorithm>
 
-enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR, CARD_SELECT };
+enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR, CARD_SELECT, SETTINGS };
 
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
@@ -18,7 +18,9 @@ static constexpr float DEATH_BLACK_HOLD = 0.50f;
 static constexpr float DEATH_FALL_GRAVITY = 0.50f;
 static constexpr float DEATH_FALL_INITIAL_VY = -5.0f;
 static constexpr float DEATH_SHAKE_DURATION = 0.80f;
-static constexpr float DEATH_SHAKE_AMOUNT = 9.0f;
+static constexpr float DEATH_SHAKE_AMOUNT   = 9.0f;
+static constexpr float DASH_SHAKE_DURATION  = 0.22f;
+static constexpr float DASH_SHAKE_AMOUNT    = 5.0f;
 static constexpr float ACTIVE_SPAWN_INTERVAL = 1.2f;
 
 struct PathNode
@@ -92,7 +94,7 @@ struct PowerupInfo {
 static const PowerupInfo PU_INFO[PU_COUNT] = {
     {"RETURN BY DEATH","On death rewinds 5s. No life lost.","1 use",      2,25, true,  0.f,1,1},
     {"DASH",           "Dash 4x forward. 0.5s invuln.",    "CD: 10s",     1,15, false,10.f,0,1},
-    {"EL SHAMAK",      "Kill all white enemies (Specters).","1 use",       4,50, false, 0.f,1,1},
+    {"EL SHAMAK",      "Summon Beatrice for 7s.",          "1 use",       4,50, false, 0.f,1,1},
     {"LARPER",         "Place a ladder at feet. x4 stack.", "1 use (x4)", 2,10, false, 0.f,1,4},
     {"REINHARD",       "Instantly win the level.",         "1 use",       5,100,false, 0.f,1,1},
     {"WHIP",           "Kill enemies 5x forward.",         "CD: 25s",     0,10, false,25.f,0,1},
@@ -100,7 +102,7 @@ static const PowerupInfo PU_INFO[PU_COUNT] = {
     {"NUKE",           "Explosion: kills enemies.",        "1 use",       4,60, false, 0.f,1,1},
     {"ONE MORE LARP",  "Restore 1 life.",                  "1 use",       2,50, false, 0.f,1,1},
     {"SPEEDRUN",       "1.5x speed for 5s.",               "CD: 20s",     0,10, false,20.f,0,1},
-    {"SHIELD",         "Parry in 0.3s grace window.",      "CD: 10s",     1,20, false,10.f,0,1},
+    {"SHIELD",         "Block hits for 1.2s.",             "CD: 15s",     1,20, false,15.f,0,1},
     {"SHOP",           "Opens shop. Stops time.",          "1 use",       3,70, false, 0.f,1,1},
     {"BEATRICE",       "Companion shoots at enemies 7s.", "1 use",       2,30, false, 0.f,1,1},
 };
@@ -123,12 +125,13 @@ struct HotbarSlot {
 
 // Card display / animation
 struct CardDisplay {
-    PowerupType type      = PU_NONE;
-    int         rarity    = 0;
-    float       scale     = 0.f;
-    float       appearT   = 0.f;   // 0→0.4 pop-in
-    bool        appeared  = false;
-    float       hoverLerp = 0.f;   // 0→1
+    PowerupType type       = PU_NONE;
+    int         rarity     = 0;
+    float       scale      = 1.f;
+    float       appearT    = 0.f;   // negative = stagger delay; 0→APPEAR_DUR scale grow
+    float       heightFrac = 0.f;   // 0→1 uniform appear scale (both axes)
+    bool        appeared   = false;
+    float       hoverLerp  = 0.f;   // 0→1
     bool        hovered   = false;
     bool        selected  = false;
     bool        dismissed = false;
@@ -139,7 +142,7 @@ struct CardDisplay {
 // Return-by-death snapshot
 struct RBDSnapshot {
     Rectangle   player; float vx,vy; bool facingR,onLadder; int curLadder; float ladderProg;
-    int lives; unsigned score;
+    int lives; unsigned score; int coins;
     struct BS{Rectangle h;int node;float spd;bool active,isBlue,isFalling;};
     struct ES{Rectangle h;Vector2 vel;EnemyType type;EnemyState st;float stT;bool active,grounded,facingR;};
     vector<BS> barrels; vector<ES> enemies;
@@ -418,12 +421,45 @@ int main(void)
     const float splashDuration = 5.0f;
 
     int       selectedOption = 0;
-    Rectangle btnPlay = { 340, 450, 200, 40 };
-    Rectangle btnExit = { 340, 500, 200, 40 };
-    Rectangle btnCtrl = { 340, 550, 200, 40 };
-    Rectangle btnEditor = { 340, 600, 200, 40 };
+    int       settingsTab      = 0;   // 0=Controls, 1=Settings, 2=Debug
+    float     settingsDbgScroll= 0.f; // scroll offset for DEBUG tab
+    Rectangle btnPlay    = { 340, 450, 200, 40 };
+    Rectangle btnExit    = { 340, 500, 200, 40 };
+    Rectangle btnEditor  = { 340, 550, 200, 40 };
+    Rectangle btnSettings= { 340, 600, 200, 40 };
 
     bool debugPath = false;
+
+    // ── Debug menu ────────────────────────────────────────────────────────────
+    bool  dbgMenuOpen      = false;
+    float dbgMenuScroll    = 0.f;
+    bool  dbgImmortal      = false;
+    bool  dbgFlight        = false;
+    bool  dbgFlightNoCol   = false;
+    int   dbgGivePUIdx     = 0;
+    bool  dbgBloomEnabled  = true;
+    float dbgBloomThreshold= 0.7f;
+    float dbgBloomIntensity= 0.8f;
+    bool  isPaused         = false;
+
+    // ── Audio volumes (music / sfx / abilities / ui) ─────────────────────────
+    float volMusic   = 0.8f; // background music
+    float volSFX     = 1.f;  // gameplay sounds (death, hit, barrel jump, RBD)
+    float volAbility = 2.f;  // ability activation sounds (shield, dash, whip, etc.) — 200% default
+    float volUI      = 1.f;  // UI/card sounds
+
+    // ── Music fade-out state ──────────────────────────────────────────────────
+    static constexpr float MUSIC_FADE_DUR = 0.5f;
+    float musicFadeTimer    = 0.f;   // counts down from MUSIC_FADE_DUR to 0
+    bool  musicPendingPause = false; // pause stream once fade reaches 0
+
+    // ── Heavy item equip state ─────────────────────────────────────────────────
+    float heavyEquipTimer  = 0.f;
+    bool  isCarryingHeavy  = false;
+
+    // ── Shield animation ──────────────────────────────────────────────────────
+    float shieldAnimTimer  = 0.f;
+    int   shieldAnimFrame  = 0;
 
     unsigned int score = 0;
     int          currentLevelId = 1;
@@ -446,7 +482,7 @@ int main(void)
     int            hotbarSlot    = 0;   // 0-2 active slot
 
     // ── Powerup effect state ─────────────────────────────────────────────────
-    int            coins         = 50;  // starting coins for testing
+    int            coins         = 0;
     int            maxLives      = 3;
     bool           speedrunActive= false;
     float          speedrunTimer = 0.f;
@@ -526,6 +562,8 @@ int main(void)
     float   deathBlackTimer = 0.0f;
     float   deathShakeTimer = 0.0f;
     Vector2 deathShakeOffset = { 0, 0 };
+    float   dashShakeTimer  = 0.0f;
+    Vector2 dashShakeOffset = { 0, 0 };
 
     // ── House / explosion ─────────────────────────────────────────────────────
     const float HOUSE_ANIM_FPS = 10.0f;
@@ -769,18 +807,40 @@ int main(void)
     Cinematic::Global.LoadAll();
     SetRandomSeed((unsigned int)time(NULL));
     InitAudioDevice();
+    SetExitKey(KEY_NULL);
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
-    Music music = LoadMusicStream("Assets/Nuevo audio/mp3/PerfectLoopSubaru.mp3");
+    Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
     Sound deathSound = LoadSound("Assets/Nuevo audio/mp3/20. Dead.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
     Sound nukeSound = LoadSound("Assets/Nuevo audio/mp3/Flash.mp3");
     Sound jumpBrlSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
     Sound rbdSound     = LoadSound("Assets/Nuevo audio/mp3/re-zero-return-by-death.mp3");
 
+    // Ability activation SFX — dedicated .wav files where available
+    static const char* WAV = "Assets/Nuevo audio/.wav/";
+    static const char* BALATRO = "Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/";
+    Sound sndShield        = LoadSound(TextFormat("%s%s", WAV,     "Shield.wav"));
+    Sound sndDash          = LoadSound(TextFormat("%s%s", WAV,     "Dash.wav"));
+    Sound sndBeatrice      = LoadSound(TextFormat("%s%s", WAV,     "BeatriceCarry.wav"));
+    Sound sndBeatriceAtk   = LoadSound(TextFormat("%s%s", WAV,     "BeatriceAttack.wav"));
+    Sound sndLarper        = LoadSound(TextFormat("%s%s", WAV,     "Larper.wav"));
+    Sound sndSpeedrun      = LoadSound(TextFormat("%s%s", BALATRO, "generic1.ogg"));
+    Sound sndWhip          = LoadSound(TextFormat("%s%s", BALATRO, "slice1.ogg"));
+    Sound sndExtraLife     = LoadSound(TextFormat("%s%s", BALATRO, "gold_seal.ogg"));
+    Sound sndOneLarp       = LoadSound(TextFormat("%s%s", BALATRO, "coin1.ogg"));
+    Sound sndReinhard      = LoadSound(TextFormat("%s%s", BALATRO, "gong.ogg"));
+
+    // Card / UI sounds (Balatro SFX)
+    Sound cardFanSnd   = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardFan2.ogg");
+    Sound cardSlideSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/cardSlide1.ogg");
+    Sound cardHoverSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/paper1.ogg");
+    Sound cardPickSnd  = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/card1.ogg");
+    Sound cardThrowSnd = LoadSound("Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/whoosh1.ogg");
+
     SetMasterVolume(1.0f);
-    SetMusicVolume(music, 1.0f);
+    SetMusicVolume(music, volMusic);
     SetMusicPan(music, 0.0f);
     PlayMusicStream(music);
 
@@ -921,7 +981,11 @@ int main(void)
     Texture2D rabbitWalkWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite1.png");
     Texture2D rabbitJumpWhite = LoadTexture("Assets/Textures/Characters/FireSprites/Dk_FireSprite_Jump1.png");
 
-    Texture2D EButton = LoadTexture("Assets/Textures/UI/EButton.png");
+    Texture2D FButton      = LoadTexture("Assets/Textures/UI/FButton.png");
+    Texture2D texGoldHeart = LoadTexture("Assets/Textures/Cards/GoldHeart.png");
+    Texture2D texHeart     = LoadTexture("Assets/Textures/Cards/heart.png");
+    Texture2D texShield1   = LoadTexture("Assets/Textures/Cards/Shield1.png");
+    Texture2D texShield2   = LoadTexture("Assets/Textures/Cards/Shield2.png");
 
     static constexpr int PROP_TEX_COUNT = 6;
     static constexpr int PROP_FIRE_VARIANT = 5;
@@ -952,6 +1016,54 @@ int main(void)
         for (int i = 0; i < PROP_TEX_COUNT; i++) ptrs[i] = &propTextures[i];
         editor.SetPropTextures(ptrs, PROP_TEX_COUNT);
     }
+
+    Texture2D texCoin = LoadTexture("Assets/Textures/UI/coin.png");  // coin icon (fallback to drawn circle)
+
+    // ── Per-powerup item textures ──────────────────────────────────────────────
+    Texture2D itemTex_ReturnByDeath = LoadTexture("Assets/Textures/Cards/Card_ReturnByDeath.png");
+    Texture2D itemTex_Dash          = LoadTexture("Assets/Textures/Cards/Card_Dash.png");
+    Texture2D itemTex_Reinhard      = LoadTexture("Assets/Textures/Cards/Card_Reinhard.png");
+    Texture2D itemTex_Whip          = LoadTexture("Assets/Textures/Cards/Card_Whip.png");
+    Texture2D itemTex_Speedrun      = LoadTexture("Assets/Textures/Cards/Card_Speedrun.png");
+    Texture2D itemTex_Shield        = LoadTexture("Assets/Textures/Cards/Card_Shield.png");
+
+    // Returns the item texture for a given powerup type (animates Beatrice frames)
+    auto GetItemTex = [&](PowerupType pu) -> Texture2D* {
+        bool beaFrame2 = fmod(GetTime(), 0.6) > 0.3;
+        switch (pu) {
+            case PU_RETURN_BY_DEATH: return &itemTex_ReturnByDeath;
+            case PU_DASH:            return &itemTex_Dash;
+            case PU_EL_SHAMAK:       return beaFrame2 ? &Beatrice_Idle2 : &Beatrice_Idle1;
+            case PU_LARPER:          return &LadderPart;
+            case PU_REINHARD:        return &itemTex_Reinhard;
+            case PU_WHIP:            return &itemTex_Whip;
+            case PU_EXTRA_LIFE:      return &texGoldHeart;
+            case PU_NUKE_PU:         return &Nuke;
+            case PU_ONE_MORE_LARP:   return &texHeart;
+            case PU_SPEEDRUN:        return &itemTex_Speedrun;
+            case PU_SHIELD:          return &itemTex_Shield;
+            case PU_SHOP:            return texCoin.id > 0 ? &texCoin : nullptr;
+            case PU_BEATRICE:        return beaFrame2 ? &Beatrice_Idle2 : &Beatrice_Idle1;
+            default:                 return nullptr;
+        }
+    };
+
+    // Rarity border colors: Common, Rare, Stairs, Astolfo, Legendary, Mythic
+    static const Color rarityBorderCols[6] = {
+        {180,185,200,255},  // Common: gray/white
+        {60,160,255,255},   // Rare: blue
+        {30,110,45,255},    // Stairs: dark green
+        {255,140,190,255},  // Astolfo: pink
+        {255,170,30,255},   // Legendary: orange-yellow
+        {210,35,120,255},   // Mythic: red-purple
+    };
+
+    // Fit a texture inside dest preserving aspect ratio (letterbox/pillarbox)
+    auto FitTexRect = [](Rectangle dest, float texW, float texH) -> Rectangle {
+        float s = fminf(dest.width / texW, dest.height / texH);
+        float fw = texW * s, fh = texH * s;
+        return { dest.x + (dest.width - fw) * 0.5f, dest.y + (dest.height - fh) * 0.5f, fw, fh };
+    };
 
     Texture2D* subaruFrames[SUBARU_FRAME_COUNT] = { &Subaru1, &Subaru2, &Subaru3, &Subaru4, &Subaru5 };
 
@@ -1219,12 +1331,14 @@ int main(void)
         hbDrag = {};
         for (int i = 0; i < n; i++) {
             displayCards[i] = {};
-            displayCards[i].type    = RollPowerup();
-            displayCards[i].rarity  = PU_INFO[(int)displayCards[i].type].rarityIdx;
-            displayCards[i].scale   = 0.f;
-            displayCards[i].appearT = 0.f;
-            displayCards[i].appeared= false;
+            displayCards[i].type      = RollPowerup();
+            displayCards[i].rarity    = PU_INFO[(int)displayCards[i].type].rarityIdx;
+            displayCards[i].scale     = 1.f;
+            displayCards[i].heightFrac = 0.f;
+            displayCards[i].appearT   = -(float)i * 0.15f;  // stagger per card
+            displayCards[i].appeared  = false;
         }
+        SetSoundVolume(cardFanSnd, volUI * 1.2f); PlaySound(cardFanSnd);
     };
 
     // Add powerup to hotbar; returns true if added
@@ -1309,6 +1423,7 @@ int main(void)
     auto TriggerDeath = [&]()
         {
             if (isDying) return;
+            if (dbgImmortal) return;
             // Return By Death intercept
             for (auto& s : hotbar) {
                 if (s.type == PU_RETURN_BY_DEATH && s.charges > 0) {
@@ -1335,7 +1450,8 @@ int main(void)
             for (auto& bb : beaBullets) bb.active = false;
             invincible = true;
             invincibleTimer = invincibleDuration;
-            PauseMusicStream(music);
+            musicFadeTimer    = MUSIC_FADE_DUR;  // start 0.5s fade-out
+            musicPendingPause = true;
             ResetRegulus();
             RespawnItems();
         };
@@ -1348,6 +1464,8 @@ int main(void)
             ResetRegulus();
             invincible = true;
             invincibleTimer = invincibleDuration;
+            musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
             ResumeMusicStream(music);
         };
 
@@ -1365,7 +1483,7 @@ int main(void)
             lives = 3;
             invincible = false;
             invincibleTimer = 0.0f;
-            score = 0;
+            score = 0; coins = 0;
 
             playerHasBeatrice = false;
             beatriceAbilityTimer = 0.0f;
@@ -1409,6 +1527,8 @@ int main(void)
             subaruFrame = 0;
             subaruTimer = 0.0f;
 
+            musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
             ResumeMusicStream(music);
         };
 
@@ -1482,6 +1602,7 @@ int main(void)
             currentScreen = MENU;
         }
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
+        if (IsKeyPressed(KEY_M)) dbgMenuOpen = !dbgMenuOpen;
 
         if (currentScreen == SPLASH_SCREEN)
         {
@@ -1506,21 +1627,26 @@ int main(void)
             {
                 selectedOption = 0; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { FullReset(); currentScreen = HOW_HIGH; splashTimer = 0.0f; subaruFrame = 0; subaruTimer = 0.0f; }
             }
-            if (CheckCollisionPointRec(mouse, btnCtrl))
-            {
-                selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { currentScreen = CONTROLS; splashTimer = 0.0f; }
-            }
             if (CheckCollisionPointRec(mouse, btnEditor))
             {
-                selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; }
+                selectedOption = 2; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { editor.ClearFlags(); currentScreen = LEVEL_EDITOR; }
             }
             if (CheckCollisionPointRec(mouse, btnExit))
             {
                 selectedOption = 1; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) break;
             }
+            if (CheckCollisionPointRec(mouse, btnSettings))
+            {
+                selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { settingsTab = 0; currentScreen = SETTINGS; }
+            }
+        }
+        else if (currentScreen == SETTINGS)
+        {
+            if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_N)) currentScreen = MENU;
         }
         else if (currentScreen == CONTROLS)
         {
+            if (IsKeyPressed(KEY_ESCAPE)) currentScreen = MENU;
             Rectangle btnsalida = { 750, 900, 200, 40 };
             Vector2 mouse = GetMousePosition();
             if (CheckCollisionPointRec(mouse, btnsalida))
@@ -1548,7 +1674,7 @@ int main(void)
                     ClearRoundEntities();
                     ResetPlayerPos();
                     ResetRegulus();
-                    lives = 3; score = 0;
+                    lives = 3; score = 0; coins = 0;
                     invincible = true; invincibleTimer = invincibleDuration;
                     playerHasBeatrice = false;
                     beatriceAbilityTimer = 0.0f;
@@ -1576,7 +1702,9 @@ int main(void)
                     regulusForceBlue = true; regulusIdleFrame = 0;
                     regulusIdleTimer = 0.0f;
                     subaruFrame = 0; subaruTimer = 0.0f;
-                    ResumeMusicStream(music);
+                    musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
+            ResumeMusicStream(music);
                     currentScreen = GAMEPLAY;
                 }
             }
@@ -1589,7 +1717,7 @@ int main(void)
             {
                 subaruTimer -= 1.0f / SUBARU_ANIM_FPS; subaruFrame = (subaruFrame + 1) % SUBARU_FRAME_COUNT;
             }
-            if (IsKeyPressed(KEY_ENTER) || splashTimer >= splashDuration)
+            if (splashTimer >= 2.0f)
             {
                 splashTimer = 0.0f;
                 ClearDeathState();
@@ -1623,7 +1751,9 @@ int main(void)
                 regulusForceBlue = true; regulusIdleFrame = 0;
                 regulusIdleTimer = 0.0f;
                 subaruFrame = 0; subaruTimer = 0.0f;
-                ResumeMusicStream(music);
+                musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
+            ResumeMusicStream(music);
                 currentScreen = GAMEPLAY;
             }
         }
@@ -1631,10 +1761,26 @@ int main(void)
         {
             UpdateMusicStream(music);
 
+            // ── Music fade-out (triggered on death) ───────────────────────────
+            if (musicFadeTimer > 0.f) {
+                musicFadeTimer -= dt;
+                float t = fmaxf(musicFadeTimer / MUSIC_FADE_DUR, 0.f);
+                SetMusicVolume(music, volMusic * t);
+                if (musicFadeTimer <= 0.f && musicPendingPause) {
+                    PauseMusicStream(music);
+                    musicPendingPause = false;
+                    SetMusicVolume(music, volMusic);
+                }
+            }
+
             {
                 static LevelData _cinematicDummy;
                 Cinematic::Global.Update(dt, _cinematicDummy);
             }
+
+            if (IsKeyPressed(KEY_ESCAPE) && !isDying) { isPaused = !isPaused; settingsTab = 0; }
+
+            if (!isPaused) {
 
             // ── RBD: save snapshot every 0.1s ────────────────────────────────
             {
@@ -1648,7 +1794,7 @@ int main(void)
                         snap.player = player; snap.vx = velocityX; snap.vy = velocityY;
                         snap.facingR = facingRight; snap.onLadder = onLadder;
                         snap.curLadder = currentLadder; snap.ladderProg = ladderProgress;
-                        snap.lives = lives; snap.score = score;
+                        snap.lives = lives; snap.score = score; snap.coins = coins;
                         snap.barrels.clear();
                         for (auto& b : barrels) snap.barrels.push_back({b.hitbox,b.currentNode,b.speed,b.active,b.isBlue,b.isFalling});
                         snap.enemies.clear();
@@ -1674,7 +1820,7 @@ int main(void)
                     player = s.player; velocityX = s.vx; velocityY = s.vy;
                     facingRight = s.facingR; onLadder = s.onLadder;
                     currentLadder = s.curLadder; ladderProgress = s.ladderProg;
-                    lives = s.lives; score = s.score;
+                    lives = s.lives; score = s.score; coins = s.coins;
                     for (int i = 0; i < (int)s.barrels.size() && i < (int)barrels.size(); i++) {
                         barrels[i].hitbox=s.barrels[i].h; barrels[i].currentNode=s.barrels[i].node;
                         barrels[i].speed=s.barrels[i].spd; barrels[i].active=s.barrels[i].active;
@@ -1694,11 +1840,13 @@ int main(void)
                     regulusIdleTimer=s.regIdleT; regulusIdleFrame=s.regIdleFr;
                     rbdCount = 0; rbdHead = 0;
                 }
-                PlaySound(rbdSound);
+                SetSoundVolume(rbdSound, volSFX); PlaySound(rbdSound);
                 rbdFading = true; rbdFadeTimer = 0.f;
                 ClearDeathState();
                 invincible = true; invincibleTimer = 2.0f;
-                ResumeMusicStream(music);
+                musicFadeTimer = 0.f; musicPendingPause = false;
+            SetMusicVolume(music, volMusic);
+            ResumeMusicStream(music);
             }
 
             // ── RBD fade-in ───────────────────────────────────────────────────
@@ -1714,14 +1862,28 @@ int main(void)
             }
 
             // ── Hotbar slot switching ─────────────────────────────────────────
-            if (IsKeyPressed(KEY_ONE))   hotbarSlot = 0;
-            if (IsKeyPressed(KEY_TWO))   hotbarSlot = 1;
-            if (IsKeyPressed(KEY_THREE)) hotbarSlot = 2;
             {
-                float wheel = GetMouseWheelMove();
-                if (wheel > 0.f) hotbarSlot = (hotbarSlot + 2) % 3;
-                if (wheel < 0.f) hotbarSlot = (hotbarSlot + 1) % 3;
+                int prevSlot = hotbarSlot;
+                if (IsKeyPressed(KEY_ONE))   hotbarSlot = 0;
+                if (IsKeyPressed(KEY_TWO))   hotbarSlot = 1;
+                if (IsKeyPressed(KEY_THREE)) hotbarSlot = 2;
+                {
+                    float wheel = GetMouseWheelMove();
+                    if (wheel > 0.f) hotbarSlot = (hotbarSlot + 2) % 3;
+                    if (wheel < 0.f) hotbarSlot = (hotbarSlot + 1) % 3;
+                }
+                auto isHeavyItem = [](PowerupType t) -> bool {
+                    return t==PU_NUKE_PU || t==PU_LARPER || t==PU_EXTRA_LIFE || t==PU_ONE_MORE_LARP;
+                };
+                if (prevSlot != hotbarSlot && isHeavyItem(hotbar[hotbarSlot].type))
+                    heavyEquipTimer = 0.f;
             }
+            auto isHeavyItem = [](PowerupType t) -> bool {
+                return t==PU_NUKE_PU || t==PU_LARPER || t==PU_EXTRA_LIFE || t==PU_ONE_MORE_LARP;
+            };
+            isCarryingHeavy = isHeavyItem(hotbar[hotbarSlot].type);
+            if (isCarryingHeavy) heavyEquipTimer = fminf(heavyEquipTimer + dt, 1.f);
+            else                 heavyEquipTimer = 0.f;
 
             // ── Active powerup effects ────────────────────────────────────────
             if (speedrunActive) { speedrunTimer -= dt; if (speedrunTimer <= 0.f) speedrunActive = false; }
@@ -1743,14 +1905,15 @@ int main(void)
                     [](const LarperLadder& ll){ return ll.curH >= ll.targH; }),
                 larperLadders.end());
 
-            // ── Hotbar E key use ──────────────────────────────────────────────
+            // ── Hotbar E key / Left-click use ────────────────────────────────
             bool ePressHandled = false;
-            if (!isDying && IsKeyPressed(KEY_E)) {
+            if (!isDying && (IsKeyPressed(KEY_E) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON))) {
                 HotbarSlot& slot = hotbar[hotbarSlot];
                 if (slot.type != PU_NONE) {
                     const PowerupInfo& info = PU_INFO[(int)slot.type];
                     bool ready = info.maxCD > 0.f ? (slot.cd <= 0.f) : (slot.charges > 0);
-                    if (ready && !info.passive) {
+                    bool heavyOK = !isHeavyItem(slot.type) || (heavyEquipTimer >= 1.f);
+                    if (ready && !info.passive && heavyOK) {
                         ePressHandled = true;
                         // ── Apply powerup ──────────────────────────────────────
                         switch(slot.type) {
@@ -1759,13 +1922,19 @@ int main(void)
                             player.x += facingRight ? dist : -dist;
                             dashActive = true; dashInvulTimer = 0.5f;
                             invincible = true; invincibleTimer = 0.5f;
+                            dashShakeTimer = DASH_SHAKE_DURATION;
+                            SetSoundVolume(sndDash, volAbility); PlaySound(sndDash);
                             slot.cd = info.maxCD; break; }
                         case PU_EL_SHAMAK:
-                            for (auto& e : enemies) if (e.active && e.type == SPECTER) { e.active=false; score+=300; }
-                            slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
+                            playerHasBeatrice = true;
+                            beatriceAbilityTimer = BEATRICE_DURATION;
+                            beaBulletShootTimer = 0.f;
+                            SetSoundVolume(sndBeatrice, volAbility); PlaySound(sndBeatrice);
+                            slot.charges--; if(slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_LARPER: {
                             float tH = player.height * 3.f;
                             larperLadders.push_back({player.x + player.width*0.5f - 20.f, player.y + player.height, 0.f, tH, tH / 0.5f});
+                            SetSoundVolume(sndLarper, volAbility); PlaySound(sndLarper);
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
                         case PU_REINHARD:
                             { LevelData nextLv;
@@ -1774,37 +1943,43 @@ int main(void)
                                   InitCardSelect(2,false); currentScreen=CARD_SELECT;
                               } else { splashTimer=0.f; currentScreen=GAME_OVER; }
                             }
+                            SetSoundVolume(sndReinhard, volAbility); PlaySound(sndReinhard);
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_WHIP: {
                             float reach = player.width * 5.f;
                             Rectangle whipRect = facingRight
                                 ? Rectangle{player.x+player.width, player.y, reach, player.height}
                                 : Rectangle{player.x-reach, player.y, reach, player.height};
-                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; }
+                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; }
+                            SetSoundVolume(sndWhip, volAbility); PlaySound(sndWhip);
                             slot.cd = info.maxCD; break; }
                         case PU_EXTRA_LIFE:
                             maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
+                            SetSoundVolume(sndExtraLife, volAbility); PlaySound(sndExtraLife);
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_NUKE_PU: {
-                            PlaySound(nukeSound);
+                            SetSoundVolume(nukeSound, volSFX); PlaySound(nukeSound);
                             float sc=3.8f*0.85f*1.05f;
                             float nkW=NUKE_NATIVE_W*(NUKE_SCALE*0.25f)*sc, nkH=NUKE_NATIVE_H*(NUKE_SCALE*0.25f)*sc;
                             nukeExplosionPos={player.x+player.width*0.5f-nkW*0.5f, player.y-nkH-2.f};
                             nukeExplosionPlaying=true; nukeExplosionFrame=0; nukeExplosionTimer=0.f;
                             nukeFlashTimer=0.f; nukeExtraDelay=3.f;
-                            for (auto& b:barrels){if(b.active){score+=100;b.active=false;}}
-                            for (auto& e:enemies){if(e.active){score+=300;e.active=false;}}
+                            for (auto& b:barrels){if(b.active){score+=100;coins+=5;b.active=false;}}
+                            for (auto& e:enemies){if(e.active){score+=300;coins+=15;e.active=false;}}
                             regulusIsStunned=true; regulusStunEnding=false; regulusStunFrame=0;
                             regulusStunTimer=0.f; regulusStunLoops=0;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
                         case PU_ONE_MORE_LARP:
                             lives = (lives+1 <= maxLives) ? lives+1 : maxLives;
+                            SetSoundVolume(sndOneLarp, volAbility); PlaySound(sndOneLarp);
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
                         case PU_SPEEDRUN:
                             speedrunActive=true; speedrunTimer=5.f;
+                            SetSoundVolume(sndSpeedrun, volAbility); PlaySound(sndSpeedrun);
                             slot.cd=info.maxCD; break;
                         case PU_SHIELD:
-                            shieldActive=true; shieldTimer=0.3f;
+                            shieldActive=true; shieldTimer=1.2f;
+                            SetSoundVolume(sndShield, volAbility); PlaySound(sndShield);
                             slot.cd=info.maxCD; break;
                         case PU_SHOP: {
                             InitCardSelect(5, true);
@@ -1814,6 +1989,7 @@ int main(void)
                             playerHasBeatrice = true;
                             beatriceAbilityTimer = BEATRICE_DURATION;
                             beaBulletShootTimer = 0.f;
+                            SetSoundVolume(sndBeatrice, volAbility); PlaySound(sndBeatrice);
                             slot.charges--; if(slot.charges<=0) slot.type=PU_NONE; break;
                         default: break;
                         }
@@ -2046,6 +2222,7 @@ int main(void)
                                 bb.vel = { dir.x * BEA_BULLET_SPEED, dir.y * BEA_BULLET_SPEED };
                                 bb.lifetime = 0.0f;
                                 bb.active = true;
+                                SetSoundVolume(sndBeatriceAtk, volAbility); PlaySound(sndBeatriceAtk);
                                 break;
                             }
                         }
@@ -2077,7 +2254,7 @@ int main(void)
                     if (!b.active) continue;
                     if (CheckCollisionRecs(bbRect, b.hitbox))
                     {
-                        b.active = false; bb.active = false; score += 100; break;
+                        b.active = false; bb.active = false; score += 100; coins += 5; break;
                     }
                 }
                 if (bb.active) {
@@ -2086,57 +2263,12 @@ int main(void)
                         if (!en.active) continue;
                         if (CheckCollisionRecs(bbRect, en.hitbox))
                         {
-                            en.active = false; bb.active = false; score += 300; break;
+                            en.active = false; bb.active = false; score += 300; coins += 15; break;
                         }
                     }
                 }
             }
 
-            // ── Throw nuke (G) ────────────────────────────────────────────────
-            if (playerHasNuke && IsKeyPressed(KEY_G))
-            {
-                playerHasNuke = false;
-                float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
-                FlyingNuke fn;
-                fn.rect = { player.x + player.width * 0.5f - nkW * 0.5f,
-                               player.y + player.height * 0.5f - nkH * 0.5f, nkW, nkH };
-                fn.vel = { facingRight ? 7.0f : -7.0f, -5.5f };
-                fn.active = true;
-                flyingNukes.push_back(fn);
-            }
-
-            // ── Detonate nuke (F) ─────────────────────────────────────────────
-            if (!isDying && playerHasNuke && IsKeyPressed(KEY_F))
-            {
-                PlaySound(nukeSound);
-                float scale = 3.8f * 0.85f * 1.05f;
-                float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
-                float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                nukeExplosionPos = { player.x + image->width * scale * 0.5f - nkW * 0.5f,
-                                     player.y - nkH - 2.0f };
-                playerHasNuke = false;
-                nukeExplosionPlaying = true;
-                nukeExplosionFrame = 0;
-                nukeExplosionTimer = 0.0f;
-                nukeFlashTimer = 0.0f;
-                nukeExtraDelay = 3.0f;
-
-                for (auto& b : barrels) { if (b.active) { score += 100; b.active = false; } }
-                for (auto& en : enemies) { if (en.active) { score += 300; en.active = false; } }
-
-                regulusIsStunned = true;
-                regulusStunEnding = false;
-                regulusStunFrame = 0;
-                regulusStunTimer = 0.0f;
-                regulusStunLoops = 0;
-                regulusStunEndFrame = 0;
-                regulusStunEndTimer = 0.0f;
-                regulusThrowing = false;
-                regulusSpawnPending = false;
-                regulusForceBlue = false;
-                regulusThrowFrame = 0;
-                regulusActiveSpawnTimer = 0.0f;
-            }
             if (nukeExtraDelay > 0.0f) nukeExtraDelay -= dt;
 
             if (nukeExplosionPlaying)
@@ -2223,15 +2355,6 @@ int main(void)
                 }
             }
 
-            if (!ePressHandled && !isDying && IsKeyPressed(KEY_E) && !regulusThrowing && !regulusIsStunned)
-            {
-                regulusThrowing = true;
-                regulusThrowFrame = 0;
-                regulusThrowTimer = 0.0f;
-                regulusSpawnPending = true;
-                regulusForceBlue = false;
-            }
-
             // ── Barrel / player collision ─────────────────────────────────────
             if (!isDying && !invincible)
             {
@@ -2242,7 +2365,7 @@ int main(void)
                     bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
                         (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
                     if (fromBelow) continue;
-                    if (shieldActive) { b.active = false; score += 100; shieldActive = false; break; }
+                    if (shieldActive) { b.active = false; score += 100; coins += 5; shieldActive = false; break; }
                     TriggerDeath();
                     break;
                 }
@@ -2255,7 +2378,7 @@ int main(void)
                 {
                     UpdateEnemy(en, player, platforms, dt);
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
-                        if (shieldActive) { en.active = false; score += 300; shieldActive = false; }
+                        if (shieldActive) { en.active = false; score += 300; coins += 15; shieldActive = false; }
                         else TriggerDeath();
                     }
                 }
@@ -2275,7 +2398,7 @@ int main(void)
                     };
                     if (CheckCollisionRecs(player, jumpZone))
                     {
-                        score += 100; b.jumpScored = true; PlaySound(jumpBrlSound);
+                        score += 100; coins += 5; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
                     }
                 }
             }
@@ -2284,8 +2407,8 @@ int main(void)
             if (isDying)
             {
                 deathTimer += dt;
-                if (!hitPlayed) { PlaySound(HitSound);   hitPlayed = true; }
-                if (deathTimer > 0.5f && !deathPlayed) { PlaySound(deathSound); deathPlayed = true; }
+                if (!hitPlayed) { SetSoundVolume(HitSound, volSFX); PlaySound(HitSound); hitPlayed = true; }
+                if (deathTimer > 0.5f && !deathPlayed) { SetSoundVolume(deathSound, volSFX); PlaySound(deathSound); deathPlayed = true; }
 
                 if (deathShakeTimer > 0.0f)
                 {
@@ -2297,7 +2420,20 @@ int main(void)
                     };
                 }
                 else deathShakeOffset = { 0, 0 };
+            }
 
+            if (dashShakeTimer > 0.f)
+            {
+                dashShakeTimer -= dt;
+                float mag = DASH_SHAKE_AMOUNT * (dashShakeTimer / DASH_SHAKE_DURATION);
+                dashShakeOffset = {
+                    (float)GetRandomValue((int)-mag, (int)mag),
+                    (float)GetRandomValue((int)-mag, (int)mag)
+                };
+            }
+            else dashShakeOffset = { 0, 0 };
+
+            if (isDying) {
                 if (!deathReachedBlack)
                 {
                     deathFallVelY += DEATH_FALL_GRAVITY;
@@ -2344,6 +2480,7 @@ int main(void)
             // ── Player input ──────────────────────────────────────────────────
             if (!isDying)
             {
+                if ((dbgFlight || dbgFlightNoCol) && onLadder) { onLadder = false; currentLadder = -1; }
                 if (onLadder)
                 {
                     const Ladder& lad = ladders[currentLadder];
@@ -2430,14 +2567,15 @@ int main(void)
                 }
                 else
                 {
+                    bool flyMode = dbgFlight || dbgFlightNoCol;
                     { float spd = playerSpeed * (speedrunActive ? 1.5f : 1.f);
                     if (IsKeyDown(KEY_D)) { player.x += spd; playerIsMoving = true; facingRight = true; }
                     if (IsKeyDown(KEY_A)) { player.x -= spd; playerIsMoving = true; facingRight = false; } }
 
-                    if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S))
+                    if (!flyMode && (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_S)))
                     {
                         bool entered = false;
-                        if (!playerHasNuke && !playerHasBeatrice)
+                        if (!isCarryingHeavy && !playerHasBeatrice)
                         {
                             for (int i = 0; i < (int)ladders.size(); i++)
                             {
@@ -2471,14 +2609,22 @@ int main(void)
                         }
                     }
 
-                    if (IsKeyPressed(KEY_SPACE) && !isJumping)
+                    if (!flyMode && IsKeyPressed(KEY_SPACE) && !isJumping)
                     {
                         velocityY = jumpForce; isJumping = true; isGrounded = false;
                     }
 
-                    if (!isGrounded) velocityY += gravity;
-                    player.y += velocityY;
+                    if (flyMode) {
+                        velocityX = 0; velocityY = 0;
+                        if (IsKeyDown(KEY_W)) player.y -= playerSpeed * 2.5f;
+                        if (IsKeyDown(KEY_S)) player.y += playerSpeed * 2.5f;
+                        isJumping = false;
+                    } else {
+                        if (!isGrounded) velocityY += gravity;
+                        player.y += velocityY;
+                    }
 
+                    if (!dbgFlightNoCol)
                     {
                         float colW = player.width * 0.5f;
                         float colH = player.height * 0.5f;
@@ -2494,6 +2640,7 @@ int main(void)
                         isGrounded = col.grounded;
                         if (col.grounded) isJumping = false;
                     }
+                    else { isGrounded = false; }
 
                     // Push player up when an elevator platform rises into them
                     if (!onLadder)
@@ -2542,9 +2689,9 @@ int main(void)
                     }
                     else if (isJumping)
                     {
-                        if (playerHasBeatrice) image = &Dk_Mario_Jump_Beatrice;
-                        else if (playerHasNuke)     image = &imgMarioJumpNuke;
-                        else                        image = &imgMarioJump;
+                        if (playerHasBeatrice)    image = &Dk_Mario_Jump_Beatrice;
+                        else if (isCarryingHeavy) image = &imgMarioJumpNuke;
+                        else                      image = &imgMarioJump;
                     }
                     else if (playerIsMoving)
                     {
@@ -2552,15 +2699,15 @@ int main(void)
                         {
                             walkFrame = (walkFrame + 1) % 2; animationTimer = fmod(animationTimer, animationSpeed);
                         }
-                        if (playerHasBeatrice) image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
-                        else if (playerHasNuke)     image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
-                        else                        image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
+                        if (playerHasBeatrice)    image = (walkFrame == 0) ? &Dk_Mario_Walk1_Beatrice : &Dk_Mario_Walk2_Beatrice;
+                        else if (isCarryingHeavy) image = (walkFrame == 0) ? &imgMarioWalk1Nuke : &imgMarioWalk2Nuke;
+                        else                      image = (walkFrame == 0) ? &imgMarioWalk1 : &imgMarioWalk2;
                     }
                     else
                     {
-                        if (playerHasBeatrice) image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
-                        else if (playerHasNuke)     image = &imgMarioIdleNuke;
-                        else                        image = &imgMarioIdle;
+                        if (playerHasBeatrice)    image = (beatriceItemAnimFrame == 0) ? &Dk_Mario_Idle1_Beatrice : &Dk_Mario_Idle2_Beatrice;
+                        else if (isCarryingHeavy) image = &imgMarioIdleNuke;
+                        else                      image = &imgMarioIdle;
                         walkFrame = 0;
                     }
 
@@ -2652,6 +2799,7 @@ int main(void)
                 }
             }
 
+            } // end !isPaused
         } // end GAMEPLAY update
 
         else if (currentScreen == GAME_OVER)
@@ -2734,8 +2882,7 @@ int main(void)
             }
 
             // ── Update card animations ────────────────────────────────────────
-            static const float APPEAR_PHASE1 = 0.2f;
-            static const float APPEAR_PHASE2 = 0.4f;
+            static const float APPEAR_DUR    = 1.0f;
             static const float EXIT_DUR      = 0.5f;
             bool anyExiting = false;
 
@@ -2743,11 +2890,20 @@ int main(void)
                 CardDisplay& c = displayCards[i];
                 if (!c.appeared) {
                     c.appearT += dt;
-                    if (c.appearT < APPEAR_PHASE1)
-                        c.scale = Lerp(0.f, 1.1f, c.appearT / APPEAR_PHASE1);
-                    else if (c.appearT < APPEAR_PHASE2)
-                        c.scale = Lerp(1.1f, 1.0f, (c.appearT - APPEAR_PHASE1) / (APPEAR_PHASE2 - APPEAR_PHASE1));
-                    else { c.scale = 1.0f; c.appeared = true; }
+                    if (c.appearT > 0.f) {
+                        float t = fminf(c.appearT / APPEAR_DUR, 1.f);
+                        // ease-out with slight overshoot on height
+                        if (t < 0.85f)
+                            c.heightFrac = Lerp(0.f, 1.05f, t / 0.85f);
+                        else
+                            c.heightFrac = Lerp(1.05f, 1.0f, (t - 0.85f) / 0.15f);
+                        if (c.appearT >= APPEAR_DUR) {
+                            c.heightFrac = 1.0f;
+                            c.appeared = true;
+                            SetSoundVolume(cardSlideSnd, volUI * 1.2f); PlaySound(cardSlideSnd);
+                        }
+                    }
+                    c.scale = 1.0f;
                 }
                 if (c.selected || c.dismissed) {
                     c.exitT += dt;
@@ -2765,7 +2921,11 @@ int main(void)
                     float cy = startY + cardH * 0.5f;
                     Rectangle hitR = { cx - cardW * c.scale * 0.5f, cy - cardH * c.scale * 0.5f,
                                        cardW * c.scale, cardH * c.scale };
+                    bool wasHovered = c.hovered;
                     c.hovered = !hbDrag.active && CheckCollisionPointRec(mouse, hitR);
+                    if (c.hovered && !wasHovered) {
+                        SetSoundVolume(cardHoverSnd, volUI * 1.2f); PlaySound(cardHoverSnd);
+                    }
                     float hTarget = c.hovered ? 1.f : 0.f;
                     c.hoverLerp = Lerp(c.hoverLerp, hTarget, fminf(dt * 10.f, 1.f));
                     c.scale = 1.0f + 0.1f * c.hoverLerp;
@@ -2796,14 +2956,17 @@ int main(void)
                     if (displayCards[i].appeared && displayCards[i].hovered) {
                         anyCardPicked = true;
                         displayCards[i].selected = true;
+                        SetSoundVolume(cardPickSnd, volUI * 1.2f); PlaySound(cardPickSnd);
                         if (isShop) {
                             int cost = PU_INFO[(int)displayCards[i].type].cost;
                             if (coins >= cost) { coins -= cost; AddToHotbar(displayCards[i].type); }
                         } else {
                             AddToHotbar(displayCards[i].type);
                         }
+                        bool anyDismissed = false;
                         for (int j = 0; j < numDispCards; j++)
-                            if (j != i) displayCards[j].dismissed = true;
+                            if (j != i) { displayCards[j].dismissed = true; anyDismissed = true; }
+                        if (anyDismissed) { SetSoundVolume(cardThrowSnd, volUI * 1.2f); PlaySound(cardThrowSnd); }
                         break;
                     }
                 }
@@ -2838,62 +3001,65 @@ int main(void)
             Color dkOrange = { 255, 140,   0, 255 };
             Color dkWhite = WHITE;
 
-            const char* title = "DONKEY KONG";
-            const char* playText = "1 PLAYER GAME";
-            const char* exitText = "EXIT";
-            const char* controlText = "CONTROLS";
+            const char* title      = "DONKEY KONG";
+            const char* playText   = "1 PLAYER GAME";
+            const char* exitText   = "EXIT";
             const char* editorText = "LEVEL EDITOR";
-            const char* subtitle = "1967 Bomboclat Industries LLC";
+            const char* optTxt     = "OPTIONS";
+            const char* subtitle   = "1967 Bomboclat Industries LLC";
 
-            int titleW = MeasureText(title, titleFont);
-            int playW = MeasureText(playText, menuFont);
-            int exitW = MeasureText(exitText, menuFont);
-            int controlW = MeasureText(controlText, menuFont);
+            int titleW  = MeasureText(title,      titleFont);
+            int playW   = MeasureText(playText,   menuFont);
+            int exitW   = MeasureText(exitText,   menuFont);
             int editorW = MeasureText(editorText, menuFont);
-            int subW = MeasureText(subtitle, smallFont);
+            int optW    = MeasureText(optTxt,     menuFont);
+            int subW    = MeasureText(subtitle,   smallFont);
 
-            int startY = (screenHeight - (titleFont + spacing * 5 + menuFont * 4 + smallFont)) / 2;
-            int titleX = (screenWidth - titleW) / 2, titleY = startY;
-            int playX = (screenWidth - playW) / 2, playY = titleY + titleFont + spacing;
-            int exitX = (screenWidth - exitW) / 2, exitY = playY + menuFont + spacing;
-            int controlX = (screenWidth - controlW) / 2, controlY = exitY + menuFont + spacing;
-            int editorX = (screenWidth - editorW) / 2, editorY = controlY + menuFont + spacing;
-            int subX = (screenWidth - subW) / 2, subY = editorY + menuFont + spacing;
+            // 4 items: play, exit, editor, options
+            int startY  = (screenHeight - (titleFont + spacing * 5 + menuFont * 4 + smallFont)) / 2;
+            int titleX  = (screenWidth - titleW)  / 2, titleY  = startY;
+            int playX   = (screenWidth - playW)   / 2, playY   = titleY + titleFont + spacing;
+            int exitX   = (screenWidth - exitW)   / 2, exitY   = playY  + menuFont  + spacing;
+            int editorX = (screenWidth - editorW) / 2, editorY = exitY  + menuFont  + spacing;
+            int optX    = (screenWidth - optW)    / 2, optY    = editorY + menuFont  + spacing;
+            int subX    = (screenWidth - subW)    / 2, subY    = optY   + menuFont  + spacing;
 
-            btnPlay = { (float)(playX - 10), (float)playY,    (float)(playW + 20), (float)(menuFont + 6) };
-            btnExit = { (float)(exitX - 10), (float)exitY,    (float)(exitW + 20), (float)(menuFont + 6) };
-            btnCtrl = { (float)(controlX - 10), (float)controlY, (float)(controlW + 20), (float)(menuFont + 6) };
-            btnEditor = { (float)(editorX - 10), (float)editorY,  (float)(editorW + 20), (float)(menuFont + 6) };
+            btnPlay     = { (float)(playX   - 10), (float)playY,   (float)(playW   + 20), (float)(menuFont + 6) };
+            btnExit     = { (float)(exitX   - 10), (float)exitY,   (float)(exitW   + 20), (float)(menuFont + 6) };
+            btnEditor   = { (float)(editorX - 10), (float)editorY, (float)(editorW + 20), (float)(menuFont + 6) };
+            btnSettings = { (float)(optX    - 10), (float)optY,    (float)(optW    + 20), (float)(menuFont + 6) };
 
-            if (selectedOption == 0) DrawText(">", playX - 40, playY, menuFont, dkOrange);
-            if (selectedOption == 1) DrawText(">", exitX - 40, exitY, menuFont, dkOrange);
-            if (selectedOption == 2) DrawText(">", controlX - 40, controlY, menuFont, dkOrange);
-            if (selectedOption == 3) DrawText(">", editorX - 40, editorY, menuFont, dkOrange);
+            if (selectedOption == 0) DrawText(">", playX   - 40, playY,   menuFont, dkOrange);
+            if (selectedOption == 1) DrawText(">", exitX   - 40, exitY,   menuFont, dkOrange);
+            if (selectedOption == 2) DrawText(">", editorX - 40, editorY, menuFont, dkOrange);
+            if (selectedOption == 3) DrawText(">", optX    - 40, optY,    menuFont, dkOrange);
 
-            DrawText(title, titleX, titleY, titleFont, dkRed);
-            DrawText(playText, playX, playY, menuFont, dkWhite);
-            DrawText(exitText, exitX, exitY, menuFont, dkWhite);
-            DrawText(controlText, controlX, controlY, menuFont, dkWhite);
-            DrawText(editorText, editorX, editorY, menuFont, dkOrange);
-            DrawText(subtitle, subX, subY, smallFont, dkOrange);
+            DrawText(title,      titleX,  titleY,  titleFont, dkRed);
+            DrawText(playText,   playX,   playY,   menuFont,  dkWhite);
+            DrawText(exitText,   exitX,   exitY,   menuFont,  dkWhite);
+            DrawText(editorText, editorX, editorY, menuFont,  dkOrange);
+            DrawText(optTxt,     optX,    optY,    menuFont,  { 120, 220, 120, 255 });
+            DrawText(subtitle,   subX,    subY,    smallFont, dkOrange);
         }
         else if (currentScreen == HOW_HIGH)
         {
+            // 1.2× scaled background — start with extra 20% above screen, pan down over 2 s
+            float imgW  = screenWidth  * 1.2f;
+            float imgH  = screenHeight * 1.2f;
+            float extra = imgH - screenHeight;          // 190 px
+            float imgX  = (screenWidth - imgW) * 0.5f; // -87.5 — centered, sides clipped
+            float t     = Clamp(splashTimer / 2.0f, 0.0f, 1.0f);
+            float imgY  = -extra + extra * t;           // -190 → 0 as timer runs
+
+            Color bgTint = { 128, 128, 128, 255 };      // 50% brightness
             DrawTexturePro(Subaru_Background,
                 { 0, 0, (float)Subaru_Background.width, (float)Subaru_Background.height },
-                { 0, 0, (float)screenWidth, (float)screenHeight }, { 0, 0 }, 0.f, WHITE);
+                { imgX, imgY, imgW, imgH }, { 0, 0 }, 0.f, bgTint);
 
             Texture2D* subTex = subaruFrames[subaruFrame];
             DrawTexturePro(*subTex,
                 { 0, 0, (float)subTex->width, (float)subTex->height },
-                { 0, 0, (float)screenWidth, (float)screenHeight }, { 0, 0 }, 0.f, WHITE);
-
-            const char* howHighTxt = "HOW HIGH CAN YOU GET?";
-            int hwW = MeasureText(howHighTxt, 50);
-            DrawText(howHighTxt, (screenWidth - hwW) / 2, screenHeight / 2 - 60, 50, YELLOW);
-            const char* pressEnter = "PRESS ENTER TO PLAY";
-            int peW = MeasureText(pressEnter, 28);
-            DrawText(pressEnter, (screenWidth - peW) / 2, screenHeight / 2 + 20, 28, WHITE);
+                { imgX, imgY, imgW, imgH }, { 0, 0 }, 0.f, WHITE);
         }
         else if (currentScreen == CONTROLS)
         {
@@ -2904,6 +3070,280 @@ int main(void)
             DrawText("while you are close to them", 330, 400, 30, WHITE);
             DrawText("Return", 750, 900, 30, WHITE);
         }
+        else if (currentScreen == SETTINGS)
+        {
+            Vector2 mouse = GetMousePosition();
+
+            // ── Panel ─────────────────────────────────────────────────────────
+            const float panW = 700.f, panH = 580.f;
+            const float panX = (screenWidth  - panW) * 0.5f;
+            const float panY = (screenHeight - panH) * 0.5f;
+            DrawRectangle(0, 0, screenWidth, screenHeight, {10, 10, 20, 200});
+            DrawRectangleRounded({panX, panY, panW, panH}, 0.04f, 8, {18, 18, 30, 245});
+            DrawRectangleRoundedLinesEx({panX, panY, panW, panH}, 0.04f, 8, 2.f, {100, 160, 255, 200});
+
+            // Title
+            const char* titTxt = "OPTIONS";
+            DrawText(titTxt, (int)(panX + (panW - MeasureText(titTxt, 38)) * 0.5f), (int)(panY + 20), 38, {120, 220, 120, 255});
+
+            // ── Tab bar ───────────────────────────────────────────────────────
+            const char* tabNames[3] = { "CONTROLS", "SETTINGS", "DEBUG" };
+            const float tabY = panY + 70.f, tabH = 34.f;
+            const float tabW = panW / 3.f;
+            for (int t = 0; t < 3; t++) {
+                float tx = panX + t * tabW;
+                bool active = (settingsTab == t);
+                Color tabBg  = active ? Color{50, 100, 200, 220} : Color{30, 30, 55, 200};
+                Color tabFg  = active ? WHITE : Color{160, 160, 200, 255};
+                DrawRectangleRec({tx, tabY, tabW, tabH}, tabBg);
+                DrawRectangleLinesEx({tx, tabY, tabW, tabH}, 1.f, {80, 80, 140, 200});
+                int tw = MeasureText(tabNames[t], 18);
+                DrawText(tabNames[t], (int)(tx + (tabW - tw) * 0.5f), (int)(tabY + (tabH - 18) * 0.5f), 18, tabFg);
+                if (!active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, {tx, tabY, tabW, tabH}))
+                    settingsTab = t;
+            }
+
+            // ── Content area ──────────────────────────────────────────────────
+            const float cX = panX + 30.f, cY = tabY + tabH + 20.f;
+            const float cW = panW - 60.f;
+
+            // ── TAB 0: CONTROLS ───────────────────────────────────────────────
+            if (settingsTab == 0) {
+                struct CtrlRow { const char* action; const char* keys; };
+                static const CtrlRow rows[] = {
+                    { "Move Left / Right",     "A  /  D" },
+                    { "Jump",                  "SPACE" },
+                    { "Use Ability",           "E  or  Left Click" },
+                    { "Pick Up Item",          "F" },
+                    { "Enter Ladder",          "W or S  (near ladder)" },
+                    { "Climb Up / Down",       "W  /  S  (on ladder)" },
+                    { "Exit Ladder",           "A, D, SPACE or W" },
+                    { "Select Hotbar Slot",    "1  /  2  /  3" },
+                    { "Scroll Hotbar",         "Mouse Wheel" },
+                    { "Return to Menu",        "N" },
+                    { "Toggle Debug Panel",    "M  (in-game)" },
+                };
+                const int nRows = (int)(sizeof(rows)/sizeof(rows[0]));
+                const int rFS = 20, rGap = 30;
+                for (int i = 0; i < nRows; i++) {
+                    float ry = cY + i * rGap;
+                    DrawText(rows[i].action, (int)cX,         (int)ry, rFS, {200, 200, 220, 255});
+                    DrawText(rows[i].keys,   (int)(cX + cW - MeasureText(rows[i].keys, rFS)), (int)ry, rFS, YELLOW);
+                    DrawLine((int)cX, (int)(ry + rFS + 3), (int)(cX + cW), (int)(ry + rFS + 3), {60, 60, 90, 180});
+                }
+            }
+
+            // ── TAB 1: SETTINGS (volume sliders) ──────────────────────────────
+            if (settingsTab == 1) {
+                // volAbility goes 0–2 (0–200%), others 0–1 (0–100%)
+                struct SliderDef { const char* label; float* vol; float maxVal; };
+                SliderDef sliders[] = {
+                    { "Music",        &volMusic,   1.f },
+                    { "Abilities",    &volAbility, 2.f },
+                    { "Gameplay SFX", &volSFX,     1.f },
+                };
+                const float sX = cX + 160.f, sW = 350.f, sH = 14.f;
+                const int   lFS = 22;
+                const float rowGap = 85.f;
+                for (int i = 0; i < 3; i++) {
+                    float sy = cY + 30.f + i * rowGap;
+                    float& vol = *sliders[i].vol;
+                    float  mx  = sliders[i].maxVal;
+                    float  frac = vol / mx;  // 0–1 for rendering
+
+                    DrawText(sliders[i].label, (int)cX, (int)(sy - lFS * 0.5f + sH * 0.5f), lFS, RAYWHITE);
+
+                    // Track
+                    DrawRectangleRec({sX, sy, sW, sH}, {50, 50, 75, 200});
+                    // Fill
+                    Color fc = {90, 200, 100, 255};
+                    if (frac < 0.25f) fc = {220, 80, 80, 255};
+                    else if (frac < 0.5f) fc = {220, 180, 60, 255};
+                    DrawRectangleRec({sX, sy, sW * frac, sH}, fc);
+                    DrawRectangleLinesEx({sX, sy, sW, sH}, 1.f, {160, 160, 200, 255});
+                    // Handle
+                    float hx = sX + sW * frac;
+                    DrawCircle((int)hx, (int)(sy + sH * 0.5f), 10.f, WHITE);
+                    DrawCircle((int)hx, (int)(sy + sH * 0.5f), 7.f, fc);
+                    // Value pct
+                    DrawText(TextFormat("%d%%", (int)(vol / mx * 100.f + 0.5f)),
+                        (int)(sX + sW + 16), (int)(sy - 1), lFS, RAYWHITE);
+                    // Input
+                    Rectangle hitR = {sX - 12.f, sy - 10.f, sW + 24.f, sH + 20.f};
+                    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, hitR))
+                        vol = Clamp((mouse.x - sX) / sW, 0.f, 1.f) * mx;
+                }
+                SetMusicVolume(music, volMusic);
+            }
+
+            // ── TAB 2: DEBUG ──────────────────────────────────────────────────
+            if (settingsTab == 2) {
+                const float ROW_H     = 33.f;
+                const float clipH     = panY + panH - 52.f - cY;
+                const float sbW       = 8.f;   // scrollbar width
+                const float innerW    = cW - sbW - 4.f;
+                const int   lFS       = 17;
+
+                // Scroll with mouse wheel
+                if (CheckCollisionPointRec(mouse, {cX, cY, cW, clipH}))
+                    settingsDbgScroll -= GetMouseWheelMove() * ROW_H;
+                const int TOTAL_DBG_ROWS = 18;
+                float totalH = TOTAL_DBG_ROWS * ROW_H;
+                float maxDbgScroll = fmaxf(0.f, totalH - clipH);
+                settingsDbgScroll = Clamp(settingsDbgScroll, 0.f, maxDbgScroll);
+
+                BeginScissorMode((int)cX, (int)cY, (int)(innerW + 2.f), (int)clipH);
+                float ry = cY - settingsDbgScroll;
+
+                // Toggle button (full row)
+                auto togBtn = [&](const char* lbl, bool state, Color onCol, Color offCol) -> bool {
+                    Color bc = state ? onCol : offCol;
+                    Rectangle r = {cX, ry, innerW, ROW_H - 3.f};
+                    bool hov = CheckCollisionPointRec(mouse, r);
+                    if (hov) { bc.r=(unsigned char)fminf(bc.r+40,255); bc.g=(unsigned char)fminf(bc.g+40,255); bc.b=(unsigned char)fminf(bc.b+40,255); }
+                    DrawRectangleRec(r, bc); DrawRectangleLinesEx(r,1.f,{120,120,180,200});
+                    int tw=MeasureText(lbl,lFS); DrawText(lbl,(int)(r.x+(r.width-tw)/2),(int)(r.y+(r.height-lFS)/2),lFS,WHITE);
+                    ry += ROW_H;
+                    return hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+                };
+
+                // Int stepper (label  < value >)
+                auto stepper = [&](const char* lbl, int& val, int minV, int maxV) {
+                    DrawText(lbl,(int)(cX+4),(int)(ry+(ROW_H-lFS)/2),lFS,{200,200,220,255});
+                    float bw=30.f, bh=ROW_H-5.f;
+                    Rectangle mR={cX+innerW-bw*2-50.f,ry+2.f,bw,bh};
+                    Rectangle pR={cX+innerW-bw-2.f,   ry+2.f,bw,bh};
+                    bool mH=CheckCollisionPointRec(mouse,mR), pH=CheckCollisionPointRec(mouse,pR);
+                    DrawRectangleRec(mR,mH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(mR,1.f,{100,100,160,200});
+                    DrawRectangleRec(pR,pH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(pR,1.f,{100,100,160,200});
+                    DrawText("<",(int)(mR.x+(mR.width-MeasureText("<",lFS))/2),(int)(mR.y+(bh-lFS)/2),lFS,WHITE);
+                    DrawText(">",(int)(pR.x+(pR.width-MeasureText(">",lFS))/2),(int)(pR.y+(bh-lFS)/2),lFS,WHITE);
+                    const char* vs=TextFormat("%d",val);
+                    DrawText(vs,(int)(mR.x-MeasureText(vs,lFS)-6),(int)(ry+(ROW_H-lFS)/2),lFS,YELLOW);
+                    if (mH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)&&val>minV) val--;
+                    if (pH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)&&val<maxV) val++;
+                    ry+=ROW_H;
+                };
+
+                // Float stepper (label  - value +)
+                auto fstepper = [&](const char* lbl, float& val, float minV, float maxV, float step, const char* fmt) {
+                    DrawText(lbl,(int)(cX+4),(int)(ry+(ROW_H-lFS)/2),lFS,{200,200,220,255});
+                    float bw=30.f, bh=ROW_H-5.f;
+                    Rectangle mR={cX+innerW-bw*2-50.f,ry+2.f,bw,bh};
+                    Rectangle pR={cX+innerW-bw-2.f,   ry+2.f,bw,bh};
+                    bool mH=CheckCollisionPointRec(mouse,mR), pH=CheckCollisionPointRec(mouse,pR);
+                    DrawRectangleRec(mR,mH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(mR,1.f,{100,100,160,200});
+                    DrawRectangleRec(pR,pH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(pR,1.f,{100,100,160,200});
+                    DrawText("-",(int)(mR.x+(mR.width-MeasureText("-",lFS))/2),(int)(mR.y+(bh-lFS)/2),lFS,WHITE);
+                    DrawText("+",(int)(pR.x+(pR.width-MeasureText("+",lFS))/2),(int)(pR.y+(bh-lFS)/2),lFS,WHITE);
+                    const char* vs=TextFormat(fmt,val);
+                    DrawText(vs,(int)(mR.x-MeasureText(vs,lFS)-6),(int)(ry+(ROW_H-lFS)/2),lFS,YELLOW);
+                    if (mH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) val=fmaxf(minV,val-step);
+                    if (pH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) val=fminf(maxV,val+step);
+                    ry+=ROW_H;
+                };
+
+                // Action button — greyed out with note if gameplay-only and not in GAMEPLAY
+                auto actionBtn = [&](const char* lbl, Color col, bool gpOnly) -> bool {
+                    bool enabled = !gpOnly || (currentScreen == GAMEPLAY);
+                    Color bc = enabled ? col : Color{45,45,55,180};
+                    Rectangle r = {cX, ry, innerW, ROW_H-3.f};
+                    bool hov = enabled && CheckCollisionPointRec(mouse,r);
+                    if (hov) { bc.r=(unsigned char)fminf(bc.r+40,255); bc.g=(unsigned char)fminf(bc.g+40,255); bc.b=(unsigned char)fminf(bc.b+40,255); }
+                    DrawRectangleRec(r,bc); DrawRectangleLinesEx(r,1.f,{100,100,160,200});
+                    const char* txt = (!enabled) ? TextFormat("%s  (in-game only)",lbl) : lbl;
+                    int tw=MeasureText(txt,lFS); DrawText(txt,(int)(r.x+(r.width-tw)/2),(int)(r.y+(r.height-lFS)/2),lFS,enabled?WHITE:Color{130,130,140,255});
+                    ry+=ROW_H;
+                    return hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+                };
+
+                // ── Rows ──────────────────────────────────────────────────
+                if (togBtn(TextFormat("Debug Overlay (M key):  %s", dbgMenuOpen?"ON":"OFF"),
+                           dbgMenuOpen,{30,120,30,220},{80,30,30,220}))
+                    dbgMenuOpen = !dbgMenuOpen;
+
+                stepper("Lives",     lives,    0, maxLives);
+                stepper("Max Lives", maxLives, 1, 10);
+                if (maxLives < lives) lives = maxLives;
+
+                if (togBtn(TextFormat("Immortality:  %s", dbgImmortal?"ON":"OFF"),
+                           dbgImmortal,{0,115,0,220},{75,0,0,220}))
+                    dbgImmortal = !dbgImmortal;
+
+                if (togBtn(TextFormat("Flight:  %s", dbgFlight?"ON":"OFF"),
+                           dbgFlight,{0,70,160,220},{30,30,80,220}))
+                { dbgFlight=!dbgFlight; if(dbgFlight) dbgFlightNoCol=false; }
+
+                if (togBtn(TextFormat("No Clip:  %s", dbgFlightNoCol?"ON":"OFF"),
+                           dbgFlightNoCol,{0,105,145,220},{30,30,80,220}))
+                { dbgFlightNoCol=!dbgFlightNoCol; if(dbgFlightNoCol) dbgFlight=false; }
+
+                if (togBtn(TextFormat("Bloom:  %s", dbgBloomEnabled?"ON":"OFF"),
+                           dbgBloomEnabled,{80,0,160,220},{30,30,80,220}))
+                    dbgBloomEnabled = !dbgBloomEnabled;
+
+                fstepper("Bloom Intensity", dbgBloomIntensity, 0.f, 3.f,  0.1f,  "%.1f");
+                fstepper("Bloom Threshold", dbgBloomThreshold, 0.f, 1.f,  0.05f, "%.2f");
+
+                // Give Ability row
+                {
+                    DrawText("Give Ability:",(int)(cX+4),(int)(ry+(ROW_H-lFS)/2),lFS,{200,200,220,255});
+                    float bw=30.f, bh=ROW_H-5.f, giveW=170.f;
+                    Rectangle prevR={cX+innerW-bw*2-giveW-6.f, ry+2.f, bw,    bh};
+                    Rectangle giveR={cX+innerW-bw-giveW-4.f,   ry+2.f, giveW, bh};
+                    Rectangle nextR={cX+innerW-bw-2.f,          ry+2.f, bw,    bh};
+                    bool gpEnabled = (currentScreen == GAMEPLAY);
+                    bool pH=CheckCollisionPointRec(mouse,prevR), nH=CheckCollisionPointRec(mouse,nextR);
+                    bool gH=CheckCollisionPointRec(mouse,giveR)&&gpEnabled;
+                    DrawRectangleRec(prevR,pH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(prevR,1.f,{100,100,160,200});
+                    DrawRectangleRec(nextR,nH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(nextR,1.f,{100,100,160,200});
+                    DrawRectangleRec(giveR,gH?Color{100,60,130,255}:gpEnabled?Color{60,40,85,255}:Color{45,45,55,180}); DrawRectangleLinesEx(giveR,1.f,{100,100,160,200});
+                    DrawText("<",(int)(prevR.x+(prevR.width-MeasureText("<",lFS))/2),(int)(prevR.y+(bh-lFS)/2),lFS,WHITE);
+                    DrawText(">",(int)(nextR.x+(nextR.width-MeasureText(">",lFS))/2),(int)(nextR.y+(bh-lFS)/2),lFS,WHITE);
+                    const char* puName=gpEnabled?PU_INFO[dbgGivePUIdx].name:TextFormat("%s (in-game)",PU_INFO[dbgGivePUIdx].name);
+                    int gnw=MeasureText(puName,lFS-2); DrawText(puName,(int)(giveR.x+(giveR.width-gnw)/2),(int)(giveR.y+(bh-(lFS-2))/2),lFS-2,gpEnabled?YELLOW:Color{130,130,140,255});
+                    if (pH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgGivePUIdx=(dbgGivePUIdx+PU_COUNT-1)%PU_COUNT;
+                    if (nH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgGivePUIdx=(dbgGivePUIdx+1)%PU_COUNT;
+                    if (gH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) AddToHotbar((PowerupType)dbgGivePUIdx);
+                    ry+=ROW_H;
+                }
+
+                if (actionBtn("Spawn Barrel",    {50,80,50,220}, true))  SpawnBarrelFromPool(barrels, barrelPath);
+                if (actionBtn("Spawn Enemy",     {80,50,50,220}, true)) {
+                    for (auto& en:enemies) if(!en.active){ en.active=true; en.hitbox={player.x+(facingRight?80.f:-80.f),player.y-50.f,44.f,44.f}; en.velocity={0,0}; en.type=GRUNT; en.state=ES_IDLE; en.stateTimer=0; en.grounded=false; en.facingRight=facingRight; break; }
+                }
+                if (actionBtn("Summon Nuke",     {80,70,25,220}, true))  nukes.push_back({{player.x,player.y-60.f},true});
+                if (actionBtn("Summon Beatrice", {50,50,100,220},true))  beatrices.push_back({{player.x,player.y-60.f},true});
+
+                fstepper("Music Vol",     volMusic,   0.f, 1.f, 0.05f, "%.2f");
+                fstepper("SFX Vol",       volSFX,     0.f, 1.f, 0.05f, "%.2f");
+                fstepper("Abilities Vol", volAbility, 0.f, 2.f, 0.1f,  "%.1f");
+                fstepper("UI Vol",        volUI,      0.f, 1.f, 0.05f, "%.2f");
+                SetMusicVolume(music, volMusic);
+
+                EndScissorMode();
+
+                // Scrollbar
+                if (maxDbgScroll > 0.f) {
+                    float ratio  = clipH / totalH;
+                    float thumbH = fmaxf(clipH * ratio, 20.f);
+                    float thumbY = cY + (settingsDbgScroll / maxDbgScroll) * (clipH - thumbH);
+                    DrawRectangle((int)(cX+cW-sbW), (int)cY, (int)sbW, (int)clipH, {30,30,50,180});
+                    DrawRectangle((int)(cX+cW-sbW), (int)thumbY, (int)sbW, (int)thumbH, {110,110,195,255});
+                }
+            }
+
+            // ── Back button ───────────────────────────────────────────────────
+            const char* backTxt = "[ ESC ]  Back";
+            int backW2 = MeasureText(backTxt, 20);
+            float backX2 = panX + (panW - backW2) * 0.5f, backY2 = panY + panH - 42.f;
+            DrawText(backTxt, (int)backX2, (int)backY2, 20, {160, 160, 210, 255});
+            Rectangle backR2 = {backX2 - 10.f, backY2 - 4.f, (float)(backW2 + 20), 28.f};
+            if (CheckCollisionPointRec(mouse, backR2)) {
+                DrawRectangleLinesEx(backR2, 1.f, {160, 160, 255, 180});
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = MENU;
+            }
+        }
         else if (currentScreen == LEVEL_EDITOR)
         {
             editor.Draw();
@@ -2912,7 +3352,8 @@ int main(void)
         {
             Camera2D cam = { 0 };
             cam.zoom = 1.0f;
-            cam.offset = { nukeShakeOffset.x + deathShakeOffset.x, nukeShakeOffset.y + deathShakeOffset.y };
+            cam.offset = { nukeShakeOffset.x + deathShakeOffset.x + dashShakeOffset.x,
+                           nukeShakeOffset.y + deathShakeOffset.y + dashShakeOffset.y };
 
             gameLighting.BeginScene(cam);
 
@@ -3073,11 +3514,13 @@ int main(void)
                     { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
             }
 
-            // 6. House
+            // 6. House (only render when cave is visible)
+            if (!currentLevelData.hasCave || currentLevelData.caveVisible)
             {
                 Texture2D& houseTex = houseIsSnowed ? House2 : House1;
                 DrawTexturePro(houseTex, { 0, 0, HOUSE_NATIVE_W, HOUSE_NATIVE_H }, { houseX, houseY, houseW, houseH }, {}, 0.f, WHITE);
-                if (houseIsSnowed) {
+                if (houseIsSnowed && currentLevelId == 1) {
+                    // Snow floor only on level 1
                     float sfW = FLOOR_NATIVE_W * FLOOR_DRAW_SCALE, sfH = FLOOR_NATIVE_H * FLOOR_DRAW_SCALE;
                     DrawTexturePro(SnowFloor, { 0, 0, FLOOR_NATIVE_W, FLOOR_NATIVE_H }, { houseX, 865.0f, sfW, sfH }, {}, 0.f, WHITE);
                 }
@@ -3179,18 +3622,46 @@ int main(void)
                     if (!facingRight && !onLadder) src.width *= -1;
                     DrawTexturePro(*image, src, dest, {}, 0.f, WHITE);
 
-                    if (playerHasNuke && !isDying)
+                    // Heavy item sprite above player
+                    if (isCarryingHeavy && !isDying)
                     {
-                        float nkW = NUKE_NATIVE_W * (NUKE_SCALE * 0.25f) * scale;
-                        float nkH = NUKE_NATIVE_H * (NUKE_SCALE * 0.25f) * scale;
-                        float nkX = player.x + dest.width * 0.5f - nkW * 0.5f;
-                        float nukeOffsetY = 5.0f;
-                        bool  moving = (!onLadder && !isJumping && walkFrame != 0);
-                        if (moving) nukeOffsetY = (walkFrame == 0) ? 5.0f : 10.0f;
-                        float nkY = drawY - nkH - 2.0f + nukeOffsetY;
-                        Rectangle nukeSrc = { 0, 0, NUKE_NATIVE_W, NUKE_NATIVE_H };
-                        if (!facingRight) nukeSrc.width *= -1;
-                        DrawTexturePro(Nuke, nukeSrc, { nkX, nkY, nkW, nkH }, {}, 0.f, WHITE);
+                        Texture2D* heavyTex = nullptr;
+                        switch (hotbar[hotbarSlot].type) {
+                        case PU_NUKE_PU:       heavyTex = &Nuke;         break;
+                        case PU_LARPER:        heavyTex = &LadderPart;   break;
+                        case PU_EXTRA_LIFE:    heavyTex = &texGoldHeart; break;
+                        case PU_ONE_MORE_LARP: heavyTex = &texHeart;     break;
+                        default: break;
+                        }
+                        if (heavyTex && heavyTex->id > 0) {
+                            float itemH = 40.f;
+                            float itemW = itemH * (float)heavyTex->width / (float)heavyTex->height;
+                            float itemX = player.x + dest.width * 0.5f - itemW * 0.5f;
+                            bool  moving = (!onLadder && !isJumping && walkFrame != 0);
+                            float bobY = moving ? 10.f : 4.f;
+                            float itemY = drawY - itemH - 2.f + bobY;
+                            Rectangle itemSrc = { 0, 0, (float)heavyTex->width, (float)heavyTex->height };
+                            if (!facingRight) itemSrc.width *= -1;
+                            DrawTexturePro(*heavyTex, itemSrc, { itemX, itemY, itemW, itemH }, {}, 0.f, WHITE);
+                        }
+                    }
+
+                    // Shield animation (drawn while inside scene RT)
+                    if (shieldActive && !isDying)
+                    {
+                        shieldAnimTimer += dt;
+                        if (shieldAnimTimer >= 0.1f) {
+                            shieldAnimTimer = fmodf(shieldAnimTimer, 0.1f);
+                            shieldAnimFrame = 1 - shieldAnimFrame;
+                        }
+                        Texture2D* shTex = (shieldAnimFrame == 0) ? &texShield1 : &texShield2;
+                        if (shTex->id > 0) {
+                            float shW = shTex->width * 3.5f, shH = shTex->height * 3.5f;
+                            float shX = player.x + dest.width * 0.5f - shW * 0.5f;
+                            float shY = player.y + player.height * 0.5f - shH * 0.5f;
+                            DrawTexturePro(*shTex, { 0,0,(float)shTex->width,(float)shTex->height },
+                                { shX, shY, shW, shH }, {}, 0.f, { 255,255,255,210 });
+                        }
                     }
                 }
             }
@@ -3257,6 +3728,18 @@ int main(void)
             // ── Lighting composite ────────────────────────────────────────────
             gameLighting.EndScene();
             gameLighting.BakeOccludersFromLevel(currentLevelData, cam);
+            if (shieldActive) {
+                LightData shieldGlow;
+                shieldGlow.x = player.x + player.width * 0.5f;
+                shieldGlow.y = player.y + player.height * 0.5f;
+                shieldGlow.radius = 130.f;
+                shieldGlow.r = 0.45f; shieldGlow.g = 0.75f; shieldGlow.b = 1.f;
+                shieldGlow.intensity = 0.8f;
+                shieldGlow.pulseFreq = 3.f; shieldGlow.pulseAmp = 0.25f;
+                shieldGlow.enabled = true;
+                gameLighting.AddRuntimeLight(shieldGlow);
+            }
+            gameLighting.SetBloom(dbgBloomEnabled, dbgBloomThreshold, dbgBloomIntensity);
             gameLighting.Composite(currentLevelData, cam);
 
             // 17. Props (unlit / overlay)
@@ -3306,12 +3789,23 @@ int main(void)
             // 19. "Press F" prompt near nuke / beatrice ground items
             if (!isDying)
             {
+                const float fbW = (FButton.id > 0) ? (float)FButton.width  * 2.f : 24.f;
+                const float fbH = (FButton.id > 0) ? (float)FButton.height * 2.f : 24.f;
+                auto DrawFPrompt = [&](float cx, float topY) {
+                    float dx = cx - fbW * 0.5f, dy = topY - fbH - 4.f;
+                    if (FButton.id > 0)
+                        DrawTexturePro(FButton,
+                            { 0, 0, (float)FButton.width, (float)FButton.height },
+                            { dx, dy, fbW, fbH }, { 0, 0 }, 0.f, WHITE);
+                    else
+                        DrawText("[F]", (int)dx, (int)dy, 18, YELLOW);
+                };
                 bool shown = false;
                 const float nkW = NUKE_NATIVE_W * NUKE_SCALE, nkH = NUKE_NATIVE_H * NUKE_SCALE;
                 for (const auto& nk : nukes) {
                     if (!nk.active) continue;
                     if (CheckCollisionRecs(player, { nk.pos.x, nk.pos.y, nkW, nkH })) {
-                        DrawText("[F]", (int)(nk.pos.x + nkW * .5f - 12), (int)(nk.pos.y - 22), 18, YELLOW);
+                        DrawFPrompt(nk.pos.x + nkW * 0.5f, nk.pos.y);
                         shown = true; break;
                     }
                 }
@@ -3321,7 +3815,7 @@ int main(void)
                     for (const auto& bc : beatrices) {
                         if (!bc.active) continue;
                         if (CheckCollisionRecs(player, { bc.pos.x, bc.pos.y - bcH, bcW, bcH })) {
-                            DrawText("[F]", (int)(bc.pos.x + bcW * .5f - 12), (int)(bc.pos.y - bcH - 24), 18, YELLOW);
+                            DrawFPrompt(bc.pos.x + bcW * 0.5f, bc.pos.y - bcH);
                             break;
                         }
                     }
@@ -3330,15 +3824,43 @@ int main(void)
 
             // 20. HUD (after lighting — always full brightness)
             {
-                // Lives
-                for (int i = 0; i < lives; i++) DrawText("<3", 20 + i * 40, 10, 30, RED);
-                // Score
-                { const char* scoreTxt = TextFormat("SCORE: %u", score);
-                  int sw = MeasureText(scoreTxt, 26);
-                  DrawText(scoreTxt, screenWidth - sw - 12, 10, 26, YELLOW); }
-                // Coins
-                { const char* coinStr = TextFormat("C:%d", coins);
-                  DrawText(coinStr, screenWidth / 2 - MeasureText(coinStr,20)/2, 10, 20, GOLD); }
+                // Lives: active hearts full-bright, lost hearts grayed out at 50% opacity
+                {
+                    const float hW = 30.f, hH = 30.f, hGap = 6.f;
+                    for (int i = 0; i < maxLives; i++) {
+                        Texture2D* hTex = (i < 3) ? &texHeart : &texGoldHeart;
+                        float hx = 14.f + i * (hW + hGap);
+                        bool active = (i < lives);
+                        Color tint = active ? WHITE : Color{80, 80, 80, 128};
+                        if (hTex->id > 0) {
+                            DrawTexturePro(*hTex,
+                                { 0,0,(float)hTex->width,(float)hTex->height },
+                                { hx, 10.f, hW, hH }, {}, 0.f, tint);
+                        } else {
+                            Color col = active ? (i < 3 ? RED : GOLD) : Color{80, 80, 80, 128};
+                            DrawText(i < 3 ? "<3" : "G<3", (int)hx, 10, 24, col);
+                        }
+                    }
+                }
+                // Coins (score = coins, displayed with icon)
+                {
+                    const char* coinTxt = TextFormat("%d", coins);
+                    int fontSize = 26;
+                    int iconSize = 26;
+                    int gap = 6;
+                    int txtW = MeasureText(coinTxt, fontSize);
+                    int totalW = iconSize + gap + txtW;
+                    int startX = screenWidth - totalW - 12;
+                    if (texCoin.id > 0) {
+                        DrawTexturePro(texCoin,
+                            { 0,0,(float)texCoin.width,(float)texCoin.height },
+                            { (float)startX, 7.f, (float)iconSize, (float)iconSize }, {}, 0.f, WHITE);
+                    } else {
+                        DrawCircle(startX + iconSize/2, 10 + iconSize/2, iconSize * 0.45f, GOLD);
+                        DrawCircle(startX + iconSize/2, 10 + iconSize/2, iconSize * 0.3f, Color{255,200,50,255});
+                    }
+                    DrawText(coinTxt, startX + iconSize + gap, 10, fontSize, GOLD);
+                }
                 // ── Hotbar (bottom-right, vertical) ──────────────────────────
                 {
                     static const float HB_W = 64.f, HB_H = 96.f;
@@ -3351,16 +3873,27 @@ int main(void)
                         const HotbarSlot& s = hotbar[i];
                         Color bg = (i == hotbarSlot) ? Color{255,220,0,180} : Color{40,40,40,180};
                         DrawRectangle((int)hbX, (int)slotY, (int)HB_W, (int)HB_H, bg);
-                        DrawRectangleLines((int)hbX, (int)slotY, (int)HB_W, (int)HB_H, i == hotbarSlot ? YELLOW : DARKGRAY);
-                        DrawText(TextFormat("%d", i+1), (int)hbX + 4, (int)slotY + 4, 12, WHITE);
+                        // Rarity-colored border (yellow if selected slot)
+                        Color slotBorder = DARKGRAY;
                         if (s.type != PU_NONE) {
                             int ri = PU_INFO[(int)s.type].rarityIdx;
-                            if (ri>=0 && ri<CARD_TEX_COUNT && cardTextures[ri].id>0)
-                                DrawTexturePro(cardTextures[ri],
-                                    {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
-                                    {hbX,slotY,HB_W,HB_H},{0,0},0.f,WHITE);
-                            int nw = MeasureText(PU_INFO[(int)s.type].name, 9);
-                            DrawText(PU_INFO[(int)s.type].name, (int)(hbX + HB_W/2 - nw/2), (int)(slotY+HB_H-13), 9, WHITE);
+                            if (ri >= 0 && ri < 6) slotBorder = rarityBorderCols[ri];
+                        }
+                        DrawRectangleLinesEx({hbX, slotY, HB_W, HB_H},
+                            (i == hotbarSlot) ? 3.f : 2.f,
+                            i == hotbarSlot ? YELLOW : slotBorder);
+                        DrawText(TextFormat("%d", i+1), (int)hbX + 4, (int)slotY + 4, 12, WHITE);
+                        if (s.type != PU_NONE) {
+                            // Item texture only — no card background
+                            Texture2D* iTex = GetItemTex(s.type);
+                            if (iTex && iTex->id > 0) {
+                                float pad = 8.f;
+                                Rectangle slotInner = { hbX+pad, slotY+pad, HB_W-pad*2.f, HB_H-pad*2.f };
+                                Rectangle fitR = FitTexRect(slotInner, (float)iTex->width, (float)iTex->height);
+                                DrawTexturePro(*iTex,
+                                    {0.f, 0.f, (float)iTex->width, (float)iTex->height},
+                                    fitR, {}, 0.f, WHITE);
+                            }
                             const PowerupInfo& info = PU_INFO[(int)s.type];
                             if (info.passive) {
                                 DrawText("AUTO", (int)(hbX - 42), (int)(slotY + HB_H/2 - 8), 13, LIME);
@@ -3406,13 +3939,6 @@ int main(void)
                     unsigned char a = (unsigned char)(t * 255.f);
                     DrawRectangle(0, 0, screenWidth, screenHeight, {0,0,0,a});
                 }
-                // Debug text
-                DrawText("Prueba de Donkey Kong_1", 10, screenHeight - 30, 20, WHITE);
-                if (onLadder) DrawText(TextFormat("Ladder: %.2f", ladderProgress), 10, screenHeight - 55, 18, YELLOW);
-                {
-                    int ac = 0; for (const auto& b : barrels) if (b.active) ac++;
-                    DrawText(TextFormat("Barrels: %d  Interval: %.1fs", ac, (float)ACTIVE_SPAWN_INTERVAL), 10, screenHeight - 80, 16, GRAY);
-                }
                 if (debugPath) DrawBarrelPathDebug(barrelPath, barrels, screenHeight);
             }
 
@@ -3444,6 +3970,223 @@ int main(void)
                     DrawRectangle(0, 0, screenWidth, screenHeight, { 0,0,0,(unsigned char)(t * 255.0f) });
                 }
             }
+
+            // ── Pause overlay ─────────────────────────────────────────────────
+            if (isPaused)
+            {
+                Vector2 pauseMouse = GetMousePosition();
+
+                // Darkened background
+                DrawRectangle(0, 0, screenWidth, screenHeight, {0, 0, 0, 172});
+
+                // Panel
+                const float pW = 700.f, pH2 = 580.f;
+                const float pX = (screenWidth  - pW)  * 0.5f;
+                const float pY = (screenHeight - pH2) * 0.5f;
+                DrawRectangleRounded({pX, pY, pW, pH2}, 0.04f, 8, {18, 18, 30, 252});
+                DrawRectangleRoundedLinesEx({pX, pY, pW, pH2}, 0.04f, 8, 2.f, {100, 160, 255, 220});
+
+                // Title
+                const char* pTitle = "PAUSED";
+                DrawText(pTitle, (int)(pX + (pW - MeasureText(pTitle, 38)) * 0.5f), (int)(pY + 18), 38, {120, 220, 120, 255});
+
+                // Tab bar
+                const char* pTabNames[3] = { "CONTROLS", "SETTINGS", "DEBUG" };
+                const float pTabY = pY + 68.f, pTabH = 34.f, pTabW = pW / 3.f;
+                for (int t = 0; t < 3; t++) {
+                    float tx = pX + t * pTabW;
+                    bool active = (settingsTab == t);
+                    DrawRectangleRec({tx, pTabY, pTabW, pTabH}, active ? Color{50,100,200,220} : Color{30,30,55,200});
+                    DrawRectangleLinesEx({tx, pTabY, pTabW, pTabH}, 1.f, {80,80,140,200});
+                    int tw = MeasureText(pTabNames[t], 18);
+                    DrawText(pTabNames[t], (int)(tx+(pTabW-tw)*0.5f), (int)(pTabY+(pTabH-18)*0.5f), 18, active?WHITE:Color{160,160,200,255});
+                    if (!active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(pauseMouse,{tx,pTabY,pTabW,pTabH}))
+                        settingsTab = t;
+                }
+
+                const float pcX = pX + 30.f, pcY = pTabY + pTabH + 20.f, pcW = pW - 60.f;
+
+                // ── Controls tab ──────────────────────────────────────────────
+                if (settingsTab == 0) {
+                    struct CR { const char* action; const char* keys; };
+                    static const CR cr[] = {
+                        {"Move Left / Right",  "A  /  D"},
+                        {"Jump",               "SPACE"},
+                        {"Use Ability",        "E  or  Left Click"},
+                        {"Pick Up Item",       "F"},
+                        {"Enter Ladder",       "W or S  (near ladder)"},
+                        {"Climb Up / Down",    "W  /  S  (on ladder)"},
+                        {"Exit Ladder",        "A, D, SPACE or W"},
+                        {"Select Hotbar Slot", "1  /  2  /  3"},
+                        {"Scroll Hotbar",      "Mouse Wheel"},
+                        {"Pause / Settings",   "ESC"},
+                        {"Toggle Debug Panel", "M  (in-game)"},
+                    };
+                    const int nCR = (int)(sizeof(cr)/sizeof(cr[0]));
+                    const int rFS = 20, rGap = 30;
+                    for (int i = 0; i < nCR; i++) {
+                        float ry = pcY + i * rGap;
+                        DrawText(cr[i].action, (int)pcX, (int)ry, rFS, {200,200,220,255});
+                        DrawText(cr[i].keys, (int)(pcX+pcW-MeasureText(cr[i].keys,rFS)), (int)ry, rFS, YELLOW);
+                        DrawLine((int)pcX,(int)(ry+rFS+3),(int)(pcX+pcW),(int)(ry+rFS+3),{60,60,90,180});
+                    }
+                }
+
+                // ── Settings tab (volume sliders) ─────────────────────────────
+                if (settingsTab == 1) {
+                    struct SD { const char* label; float* vol; float maxVal; };
+                    SD sldrs[] = {{"Music",&volMusic,1.f},{"Abilities",&volAbility,2.f},{"Gameplay SFX",&volSFX,1.f}};
+                    const float sX = pcX+160.f, sW = 350.f, sH = 14.f;
+                    const float rowGap = 85.f;
+                    for (int i = 0; i < 3; i++) {
+                        float sy = pcY + 30.f + i * rowGap;
+                        float& vol = *sldrs[i].vol;
+                        float  mx  = sldrs[i].maxVal;
+                        float  frac = vol / mx;
+                        DrawText(sldrs[i].label, (int)pcX, (int)(sy - 11.f + sH * 0.5f), 22, RAYWHITE);
+                        DrawRectangleRec({sX,sy,sW,sH},{50,50,75,200});
+                        Color fc = frac<0.25f?Color{220,80,80,255}:frac<0.5f?Color{220,180,60,255}:Color{90,200,100,255};
+                        DrawRectangleRec({sX,sy,sW*frac,sH},fc);
+                        DrawRectangleLinesEx({sX,sy,sW,sH},1.f,{160,160,200,255});
+                        float hx = sX+sW*frac;
+                        DrawCircle((int)hx,(int)(sy+sH*0.5f),10.f,WHITE);
+                        DrawCircle((int)hx,(int)(sy+sH*0.5f),7.f,fc);
+                        DrawText(TextFormat("%d%%",(int)(vol/mx*100.f+0.5f)),(int)(sX+sW+16),(int)(sy-1),22,RAYWHITE);
+                        Rectangle hitR={sX-12.f,sy-10.f,sW+24.f,sH+20.f};
+                        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(pauseMouse,hitR))
+                            vol = Clamp((pauseMouse.x-sX)/sW,0.f,1.f)*mx;
+                    }
+                    SetMusicVolume(music,volMusic);
+                }
+
+                // ── Debug tab ─────────────────────────────────────────────────
+                if (settingsTab == 2) {
+                    const float ROW_H  = 33.f;
+                    const float clipH  = pY + pH2 - 52.f - pcY;
+                    const float sbW    = 8.f;
+                    const float innerW = pcW - sbW - 4.f;
+                    const int   lFS    = 17;
+                    if (CheckCollisionPointRec(pauseMouse,{pcX,pcY,pcW,clipH}))
+                        settingsDbgScroll -= GetMouseWheelMove() * ROW_H;
+                    const int TOTAL_ROWS = 18;
+                    float totalH2 = TOTAL_ROWS * ROW_H;
+                    float maxScroll2 = fmaxf(0.f, totalH2 - clipH);
+                    settingsDbgScroll = Clamp(settingsDbgScroll, 0.f, maxScroll2);
+                    BeginScissorMode((int)pcX,(int)pcY,(int)(innerW+2.f),(int)clipH);
+                    float ry2 = pcY - settingsDbgScroll;
+
+                    auto togBtn2 = [&](const char* lbl, bool state, Color onC, Color offC) -> bool {
+                        Color bc = state ? onC : offC;
+                        Rectangle r = {pcX, ry2, innerW, ROW_H-3.f};
+                        bool hov = CheckCollisionPointRec(pauseMouse,r);
+                        if (hov){bc.r=(unsigned char)fminf(bc.r+40,255);bc.g=(unsigned char)fminf(bc.g+40,255);bc.b=(unsigned char)fminf(bc.b+40,255);}
+                        DrawRectangleRec(r,bc); DrawRectangleLinesEx(r,1.f,{120,120,180,200});
+                        int tw=MeasureText(lbl,lFS); DrawText(lbl,(int)(r.x+(r.width-tw)/2),(int)(r.y+(r.height-lFS)/2),lFS,WHITE);
+                        ry2+=ROW_H; return hov&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+                    };
+                    auto step2 = [&](const char* lbl, int& val, int mn, int mx) {
+                        DrawText(lbl,(int)(pcX+4),(int)(ry2+(ROW_H-lFS)/2),lFS,{200,200,220,255});
+                        float bw=30.f,bh=ROW_H-5.f;
+                        Rectangle mR={pcX+innerW-bw*2-50.f,ry2+2.f,bw,bh}, pR={pcX+innerW-bw-2.f,ry2+2.f,bw,bh};
+                        bool mH=CheckCollisionPointRec(pauseMouse,mR),pH=CheckCollisionPointRec(pauseMouse,pR);
+                        DrawRectangleRec(mR,mH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(mR,1.f,{100,100,160,200});
+                        DrawRectangleRec(pR,pH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(pR,1.f,{100,100,160,200});
+                        DrawText("<",(int)(mR.x+(mR.width-MeasureText("<",lFS))/2),(int)(mR.y+(bh-lFS)/2),lFS,WHITE);
+                        DrawText(">",(int)(pR.x+(pR.width-MeasureText(">",lFS))/2),(int)(pR.y+(bh-lFS)/2),lFS,WHITE);
+                        const char* vs=TextFormat("%d",val);
+                        DrawText(vs,(int)(mR.x-MeasureText(vs,lFS)-6),(int)(ry2+(ROW_H-lFS)/2),lFS,YELLOW);
+                        if (mH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)&&val>mn) val--;
+                        if (pH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)&&val<mx) val++;
+                        ry2+=ROW_H;
+                    };
+                    auto fstep2 = [&](const char* lbl, float& val, float mn, float mx, float step, const char* fmt) {
+                        DrawText(lbl,(int)(pcX+4),(int)(ry2+(ROW_H-lFS)/2),lFS,{200,200,220,255});
+                        float bw=30.f,bh=ROW_H-5.f;
+                        Rectangle mR={pcX+innerW-bw*2-50.f,ry2+2.f,bw,bh}, pR={pcX+innerW-bw-2.f,ry2+2.f,bw,bh};
+                        bool mH=CheckCollisionPointRec(pauseMouse,mR),pH=CheckCollisionPointRec(pauseMouse,pR);
+                        DrawRectangleRec(mR,mH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(mR,1.f,{100,100,160,200});
+                        DrawRectangleRec(pR,pH?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(pR,1.f,{100,100,160,200});
+                        DrawText("-",(int)(mR.x+(mR.width-MeasureText("-",lFS))/2),(int)(mR.y+(bh-lFS)/2),lFS,WHITE);
+                        DrawText("+",(int)(pR.x+(pR.width-MeasureText("+",lFS))/2),(int)(pR.y+(bh-lFS)/2),lFS,WHITE);
+                        const char* vs=TextFormat(fmt,val);
+                        DrawText(vs,(int)(mR.x-MeasureText(vs,lFS)-6),(int)(ry2+(ROW_H-lFS)/2),lFS,YELLOW);
+                        if (mH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) val=fmaxf(mn,val-step);
+                        if (pH&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) val=fminf(mx,val+step);
+                        ry2+=ROW_H;
+                    };
+                    auto actBtn2 = [&](const char* lbl, Color col) -> bool {
+                        Color bc=col; Rectangle r={pcX,ry2,innerW,ROW_H-3.f};
+                        bool hov=CheckCollisionPointRec(pauseMouse,r);
+                        if (hov){bc.r=(unsigned char)fminf(bc.r+40,255);bc.g=(unsigned char)fminf(bc.g+40,255);bc.b=(unsigned char)fminf(bc.b+40,255);}
+                        DrawRectangleRec(r,bc); DrawRectangleLinesEx(r,1.f,{100,100,160,200});
+                        int tw=MeasureText(lbl,lFS); DrawText(lbl,(int)(r.x+(r.width-tw)/2),(int)(r.y+(r.height-lFS)/2),lFS,WHITE);
+                        ry2+=ROW_H; return hov&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+                    };
+
+                    if (togBtn2(TextFormat("Debug Overlay (M key):  %s",dbgMenuOpen?"ON":"OFF"),dbgMenuOpen,{30,120,30,220},{80,30,30,220})) dbgMenuOpen=!dbgMenuOpen;
+                    step2("Lives",lives,0,maxLives);
+                    step2("Max Lives",maxLives,1,10);
+                    if (maxLives<lives) lives=maxLives;
+                    if (togBtn2(TextFormat("Immortality:  %s",dbgImmortal?"ON":"OFF"),dbgImmortal,{0,115,0,220},{75,0,0,220})) dbgImmortal=!dbgImmortal;
+                    if (togBtn2(TextFormat("Flight:  %s",dbgFlight?"ON":"OFF"),dbgFlight,{0,70,160,220},{30,30,80,220})) {dbgFlight=!dbgFlight;if(dbgFlight)dbgFlightNoCol=false;}
+                    if (togBtn2(TextFormat("No Clip:  %s",dbgFlightNoCol?"ON":"OFF"),dbgFlightNoCol,{0,105,145,220},{30,30,80,220})) {dbgFlightNoCol=!dbgFlightNoCol;if(dbgFlightNoCol)dbgFlight=false;}
+                    if (togBtn2(TextFormat("Bloom:  %s",dbgBloomEnabled?"ON":"OFF"),dbgBloomEnabled,{80,0,160,220},{30,30,80,220})) dbgBloomEnabled=!dbgBloomEnabled;
+                    fstep2("Bloom Intensity",dbgBloomIntensity,0.f,3.f,0.1f,"%.1f");
+                    fstep2("Bloom Threshold",dbgBloomThreshold,0.f,1.f,0.05f,"%.2f");
+                    {
+                        DrawText("Give Ability:",(int)(pcX+4),(int)(ry2+(ROW_H-lFS)/2),lFS,{200,200,220,255});
+                        float bw=30.f,bh=ROW_H-5.f,gW=170.f;
+                        Rectangle prv={pcX+innerW-bw*2-gW-6.f,ry2+2.f,bw,bh};
+                        Rectangle gvR={pcX+innerW-bw-gW-4.f,  ry2+2.f,gW,bh};
+                        Rectangle nxt={pcX+innerW-bw-2.f,      ry2+2.f,bw,bh};
+                        bool pH2=CheckCollisionPointRec(pauseMouse,prv),nH2=CheckCollisionPointRec(pauseMouse,nxt),gH2=CheckCollisionPointRec(pauseMouse,gvR);
+                        DrawRectangleRec(prv,pH2?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(prv,1.f,{100,100,160,200});
+                        DrawRectangleRec(nxt,nH2?Color{80,80,140,255}:Color{50,50,80,255}); DrawRectangleLinesEx(nxt,1.f,{100,100,160,200});
+                        DrawRectangleRec(gvR,gH2?Color{100,60,130,255}:Color{60,40,85,255}); DrawRectangleLinesEx(gvR,1.f,{100,100,160,200});
+                        DrawText("<",(int)(prv.x+(prv.width-MeasureText("<",lFS))/2),(int)(prv.y+(bh-lFS)/2),lFS,WHITE);
+                        DrawText(">",(int)(nxt.x+(nxt.width-MeasureText(">",lFS))/2),(int)(nxt.y+(bh-lFS)/2),lFS,WHITE);
+                        const char* pn=PU_INFO[dbgGivePUIdx].name;
+                        int gnw=MeasureText(pn,lFS-2); DrawText(pn,(int)(gvR.x+(gvR.width-gnw)/2),(int)(gvR.y+(bh-(lFS-2))/2),lFS-2,YELLOW);
+                        if (pH2&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgGivePUIdx=(dbgGivePUIdx+PU_COUNT-1)%PU_COUNT;
+                        if (nH2&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgGivePUIdx=(dbgGivePUIdx+1)%PU_COUNT;
+                        if (gH2&&IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) AddToHotbar((PowerupType)dbgGivePUIdx);
+                        ry2+=ROW_H;
+                    }
+                    if (actBtn2("Spawn Barrel",   {50,80,50,220}))  SpawnBarrelFromPool(barrels,barrelPath);
+                    if (actBtn2("Spawn Enemy",    {80,50,50,220}))  { for (auto& en:enemies) if(!en.active){en.active=true;en.hitbox={player.x+(facingRight?80.f:-80.f),player.y-50.f,44.f,44.f};en.velocity={0,0};en.type=GRUNT;en.state=ES_IDLE;en.stateTimer=0;en.grounded=false;en.facingRight=facingRight;break;} }
+                    if (actBtn2("Summon Nuke",    {80,70,25,220}))  nukes.push_back({{player.x,player.y-60.f},true});
+                    if (actBtn2("Summon Beatrice",{50,50,100,220})) beatrices.push_back({{player.x,player.y-60.f},true});
+                    fstep2("Music Vol",    volMusic,  0.f,1.f,0.05f,"%.2f");
+                    fstep2("SFX Vol",      volSFX,    0.f,1.f,0.05f,"%.2f");
+                    fstep2("Ability Vol",  volAbility,0.f,2.f,0.1f, "%.1f");
+                    fstep2("UI Vol",       volUI,     0.f,1.f,0.05f,"%.2f");
+                    SetMusicVolume(music,volMusic);
+                    EndScissorMode();
+                    if (maxScroll2 > 0.f) {
+                        float ratio=clipH/totalH2, thumbH=fmaxf(clipH*ratio,20.f);
+                        float thumbY=pcY+(settingsDbgScroll/maxScroll2)*(clipH-thumbH);
+                        DrawRectangle((int)(pcX+pcW-sbW),(int)pcY,(int)sbW,(int)clipH,{30,30,50,180});
+                        DrawRectangle((int)(pcX+pcW-sbW),(int)thumbY,(int)sbW,(int)thumbH,{110,110,195,255});
+                    }
+                }
+
+                // Bottom buttons
+                const float btnBH = 34.f, btnBW = 200.f, btnBY = pY + pH2 - 46.f;
+                Rectangle resumeR = {pX + pW*0.25f - btnBW*0.5f, btnBY, btnBW, btnBH};
+                Rectangle toMenuR = {pX + pW*0.75f - btnBW*0.5f, btnBY, btnBW, btnBH};
+                bool resHov  = CheckCollisionPointRec(pauseMouse, resumeR);
+                bool menHov  = CheckCollisionPointRec(pauseMouse, toMenuR);
+                DrawRectangleRec(resumeR, resHov?Color{40,160,40,245}:Color{25,100,25,220});
+                DrawRectangleLinesEx(resumeR, 1.f, {100,255,100,200});
+                const char* resTxt = "RESUME  (ESC)";
+                DrawText(resTxt,(int)(resumeR.x+(resumeR.width-MeasureText(resTxt,18))*0.5f),(int)(resumeR.y+(btnBH-18)*0.5f),18,WHITE);
+                DrawRectangleRec(toMenuR, menHov?Color{160,40,40,245}:Color{100,25,25,220});
+                DrawRectangleLinesEx(toMenuR, 1.f, {255,100,100,200});
+                const char* menTxt = "RETURN TO MENU";
+                DrawText(menTxt,(int)(toMenuR.x+(toMenuR.width-MeasureText(menTxt,18))*0.5f),(int)(toMenuR.y+(btnBH-18)*0.5f),18,WHITE);
+                if (resHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) isPaused = false;
+                if (menHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { isPaused = false; currentScreen = MENU; }
+            }
         }
         else if (currentScreen == GAME_OVER)
         {
@@ -3468,9 +4211,19 @@ int main(void)
             else
             {
                 DrawText("GAME OVER", 300, 380, 50, RED);
-                const char* scoreTxt = TextFormat("SCORE: %u", score);
-                int sw = MeasureText(scoreTxt, 32);
-                DrawText(scoreTxt, screenWidth / 2 - sw / 2, 450, 32, YELLOW);
+                {
+                    const char* coinTxt = TextFormat("%d", coins);
+                    int fontSize = 32, iconSize = 32, gap = 8;
+                    int txtW = MeasureText(coinTxt, fontSize);
+                    int totalW = iconSize + gap + txtW;
+                    int sx = screenWidth / 2 - totalW / 2;
+                    if (texCoin.id > 0)
+                        DrawTexturePro(texCoin, {0,0,(float)texCoin.width,(float)texCoin.height},
+                            {(float)sx, 450.f, (float)iconSize, (float)iconSize}, {}, 0.f, WHITE);
+                    else { DrawCircle(sx+iconSize/2, 450+iconSize/2, iconSize*0.45f, GOLD);
+                           DrawCircle(sx+iconSize/2, 450+iconSize/2, iconSize*0.3f, {255,200,50,255}); }
+                    DrawText(coinTxt, sx + iconSize + gap, 450, fontSize, GOLD);
+                }
             }
         }
         else if (currentScreen == CARD_SELECT)
@@ -3496,8 +4249,15 @@ int main(void)
             int tw = MeasureText(title, 28);
             DrawText(title, screenWidth / 2 - tw / 2, 50, 28, WHITE);
             if (isShop) {
-                const char* coinTxt = TextFormat("Coins: %d", coins);
-                DrawText(coinTxt, screenWidth / 2 + tw / 2 + 20, 50, 22, GOLD);
+                // Coin icon + count next to title
+                int iconSz = 22, gapSz = 4;
+                float iconX = (float)(screenWidth / 2 + tw / 2 + 20);
+                if (texCoin.id > 0)
+                    DrawTexturePro(texCoin, {0,0,(float)texCoin.width,(float)texCoin.height},
+                        {iconX, 52.f, (float)iconSz, (float)iconSz}, {}, 0.f, WHITE);
+                else { DrawCircle((int)iconX+iconSz/2, 63, iconSz/2, GOLD);
+                       DrawCircle((int)iconX+iconSz/2, 63, iconSz*5/14, {255,200,50,255}); }
+                DrawText(TextFormat("%d", coins), (int)(iconX + iconSz + gapSz), 52, 22, GOLD);
             }
 
             // Draw each card
@@ -3515,22 +4275,46 @@ int main(void)
                     flipped = spinF < 0.f;
                 }
 
-                float dW = cardW * scaleX;
-                float dH = cardH * c.scale;
+                // Scale pop-in on all axes: 0 → 1.x → 1 during appear, full size after
+                bool isAppearing = (!c.appeared && c.heightFrac < 1.f);
+                float effScale = isAppearing ? c.heightFrac : c.scale;
+                float dW = cardW * scaleX * (isAppearing ? effScale : 1.f);
+                float dH = cardH * effScale;
                 if (dW < 1.f) dW = 1.f;
                 if (dH < 1.f) dH = 1.f;
-                Rectangle dest = { cx - dW * 0.5f, cy - dH * 0.5f, dW, dH };
+                // Always centered
+                float destX = cx - dW * 0.5f;
+                float destY = cy - dH * 0.5f;
+                Rectangle dest = { destX, destY, dW, dH };
 
                 // Draw card texture
                 int ri = c.rarity;
-                static const Color rarityColors[6]={{180,180,180,255},{60,160,255,255},{120,80,255,255},{255,150,0,255},{255,200,50,255},{200,50,255,255}};
                 if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0) {
-                    float srcW = flipped ? -(float)cardTextures[ri].width : (float)cardTextures[ri].width;
-                    float srcX = flipped ? (float)cardTextures[ri].width : 0.f;
-                    DrawTexturePro(cardTextures[ri], { srcX, 0, srcW, (float)cardTextures[ri].height },
+                    float srcWtex = flipped ? -(float)cardTextures[ri].width : (float)cardTextures[ri].width;
+                    float srcXtex = flipped ? (float)cardTextures[ri].width : 0.f;
+                    DrawTexturePro(cardTextures[ri],
+                        { srcXtex, 0.f, srcWtex, (float)cardTextures[ri].height },
                         dest, { 0, 0 }, 0.f, WHITE);
                 } else {
-                    DrawRectangleRec(dest, rarityColors[ri]);
+                    Color rc = (ri>=0&&ri<6) ? rarityBorderCols[ri] : GRAY;
+                    DrawRectangleRec(dest, rc);
+                }
+
+                // Item texture overlay: shadow + bobbing icon on top of card
+                if (c.type != PU_NONE && effScale > 0.1f) {
+                    Texture2D* iTex = GetItemTex(c.type);
+                    if (iTex && iTex->id > 0) {
+                        float bob = isAppearing ? 0.f : sinf((float)GetTime() * 2.f) * 3.f;
+                        float pad = dW * 0.15f;
+                        Rectangle itemArea = { destX + pad, destY + pad + bob, dW - pad*2.f, dH - pad*2.f };
+                        Rectangle fitR = FitTexRect(itemArea, (float)iTex->width, (float)iTex->height);
+                        Rectangle fitRShadow = { fitR.x + 4.f, fitR.y + 6.f, fitR.width, fitR.height };
+                        Rectangle src = {0.f, 0.f, (float)iTex->width, (float)iTex->height};
+                        // Shadow: black duplicate offset below-right
+                        DrawTexturePro(*iTex, src, fitRShadow, {}, 0.f, {0,0,0,110});
+                        // Item
+                        DrawTexturePro(*iTex, src, fitR, {}, 0.f, WHITE);
+                    }
                 }
 
                 // Hover highlight
@@ -3538,8 +4322,8 @@ int main(void)
                     DrawRectangleLinesEx(dest, 3, YELLOW);
 
                 // Text OUTSIDE card — name above, desc+cd below
-                if (c.scale > 0.2f && !c.selected) {
-                    float alpha = fminf((c.scale - 0.2f) / 0.5f, 1.f);
+                if (effScale > 0.2f && !c.selected) {
+                    float alpha = fminf((effScale - 0.2f) / 0.5f, 1.f);
                     unsigned char a = (unsigned char)(alpha * 255.f);
                     int nameFS = isShop ? 13 : 17;
                     int descFS = isShop ? 10 : 13;
@@ -3578,16 +4362,27 @@ int main(void)
                 const HotbarSlot& s = hotbar[i];
                 Color bg = (i == hotbarSlot) ? Color{255,220,0,130} : Color{40,40,40,150};
                 DrawRectangle((int)slotX, (int)hbSlotY2, (int)HB_W2, (int)HB_H2, bg);
-                DrawRectangleLines((int)slotX, (int)hbSlotY2, (int)HB_W2, (int)HB_H2, i == hotbarSlot ? YELLOW : DARKGRAY);
-                DrawText(TextFormat("%d", i+1), (int)slotX + 4, (int)hbSlotY2 + 4, 12, WHITE);
+                // Rarity-colored border
+                Color slotBorder2 = DARKGRAY;
                 if (s.type != PU_NONE) {
                     int ri = PU_INFO[(int)s.type].rarityIdx;
-                    if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0)
-                        DrawTexturePro(cardTextures[ri],
-                            {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
-                            {slotX, hbSlotY2, HB_W2, HB_H2}, {0,0}, 0.f, WHITE);
-                    int nw = MeasureText(PU_INFO[(int)s.type].name, 9);
-                    DrawText(PU_INFO[(int)s.type].name, (int)(slotX + HB_W2/2 - nw/2), (int)(hbSlotY2 + HB_H2 - 12), 9, WHITE);
+                    if (ri >= 0 && ri < 6) slotBorder2 = rarityBorderCols[ri];
+                }
+                DrawRectangleLinesEx({slotX, hbSlotY2, HB_W2, HB_H2},
+                    (i == hotbarSlot) ? 3.f : 2.f,
+                    i == hotbarSlot ? YELLOW : slotBorder2);
+                DrawText(TextFormat("%d", i+1), (int)slotX + 4, (int)hbSlotY2 + 4, 12, WHITE);
+                if (s.type != PU_NONE) {
+                    // Item texture only — no card background
+                    Texture2D* iTex = GetItemTex(s.type);
+                    if (iTex && iTex->id > 0) {
+                        float pad2 = 8.f;
+                        Rectangle slotInner2 = { slotX+pad2, hbSlotY2+pad2, HB_W2-pad2*2.f, HB_H2-pad2*2.f };
+                        Rectangle fitR2 = FitTexRect(slotInner2, (float)iTex->width, (float)iTex->height);
+                        DrawTexturePro(*iTex,
+                            {0.f, 0.f, (float)iTex->width, (float)iTex->height},
+                            fitR2, {}, 0.f, WHITE);
+                    }
                 }
             }
 
@@ -3595,14 +4390,19 @@ int main(void)
             if (hbDrag.active) {
                 int ri = PU_INFO[(int)hbDrag.type].rarityIdx;
                 float dX = hbDrag.x - HB_W2 * 0.5f, dY = hbDrag.y - HB_H2 * 0.5f;
-                Color tint = { 255,255,255,200 };
-                if (ri >= 0 && ri < CARD_TEX_COUNT && cardTextures[ri].id > 0)
-                    DrawTexturePro(cardTextures[ri],
-                        {0,0,(float)cardTextures[ri].width,(float)cardTextures[ri].height},
-                        {dX, dY, HB_W2, HB_H2}, {0,0}, 0.f, tint);
+                Color dragBorder = (ri >= 0 && ri < 6) ? rarityBorderCols[ri] : WHITE;
+                // Item texture for dragged card
+                Texture2D* dTex = GetItemTex(hbDrag.type);
+                if (dTex && dTex->id > 0) {
+                    Rectangle dragInner = { dX, dY, HB_W2, HB_H2 };
+                    Rectangle dragFit = FitTexRect(dragInner, (float)dTex->width, (float)dTex->height);
+                    DrawTexturePro(*dTex,
+                        {0.f, 0.f, (float)dTex->width, (float)dTex->height},
+                        dragFit, {}, 0.f, {255,255,255,200});
+                }
                 else
                     DrawRectangle((int)dX, (int)dY, (int)HB_W2, (int)HB_H2, {120,80,200,200});
-                DrawRectangleLines((int)dX, (int)dY, (int)HB_W2, (int)HB_H2, WHITE);
+                DrawRectangleLinesEx({dX, dY, HB_W2, HB_H2}, 2.f, dragBorder);
                 int nw = MeasureText(PU_INFO[(int)hbDrag.type].name, 9);
                 DrawText(PU_INFO[(int)hbDrag.type].name, (int)(hbDrag.x - nw * 0.5f), (int)(hbDrag.y + HB_H2 * 0.5f - 12), 9, WHITE);
             }
@@ -3611,6 +4411,222 @@ int main(void)
             if (cardFadeOut > 0.f) {
                 unsigned char fa = (unsigned char)(fminf(cardFadeOut, 1.f) * 255.f);
                 DrawRectangle(0, 0, screenWidth, screenHeight, { 0, 0, 0, fa });
+            }
+        }
+
+        // ── Debug menu overlay ────────────────────────────────────────────────────
+        if (dbgMenuOpen)
+        {
+            const int  DBG_X = 5, DBG_Y = 5, DBG_W = 235, DBG_H = 355;
+            const int  DBG_TITLE_H = 22;
+            const int  DBG_ROW_H   = 30;
+            const int  DBG_PAD     = 4;
+            const int  DBG_CONT_Y  = DBG_Y + DBG_TITLE_H;
+            const int  DBG_CONT_H  = DBG_H - DBG_TITLE_H;
+
+            Vector2 dbgMouse = GetMousePosition();
+            float   mwheel   = GetMouseWheelMove();
+
+            if (CheckCollisionPointRec(dbgMouse, { (float)DBG_X,(float)DBG_Y,(float)DBG_W,(float)DBG_H }))
+                dbgMenuScroll -= mwheel * (float)DBG_ROW_H;
+
+            const int numRows    = 16;
+            const int totalContH = numRows * DBG_ROW_H + DBG_PAD * 2;
+            int maxScroll  = totalContH - DBG_CONT_H;
+            if (maxScroll < 0) maxScroll = 0;
+            if (dbgMenuScroll < 0.f) dbgMenuScroll = 0.f;
+            if (dbgMenuScroll > (float)maxScroll) dbgMenuScroll = (float)maxScroll;
+
+            // Panel background
+            DrawRectangle(DBG_X, DBG_Y, DBG_W, DBG_H, { 18, 18, 28, 230 });
+            DrawRectangleLines(DBG_X, DBG_Y, DBG_W, DBG_H, { 90, 90, 140, 255 });
+
+            // Title bar
+            DrawRectangle(DBG_X, DBG_Y, DBG_W, DBG_TITLE_H, { 35, 35, 75, 255 });
+            DrawText("DEBUG MENU", DBG_X + DBG_PAD + 2, DBG_Y + 4, 13, YELLOW);
+
+            // Close [X] button
+            Rectangle dbgCloseBtn = { (float)(DBG_X + DBG_W - 22), (float)(DBG_Y + 1), 21.f, (float)(DBG_TITLE_H - 2) };
+            bool dbgCloseHov = CheckCollisionPointRec(dbgMouse, dbgCloseBtn);
+            DrawRectangle((int)dbgCloseBtn.x,(int)dbgCloseBtn.y,(int)dbgCloseBtn.width,(int)dbgCloseBtn.height,
+                dbgCloseHov ? Color{200,50,50,255} : Color{110,30,30,255});
+            DrawText("X",(int)(dbgCloseBtn.x+5),(int)(dbgCloseBtn.y+3),13,WHITE);
+            if (dbgCloseHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) dbgMenuOpen = false;
+
+            // Clip content
+            BeginScissorMode(DBG_X, DBG_CONT_Y, DBG_W, DBG_CONT_H);
+
+            auto dbgRowY = [&](int r) -> int {
+                return DBG_CONT_Y + DBG_PAD + r * DBG_ROW_H - (int)dbgMenuScroll;
+            };
+            auto dbgBtn = [&](Rectangle r, const char* txt, Color bg, Color fg) {
+                Rectangle clip = { (float)DBG_X,(float)DBG_CONT_Y,(float)DBG_W,(float)DBG_CONT_H };
+                bool hov = CheckCollisionPointRec(dbgMouse, r) && CheckCollisionPointRec(dbgMouse, clip);
+                auto addC = [](unsigned char v, int a) -> unsigned char { int x=(int)v+a; return x>255?255:(x<0?0:(unsigned char)x); };
+                Color bc = hov ? Color{addC(bg.r,50),addC(bg.g,50),addC(bg.b,50),bg.a} : bg;
+                DrawRectangle((int)r.x,(int)r.y,(int)r.width,(int)r.height,bc);
+                DrawRectangleLines((int)r.x,(int)r.y,(int)r.width,(int)r.height,{70,70,110,200});
+                int tw = MeasureText(txt,10);
+                DrawText(txt,(int)(r.x+r.width/2-tw/2),(int)(r.y+r.height/2-5),10,fg);
+            };
+            auto dbgClicked = [&](Rectangle r) -> bool {
+                Rectangle clip = { (float)DBG_X,(float)DBG_CONT_Y,(float)DBG_W,(float)DBG_CONT_H };
+                return IsMouseButtonPressed(MOUSE_LEFT_BUTTON)
+                    && CheckCollisionPointRec(dbgMouse,r)
+                    && CheckCollisionPointRec(dbgMouse,clip);
+            };
+
+            // Row 0 – Lives
+            { int ry = dbgRowY(0);
+              DrawText("Lives:", DBG_X+DBG_PAD+2, ry+9, 11, WHITE);
+              Rectangle mR = {(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR = {(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"<",{55,55,75,255},WHITE); dbgBtn(pR,">",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%d",lives),DBG_X+139,ry+9,12,YELLOW);
+              if (dbgClicked(mR) && lives>0) lives--;
+              if (dbgClicked(pR) && lives<maxLives) lives++; }
+
+            // Row 1 – Max Lives
+            { int ry = dbgRowY(1);
+              DrawText("Max Lives:", DBG_X+DBG_PAD+2, ry+9, 11, WHITE);
+              Rectangle mR = {(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR = {(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"<",{55,55,75,255},WHITE); dbgBtn(pR,">",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%d",maxLives),DBG_X+139,ry+9,12,YELLOW);
+              if (dbgClicked(mR) && maxLives>1) { maxLives--; if(lives>maxLives) lives=maxLives; }
+              if (dbgClicked(pR) && maxLives<10) maxLives++; }
+
+            // Row 2 – Spawn Barrel
+            { int ry = dbgRowY(2);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Spawn Barrel",{50,80,50,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) SpawnBarrelFromPool(barrels,barrelPath); }
+
+            // Row 3 – Spawn Enemy
+            { int ry = dbgRowY(3);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Spawn Enemy",{80,50,50,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) {
+                  for (auto& en:enemies) if(!en.active){
+                      en.active=true;
+                      en.hitbox={player.x+(facingRight?80.f:-80.f),player.y-50.f,44.f,44.f};
+                      en.velocity={0,0}; en.type=GRUNT; en.state=ES_IDLE;
+                      en.stateTimer=0; en.grounded=false; en.facingRight=facingRight; break;
+                  }
+              } }
+
+            // Row 4 – Summon Nuke
+            { int ry = dbgRowY(4);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Summon Nuke",{80,70,25,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) nukes.push_back({{player.x,player.y-60.f},true}); }
+
+            // Row 5 – Summon Beatrice
+            { int ry = dbgRowY(5);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,"Summon Beatrice",{50,50,100,255},WHITE);
+              if (dbgClicked(r) && currentScreen==GAMEPLAY) beatrices.push_back({{player.x,player.y-60.f},true}); }
+
+            // Row 6 – Give Ability
+            { int ry = dbgRowY(6);
+              float bw = 22.f;
+              Rectangle prevR = {(float)(DBG_X+DBG_PAD),(float)ry,bw,(float)(DBG_ROW_H-2)};
+              Rectangle nextR = {(float)(DBG_X+DBG_W-DBG_PAD-bw),(float)ry,bw,(float)(DBG_ROW_H-2)};
+              Rectangle giveR = {(float)(DBG_X+DBG_PAD+bw+2),(float)ry,(float)(DBG_W-DBG_PAD*2-bw*2-4),(float)(DBG_ROW_H-2)};
+              dbgBtn(prevR,"<",{55,55,75,255},WHITE);
+              dbgBtn(nextR,">",{55,55,75,255},WHITE);
+              dbgBtn(giveR,PU_INFO[dbgGivePUIdx].name,{60,40,85,255},YELLOW);
+              if (dbgClicked(prevR)) dbgGivePUIdx=(dbgGivePUIdx+PU_COUNT-1)%PU_COUNT;
+              if (dbgClicked(nextR)) dbgGivePUIdx=(dbgGivePUIdx+1)%PU_COUNT;
+              if (dbgClicked(giveR)&&currentScreen==GAMEPLAY) AddToHotbar((PowerupType)dbgGivePUIdx); }
+
+            // Row 7 – Immortality
+            { int ry = dbgRowY(7);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("Immortality: %s",dbgImmortal?"ON":"OFF"),
+                  dbgImmortal?Color{0,115,0,255}:Color{75,0,0,255},WHITE);
+              if (dbgClicked(r)) dbgImmortal=!dbgImmortal; }
+
+            // Row 8 – Flight
+            { int ry = dbgRowY(8);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("Flight: %s",dbgFlight?"ON":"OFF"),
+                  dbgFlight?Color{0,70,160,255}:Color{30,30,80,255},WHITE);
+              if (dbgClicked(r)) { dbgFlight=!dbgFlight; if(dbgFlight) dbgFlightNoCol=false; } }
+
+            // Row 9 – No Clip
+            { int ry = dbgRowY(9);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("No Clip: %s",dbgFlightNoCol?"ON":"OFF"),
+                  dbgFlightNoCol?Color{0,105,145,255}:Color{30,30,80,255},WHITE);
+              if (dbgClicked(r)) { dbgFlightNoCol=!dbgFlightNoCol; if(dbgFlightNoCol) dbgFlight=false; } }
+
+            // Row 10 – Bloom ON/OFF
+            { int ry = dbgRowY(10);
+              Rectangle r = {(float)(DBG_X+DBG_PAD),(float)ry,(float)(DBG_W-DBG_PAD*2),(float)(DBG_ROW_H-2)};
+              dbgBtn(r,TextFormat("Bloom: %s",dbgBloomEnabled?"ON":"OFF"),
+                  dbgBloomEnabled?Color{80,0,160,255}:Color{30,30,80,255},WHITE);
+              if (dbgClicked(r)) dbgBloomEnabled=!dbgBloomEnabled; }
+
+            // Row 11 – Bloom Intensity
+            { int ry = dbgRowY(11);
+              DrawText("Bloom Inten:", DBG_X+DBG_PAD+2, ry+9, 10, WHITE);
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.1f",dbgBloomIntensity),DBG_X+134,ry+9,11,YELLOW);
+              if (dbgClicked(mR)) dbgBloomIntensity=fmaxf(0.f,dbgBloomIntensity-0.1f);
+              if (dbgClicked(pR)) dbgBloomIntensity=fminf(3.f,dbgBloomIntensity+0.1f); }
+
+            // Row 12 – Bloom Threshold
+            { int ry = dbgRowY(12);
+              DrawText("Bloom Thr:", DBG_X+DBG_PAD+2, ry+9, 10, WHITE);
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",dbgBloomThreshold),DBG_X+130,ry+9,11,YELLOW);
+              if (dbgClicked(mR)) dbgBloomThreshold=fmaxf(0.f,dbgBloomThreshold-0.05f);
+              if (dbgClicked(pR)) dbgBloomThreshold=fminf(1.f,dbgBloomThreshold+0.05f); }
+
+            // Row 13 – Music Volume
+            { int ry = dbgRowY(13);
+              DrawText("Music Vol:", DBG_X+DBG_PAD+2, ry+9, 10, {180,220,255,255});
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",volMusic),DBG_X+130,ry+9,11,{180,220,255,255});
+              if (dbgClicked(mR)) { volMusic=fmaxf(0.f,volMusic-0.05f); SetMusicVolume(music,volMusic); }
+              if (dbgClicked(pR)) { volMusic=fminf(1.f,volMusic+0.05f); SetMusicVolume(music,volMusic); } }
+
+            // Row 14 – SFX Volume (gameplay sounds: death, hit, nuke, barrel jump, RBD)
+            { int ry = dbgRowY(14);
+              DrawText("SFX Vol:", DBG_X+DBG_PAD+2, ry+9, 10, {255,200,160,255});
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",volSFX),DBG_X+130,ry+9,11,{255,200,160,255});
+              if (dbgClicked(mR)) volSFX=fmaxf(0.f,volSFX-0.05f);
+              if (dbgClicked(pR)) volSFX=fminf(1.f,volSFX+0.05f); }
+
+            // Row 15 – UI Volume (card sounds)
+            { int ry = dbgRowY(15);
+              DrawText("UI Vol:", DBG_X+DBG_PAD+2, ry+9, 10, {200,255,200,255});
+              Rectangle mR={(float)(DBG_X+112),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              Rectangle pR={(float)(DBG_X+172),(float)ry,22.f,(float)(DBG_ROW_H-2)};
+              dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
+              DrawText(TextFormat("%.2f",volUI),DBG_X+130,ry+9,11,{200,255,200,255});
+              if (dbgClicked(mR)) volUI=fmaxf(0.f,volUI-0.05f);
+              if (dbgClicked(pR)) volUI=fminf(1.f,volUI+0.05f); }
+
+            EndScissorMode();
+
+            // Scrollbar
+            if (maxScroll > 0) {
+                float ratio  = (float)DBG_CONT_H / (float)totalContH;
+                float thumbH = (float)DBG_CONT_H * ratio;
+                float thumbY = (float)DBG_CONT_Y + (dbgMenuScroll/(float)maxScroll)*((float)DBG_CONT_H - thumbH);
+                DrawRectangle(DBG_X+DBG_W-6, DBG_CONT_Y, 5, DBG_CONT_H, {35,35,55,200});
+                DrawRectangle(DBG_X+DBG_W-6,(int)thumbY,5,(int)thumbH,{110,110,195,255});
             }
         }
 
@@ -3624,6 +4640,21 @@ int main(void)
     UnloadSound(nukeSound);
     UnloadSound(jumpBrlSound);
     UnloadSound(rbdSound);
+    UnloadSound(sndShield);
+    UnloadSound(sndDash);
+    UnloadSound(sndBeatrice);
+    UnloadSound(sndBeatriceAtk);
+    UnloadSound(sndLarper);
+    UnloadSound(sndSpeedrun);
+    UnloadSound(sndWhip);
+    UnloadSound(sndExtraLife);
+    UnloadSound(sndOneLarp);
+    UnloadSound(sndReinhard);
+    UnloadSound(cardFanSnd);
+    UnloadSound(cardSlideSnd);
+    UnloadSound(cardHoverSnd);
+    UnloadSound(cardPickSnd);
+    UnloadSound(cardThrowSnd);
 
     UnloadTexture(imgMarioIdle);      UnloadTexture(imgMarioWalk1);
     UnloadTexture(imgMarioWalk2);     UnloadTexture(imgMarioJump);
@@ -3665,11 +4696,17 @@ int main(void)
     UnloadTexture(Subaru4); UnloadTexture(Subaru5); UnloadTexture(Subaru_Background);
     UnloadTexture(rabbitWalkBlack); UnloadTexture(rabbitJumpBlack);
     UnloadTexture(rabbitWalkWhite); UnloadTexture(rabbitJumpWhite);
-    UnloadTexture(EButton);
+    UnloadTexture(FButton);
+    UnloadTexture(texGoldHeart); UnloadTexture(texHeart);
+    UnloadTexture(texShield1);   UnloadTexture(texShield2);
     for (int i = 0; i < PROP_TEX_COUNT; i++)
         if (propTextures[i].id > 0) UnloadTexture(propTextures[i]);
     if (propFireFrame2.id > 0) UnloadTexture(propFireFrame2);
     for (int i = 0; i < CARD_TEX_COUNT; i++) UnloadTexture(cardTextures[i]);
+    if (texCoin.id > 0) UnloadTexture(texCoin);
+    UnloadTexture(itemTex_ReturnByDeath); UnloadTexture(itemTex_Dash);
+    UnloadTexture(itemTex_Reinhard);      UnloadTexture(itemTex_Whip);
+    UnloadTexture(itemTex_Speedrun);      UnloadTexture(itemTex_Shield);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);

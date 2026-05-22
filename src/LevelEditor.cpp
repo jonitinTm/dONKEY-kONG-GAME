@@ -1382,9 +1382,11 @@ void LevelEditor::DrawBeamEnt(const BeamData& b, bool sel, bool msel) const {
 }
 void LevelEditor::DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const {
     if (_playerTex && _playerTex->id > 0) {
-        float s = 3.5f, w = _playerTex->width * s, h = _playerTex->height * s;
-        DrawTexturePro(*_playerTex, { 0,0,(float)_playerTex->width,(float)_playerTex->height }, { pos.x - w * .5f,pos.y - h,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x - w * .5f,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
+        // Match game draw: top-left at pos, y+10 offset, same scale as gameplay
+        float s = 3.8f * 0.85f * 1.05f, w = _playerTex->width * s, h = _playerTex->height * s;
+        Rectangle dest = { pos.x, pos.y + 10.f, w, h };
+        DrawTexturePro(*_playerTex, { 0,0,(float)_playerTex->width,(float)_playerTex->height }, dest, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx(dest, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
     else DrawCircEnt(pos, 12.f, GREEN, sel, msel, "P");
     DrawCircleV(pos, 4.f, sel ? YELLOW : GREEN);
@@ -1392,14 +1394,28 @@ void LevelEditor::DrawPlayerSpawn(Vector2 pos, bool sel, bool msel) const {
 }
 void LevelEditor::DrawRegulusEnt(Vector2 pos, bool sel, bool msel) const {
     if (_regulusTex && _regulusTex->id > 0) {
+        // Match game draw: regX = pos.x + w*0.5f, regY = pos.y - h + 20
         float s = 3.5f * .7f * 1.2f, w = _regulusTex->width * s, h = _regulusTex->height * s;
-        DrawTexturePro(*_regulusTex, { 0,0,(float)_regulusTex->width,(float)_regulusTex->height }, { pos.x,pos.y - h,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
-        if (sel || msel) DrawRectangleLinesEx({ pos.x,pos.y - h,w,h }, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
+        Rectangle dest = { pos.x + w * 0.5f, pos.y - h + 20.f, w, h };
+        DrawTexturePro(*_regulusTex, { 0,0,(float)_regulusTex->width,(float)_regulusTex->height }, dest, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
+        if (sel || msel) DrawRectangleLinesEx(dest, 2.f, sel ? YELLOW : Color{ 255,200,0,200 });
     }
     else DrawCircEnt(pos, 16.f, { 160,32,240,255 }, sel, msel, "R");
     DrawCircleV(pos, 3.f, sel ? YELLOW : Color{ 160,32,240,255 });
 }
 void LevelEditor::DrawCaveEnt(Vector2 pos, bool sel, bool msel) const {
+    if (!_level.caveVisible) {
+        // Invisible cave: show spawn circle only
+        Vector2 center = { pos.x + 112.f, pos.y + 56.f };
+        float radius = 28.f;
+        DrawCircleV(center, radius, { 255,165,0,40 });
+        DrawCircleLinesV(center, radius, sel ? YELLOW : ORANGE);
+        if (msel && !sel) DrawCircleLinesV(center, radius + 3.f, { 255,200,0,180 });
+        int tw = MeasureText("SPAWN", 9);
+        DrawText("SPAWN", (int)(center.x - tw * 0.5f), (int)(center.y - 5), 9, sel ? YELLOW : ORANGE);
+        DrawText("(hidden)", (int)(center.x - 18), (int)(center.y + 6), 8, { 200,140,60,200 });
+        return;
+    }
     if (_caveTex && _caveTex->id > 0) {
         float w = 64.f * 3.5f, h = 32.f * 3.5f;
         DrawTexturePro(*_caveTex, { 0,0,64.f,32.f }, { pos.x,pos.y,w,h }, {}, 0.f, (msel && !sel) ? Color{ 255,220,100,220 } : WHITE);
@@ -1908,6 +1924,20 @@ void LevelEditor::DrawDataPanel() {
             DrawText(TextFormat("  • %s %d", ToolName((EditorTool)ce.type), ce.index),
                 (int)px, (int)cy, 9, ToolColor((EditorTool)ce.type)); cy += 12;
         }
+    }
+    if (_sel.type == (int)EditorTool::CAVE) {
+        SectionHeader("── Cave Options ───────────");
+        Rectangle visR = { px, cy, fw, 18 };
+        bool hVis = CheckCollisionPointRec(GetMousePosition(), visR);
+        bool isVis = _level.caveVisible;
+        DrawRectangleRec(visR, isVis ? Color{20,80,20,255} : (hVis ? Color{60,30,30,255} : Color{40,20,20,255}));
+        DrawRectangleLinesEx(visR, isVis ? 2.f : 1.f, isVis ? Color{80,220,80,255} : Color{200,80,80,255});
+        const char* visLbl = isVis ? "Visible: ON" : "Visible: OFF (circle only)";
+        int vlw = MeasureText(visLbl, 9);
+        DrawText(visLbl, (int)(visR.x + visR.width * 0.5f - vlw * 0.5f), (int)cy + 5, 9,
+            isVis ? Color{180,255,180,255} : Color{255,160,160,255});
+        if (hVis && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); _level.caveVisible = !_level.caveVisible; }
+        cy += 22;
     }
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Rotation ───────────────");
