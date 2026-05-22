@@ -26,7 +26,8 @@ static constexpr float ACTIVE_SPAWN_INTERVAL = 1.2f;
 struct PathNode
 {
     Vector2 pos = { 0.f, 0.f };
-    int     next[2] = { -1, -1 };
+    int     next[3] = { -1, -1, -1 };
+    int     edgeType[3] = { 0, 0, 0 };  // 0=normal, 1=ladder
     int     rollThreshold = 5;
     bool    isSplitNode = false;
 };
@@ -223,21 +224,19 @@ static void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
         b.hitbox.y = target.y;
         if (!node.isSplitNode) b.isFalling = false;
 
-        bool bothValid = (node.next[0] != -1 && node.next[1] != -1);
-        bool oneValid = (node.next[0] != -1 || node.next[1] != -1);
-
-        if (bothValid)
-        {
-            int roll = GetRandomValue(0, 9);
-            int choice = (roll < node.rollThreshold) ? 0 : 1;
-            if (node.isSplitNode) { b.isFalling = (choice == 0); b.animFrame = 0; }
-            b.currentNode = node.next[choice];
+        // Collect valid branches (equal probability)
+        int validNext[3] = { -1, -1, -1 };
+        int validCount = 0;
+        for (int k = 0; k < 3; k++) {
+            if (node.next[k] >= 0 && node.next[k] < (int)path.size())
+                validNext[validCount++] = node.next[k];
         }
-        else if (oneValid)
+
+        if (validCount > 0)
         {
-            int nextNode = (node.next[0] != -1) ? node.next[0] : node.next[1];
-            if (node.isSplitNode) { b.isFalling = false; b.animFrame = 0; }
-            b.currentNode = nextNode;
+            int choice = GetRandomValue(0, validCount - 1);
+            if (node.isSplitNode) { b.isFalling = (choice == 0 && validCount > 1); b.animFrame = 0; }
+            b.currentNode = validNext[choice];
         }
         else { b.active = false; b.reachedEnd = true; }
     }
@@ -300,7 +299,9 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
     }
 
     // ── Enter ladder if grounded and overlapping ──────────────────────────────
-    if (e.grounded && e.ladderCooldown <= 0.f) {
+    // Only enter when truly grounded and not immediately after a jump, to prevent stuck loops
+    if (e.grounded && e.ladderCooldown <= 0.f && !e.justJumped
+        && e.state != ES_JUMP_TOWARD && e.state != ES_JUMP_BACK) {
         for (int i = 0; i < (int)lads.size(); i++) {
             Rectangle lhb = lads[i].GetHitbox();
             if (CheckCollisionRecs(e.hitbox, lhb)) {
@@ -311,6 +312,7 @@ static void UpdateEnemy(Enemy& e, const Rectangle& playerRect,
                 e.velocity = { 0.f, 0.f };
                 e.state = ES_IDLE;
                 e.stateTimer = 0.f;
+                e.ladderCooldown = 0.4f;
                 return;
             }
         }
@@ -612,6 +614,7 @@ int main(void)
     float ladderExitTimer = 0.0f;
     float ladderExitFrameDuration = 0.12f;
     float ladderCooldown = 0.0f;
+    float ladderStepDist = 0.f;
     bool  ladderEntryClamp = false;
     float ladderEntryClampTimer = 0.0f;
     float ladderEntryClampStart = 0.0f;
@@ -888,22 +891,23 @@ int main(void)
     static const char* BALATRO = "Assets/Nuevo audio/PC _ Computer - Balatro - Miscellaneous - Sound Effects/";
     Sound sndShield        = LoadSound(TextFormat("%s%s", WAV,     "Shield.wav"));
     Sound sndDash          = LoadSound(TextFormat("%s%s", WAV,     "Dash.wav"));
-    Sound sndBeatrice      = LoadSound(TextFormat("%s%s", WAV,     "BeatriceCarry.wav"));
+    Sound sndBeatrice      = LoadSound(TextFormat("%s%s", WAV,     "PickBeatrice.wav"));
     static const char* NEWSFX = "Assets/Nuevo audio/NewSFX/";
     Sound sndBeatriceAtk   = LoadSound(TextFormat("%s%s", NEWSFX,  "MagicShot.wav"));
-    Sound sndLarper        = LoadSound(TextFormat("%s%s", WAV,     "Larper.wav"));
-    Sound sndSpeedrun      = LoadSound(TextFormat("%s%s", BALATRO, "generic1.ogg"));
+    Sound sndLarper        = LoadSound(TextFormat("%s%s", WAV,     "Escalera.wav"));
+    Sound sndSpeedrun      = LoadSound(TextFormat("%s%s", WAV,     "Increasing Speed.wav"));
     Sound sndWhip[3] = {
         LoadSound(TextFormat("%s%s", NEWSFX, "WhipStart1.wav")),
         LoadSound(TextFormat("%s%s", NEWSFX, "WhipStart2.wav")),
         LoadSound(TextFormat("%s%s", NEWSFX, "WhipStart3.wav")),
     };
     Sound sndEnemyKill     = LoadSound(TextFormat("%s%s", NEWSFX, "NPC_Killed_1.wav"));
-    Sound sndExtraLife     = LoadSound(TextFormat("%s%s", BALATRO, "gold_seal.ogg"));
+    Sound sndExtraLife     = LoadSound(TextFormat("%s%s", WAV,     "ExtraLife.wav"));
     Sound sndOneLarp       = LoadSound(TextFormat("%s%s", BALATRO, "coin1.ogg"));
     Sound sndError         = LoadSound(TextFormat("%s%s", BALATRO, "cancel.ogg"));
     Sound sndReinhard      = LoadSound(TextFormat("%s%s", BALATRO, "gong.ogg"));
     Sound sndBunnyJump     = LoadSound(TextFormat("%s%s", WAV, "Arcade - Donkey Kong - Sound Effects_grunt.wav"));
+    Sound sndMoney         = LoadSound(TextFormat("%s%s", WAV, "Money.wav"));
 
     // ── Footstep sounds ───────────────────────────────────────────────────────
     static const char* MINE = "Assets/Nuevo audio/Mine/";
@@ -1319,6 +1323,10 @@ int main(void)
                 n.pos = { nd.x, nd.y };
                 n.next[0] = nd.next[0];
                 n.next[1] = nd.next[1];
+                n.next[2] = nd.next[2];
+                n.edgeType[0] = nd.edgeType[0];
+                n.edgeType[1] = nd.edgeType[1];
+                n.edgeType[2] = nd.edgeType[2];
                 n.rollThreshold = nd.rollThreshold;
                 n.isSplitNode = nd.isSplitNode;
                 barrelPath.push_back(n);
@@ -2535,10 +2543,6 @@ int main(void)
                 for (auto& en : enemies)
                 {
                     UpdateEnemy(en, player, platforms, ladders, dt);
-                    if (en.justJumped) {
-                        SetSoundVolume(sndBunnyJump, volSFX * 0.6f);
-                        PlaySound(sndBunnyJump);
-                    }
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
                         if (shieldActive) { en.active = false; score += 300; coins += 15; shieldActive = false; }
                         else TriggerDeath();
@@ -2560,7 +2564,7 @@ int main(void)
                     };
                     if (CheckCollisionRecs(player, jumpZone))
                     {
-                        score += 100; coins += 5; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound);
+                        score += 100; coins += 5; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound); SetSoundVolume(sndMoney, volSFX); PlaySound(sndMoney);
                     }
                 }
             }
@@ -2621,7 +2625,7 @@ int main(void)
             {
                 for (auto& b : barrels)
                 {
-                    if (b.active && b.isBlue && CheckCollisionRecs(b.hitbox, houseHitbox))
+                    if (b.active && CheckCollisionRecs(b.hitbox, houseHitbox))
                     {
                         houseAnimPlaying = true; houseAnimFrame = 0; houseAnimTimer = 0.0f; b.active = false; break;
                     }
@@ -2690,12 +2694,27 @@ int main(void)
                     }
                     else
                     {
+                        float prevLadderY = player.y;
                         bool climbing = IsKeyDown(KEY_W) || IsKeyDown(KEY_S);
                         if (IsKeyDown(KEY_W)) ladderProgress += ladderClimbSpeed * 0.75f / lad.ClimbHeight();
                         if (IsKeyDown(KEY_S)) ladderProgress -= ladderClimbSpeed * 0.75f / lad.ClimbHeight();
                         ladderProgress = Clamp(ladderProgress, 0.0f, 1.0f);
                         player.x = lad.x + lad.width * 0.5f - player.width * 0.5f;
                         player.y = lad.PlayerYAtProgress(ladderProgress, player.height);
+                        // Metalbar step sounds when climbing up (2x faster interval than walking)
+                        if (IsKeyDown(KEY_W) && player.y < prevLadderY) {
+                            static constexpr float LADDER_STEP_DIST = 19.2f;
+                            static constexpr int   METALBAR_IDX = 9;
+                            ladderStepDist += prevLadderY - player.y;
+                            if (ladderStepDist >= LADDER_STEP_DIST && !footsteps[METALBAR_IDX].walk.empty()) {
+                                ladderStepDist = 0.f;
+                                int idx = GetRandomValue(0, (int)footsteps[METALBAR_IDX].walk.size() - 1);
+                                SetSoundVolume(footsteps[METALBAR_IDX].walk[idx], volSFX * 0.5f);
+                                PlaySound(footsteps[METALBAR_IDX].walk[idx]);
+                            }
+                        } else {
+                            ladderStepDist = 0.f;
+                        }
                         velocityY = 0; velocityX = 0;
                         if (ladderProgress <= 0.0f)
                         {
@@ -2837,7 +2856,7 @@ int main(void)
                     if (isGrounded && !onLadder && !isDying) {
                         float stepped = fabsf(player.x - prevX);
                         playerStepDist += stepped;
-                        static constexpr float STEP_DIST = 48.f;
+                        static constexpr float STEP_DIST = 48.f / 1.25f;
                         if (playerStepDist >= STEP_DIST && stepped > 0.1f) {
                             playerStepDist = 0.f;
                             // Find the beam directly below the player
@@ -3148,6 +3167,15 @@ int main(void)
                 }
             }
 
+            // ── Shop exit button ──────────────────────────────────────────────
+            if (isShop && !anyCardPicked) {
+                Rectangle exitR = { (float)screenWidth - 130.f, 46.f, 110.f, 32.f };
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, exitR)) {
+                    anyCardPicked = true;
+                    for (int i = 0; i < numDispCards; i++) displayCards[i].dismissed = true;
+                }
+            }
+
             // ── Click to pick a card (only if not dragging) ───────────────────
             if (!anyCardPicked && !hbDrag.active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 for (int i = 0; i < numDispCards; i++) {
@@ -3345,12 +3373,12 @@ int main(void)
 
             // ── TAB 1: SETTINGS (volume sliders) ──────────────────────────────
             if (settingsTab == 1) {
-                // volAbility goes 0–2 (0–200%), others 0–1 (0–100%)
+                // SFX and Ability go 0–4 (0–400%), Music 0–1 (0–100%)
                 struct SliderDef { const char* label; float* vol; float maxVal; };
                 SliderDef sliders[] = {
                     { "Music",        &volMusic,   1.f },
-                    { "Abilities",    &volAbility, 2.f },
-                    { "Gameplay SFX", &volSFX,     1.f },
+                    { "Abilities",    &volAbility, 4.f },
+                    { "Gameplay SFX", &volSFX,     4.f },
                 };
                 const float sX = cX + 160.f, sW = 350.f, sH = 14.f;
                 const int   lFS = 22;
@@ -3376,7 +3404,7 @@ int main(void)
                     DrawCircle((int)hx, (int)(sy + sH * 0.5f), 10.f, WHITE);
                     DrawCircle((int)hx, (int)(sy + sH * 0.5f), 7.f, fc);
                     // Value pct
-                    DrawText(TextFormat("%d%%", (int)(vol / mx * 100.f + 0.5f)),
+                    DrawText(TextFormat("%d%%", (int)(vol * 100.f + 0.5f)),
                         (int)(sX + sW + 16), (int)(sy - 1), lFS, RAYWHITE);
                     // Input
                     Rectangle hitR = {sX - 12.f, sy - 10.f, sW + 24.f, sH + 20.f};
@@ -3526,8 +3554,8 @@ int main(void)
                 if (actionBtn("Summon Beatrice", {50,50,100,220},true))  beatrices.push_back({{player.x,player.y-60.f},true});
 
                 fstepper("Music Vol",     volMusic,   0.f, 1.f, 0.05f, "%.2f");
-                fstepper("SFX Vol",       volSFX,     0.f, 1.f, 0.05f, "%.2f");
-                fstepper("Abilities Vol", volAbility, 0.f, 2.f, 0.1f,  "%.1f");
+                fstepper("SFX Vol",       volSFX,     0.f, 4.f, 0.05f, "%.2f");
+                fstepper("Abilities Vol", volAbility, 0.f, 4.f, 0.1f,  "%.1f");
                 fstepper("UI Vol",        volUI,      0.f, 1.f, 0.05f, "%.2f");
                 SetMusicVolume(music, volMusic);
 
@@ -4247,7 +4275,7 @@ int main(void)
                 // ── Settings tab (volume sliders) ─────────────────────────────
                 if (settingsTab == 1) {
                     struct SD { const char* label; float* vol; float maxVal; };
-                    SD sldrs[] = {{"Music",&volMusic,1.f},{"Abilities",&volAbility,2.f},{"Gameplay SFX",&volSFX,1.f}};
+                    SD sldrs[] = {{"Music",&volMusic,1.f},{"Abilities",&volAbility,4.f},{"Gameplay SFX",&volSFX,4.f}};
                     const float sX = pcX+160.f, sW = 350.f, sH = 14.f;
                     const float rowGap = 85.f;
                     for (int i = 0; i < 3; i++) {
@@ -4263,7 +4291,7 @@ int main(void)
                         float hx = sX+sW*frac;
                         DrawCircle((int)hx,(int)(sy+sH*0.5f),10.f,WHITE);
                         DrawCircle((int)hx,(int)(sy+sH*0.5f),7.f,fc);
-                        DrawText(TextFormat("%d%%",(int)(vol/mx*100.f+0.5f)),(int)(sX+sW+16),(int)(sy-1),22,RAYWHITE);
+                        DrawText(TextFormat("%d%%",(int)(vol*100.f+0.5f)),(int)(sX+sW+16),(int)(sy-1),22,RAYWHITE);
                         Rectangle hitR={sX-12.f,sy-10.f,sW+24.f,sH+20.f};
                         if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(pauseMouse,hitR))
                             vol = Clamp((pauseMouse.x-sX)/sW,0.f,1.f)*mx;
@@ -4369,8 +4397,8 @@ int main(void)
                     if (actBtn2("Summon Nuke",    {80,70,25,220}))  nukes.push_back({{player.x,player.y-60.f},true});
                     if (actBtn2("Summon Beatrice",{50,50,100,220})) beatrices.push_back({{player.x,player.y-60.f},true});
                     fstep2("Music Vol",    volMusic,  0.f,1.f,0.05f,"%.2f");
-                    fstep2("SFX Vol",      volSFX,    0.f,1.f,0.05f,"%.2f");
-                    fstep2("Ability Vol",  volAbility,0.f,2.f,0.1f, "%.1f");
+                    fstep2("SFX Vol",      volSFX,    0.f,4.f,0.05f,"%.2f");
+                    fstep2("Ability Vol",  volAbility,0.f,4.f,0.1f, "%.1f");
                     fstep2("UI Vol",       volUI,     0.f,1.f,0.05f,"%.2f");
                     SetMusicVolume(music,volMusic);
                     EndScissorMode();
@@ -4461,6 +4489,14 @@ int main(void)
             int tw = MeasureText(title, 28);
             DrawText(title, screenWidth / 2 - tw / 2, 50, 28, WHITE);
             if (isShop) {
+                // Exit button (top-right)
+                Rectangle exitR = { (float)screenWidth - 130.f, 46.f, 110.f, 32.f };
+                bool exitHov = CheckCollisionPointRec(GetMousePosition(), exitR) && !anyCardPicked;
+                DrawRectangleRec(exitR, exitHov ? Color{180,40,40,230} : Color{100,25,25,200});
+                DrawRectangleLinesEx(exitR, 2.f, exitHov ? Color{255,100,100,255} : Color{180,60,60,200});
+                int etw = MeasureText("EXIT SHOP", 13);
+                DrawText("EXIT SHOP", (int)(exitR.x + exitR.width*0.5f - etw*0.5f), (int)(exitR.y + 9.f), 13, WHITE);
+
                 // Coin icon + count next to title
                 int iconSz = 22, gapSz = 4;
                 float iconX = (float)(screenWidth / 2 + tw / 2 + 20);
@@ -4820,7 +4856,7 @@ int main(void)
               dbgBtn(mR,"-",{55,55,75,255},WHITE); dbgBtn(pR,"+",{55,55,75,255},WHITE);
               DrawText(TextFormat("%.2f",volSFX),DBG_X+130,ry+9,11,{255,200,160,255});
               if (dbgClicked(mR)) volSFX=fmaxf(0.f,volSFX-0.05f);
-              if (dbgClicked(pR)) volSFX=fminf(1.f,volSFX+0.05f); }
+              if (dbgClicked(pR)) volSFX=fminf(4.f,volSFX+0.05f); }
 
             // Row 15 – UI Volume (card sounds)
             { int ry = dbgRowY(15);
@@ -4867,6 +4903,7 @@ int main(void)
     UnloadSound(sndError);
     UnloadSound(sndReinhard);
     UnloadSound(sndBunnyJump);
+    UnloadSound(sndMoney);
     for (int mi = 1; mi < MAT_COUNT; mi++) {
         for (auto& s : footsteps[mi].walk) UnloadSound(s);
         for (auto& s : footsteps[mi].run)  UnloadSound(s);

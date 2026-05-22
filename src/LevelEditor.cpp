@@ -419,9 +419,12 @@ void LevelEditor::DeleteSelected() {
     case EditorTool::BEAM:           Er(_level.beams, i); break;
     case EditorTool::PATH_NODE: {
         for (auto& n : _level.pathNodes) {
-            if (n.next[0] == i)n.next[0] = -1; if (n.next[1] == i)n.next[1] = -1;
-            if (n.next[0] > i)n.next[0]--;   if (n.next[1] > i)n.next[1]--;
+            for (int k = 0; k < 3; k++) {
+                if (n.next[k] == i) { n.next[k] = -1; n.edgeType[k] = 0; }
+                else if (n.next[k] > i) n.next[k]--;
+            }
         }
+        _selEdge.clear();
         Er(_level.pathNodes, i); break;
     }
     case EditorTool::NUKE_SPAWN:     Er(_level.nukeSpawns, i); break;
@@ -476,7 +479,8 @@ void LevelEditor::DeleteMultiSelected() {
     for (const auto& e : _multiSel) if (e.type == (int)EditorTool::PATH_NODE) pi.push_back(e.index);
     if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && std::find(pi.begin(), pi.end(), _sel.index) == pi.end()) pi.push_back(_sel.index);
     std::sort(pi.rbegin(), pi.rend());
-    for (int x : pi) { for (auto& n : _level.pathNodes) { if (n.next[0] == x)n.next[0] = -1; if (n.next[1] == x)n.next[1] = -1; if (n.next[0] > x)n.next[0]--; if (n.next[1] > x)n.next[1]--; } Er(_level.pathNodes, x); }
+    for (int x : pi) { for (auto& n : _level.pathNodes) { for (int k=0;k<3;k++){if(n.next[k]==x){n.next[k]=-1;n.edgeType[k]=0;}else if(n.next[k]>x)n.next[k]--;} } Er(_level.pathNodes, x); }
+    _selEdge.clear();
     for (const auto& e : _multiSel) {
         if (e.type == (int)EditorTool::PLAYER_SPAWN) _level.hasPlayerSpawn = false;
         if (e.type == (int)EditorTool::REGULUS)      _level.hasRegulus = false;
@@ -502,7 +506,8 @@ void LevelEditor::CopySelected() {
         case EditorTool::PLATFORM:       ce.plat = _level.platforms[i]; break;
         case EditorTool::LADDER:         ce.lad = _level.ladders[i]; break;
         case EditorTool::PATH_NODE:      ce.node = _level.pathNodes[i];
-            ce.node.next[0] = -1; ce.node.next[1] = -1; break;
+            ce.node.next[0] = -1; ce.node.next[1] = -1; ce.node.next[2] = -1;
+            ce.node.edgeType[0] = 0; ce.node.edgeType[1] = 0; ce.node.edgeType[2] = 0; break;
         case EditorTool::BEAM:           ce.beam = _level.beams[i]; break;
         case EditorTool::NUKE_SPAWN:     ce.pos = _level.nukeSpawns[i]; break;
         case EditorTool::BEATRICE_SPAWN: ce.pos = _level.beatriceSpawns[i]; break;
@@ -635,7 +640,7 @@ void LevelEditor::LoadLevel(int id) {
     else SetStatus(TextFormat("Loaded level %d.", id));
     _sel.clear(); _multiSel.clear(); _gizmoDragging = false; _directOp = DirectOp::NONE;
     _placingPlatform = _placingLadder = _dragging = _multiDragging = _boxSelecting = false;
-    _connectMode = ConnectMode::NONE; _outlineScroll = 0;
+    _connectMode = ConnectMode::NONE; _selEdge.clear(); _outlineScroll = 0;
     _undoStack.clear(); _redoStack.clear();
 }
 void LevelEditor::SaveCurrentLevel() {
@@ -1002,7 +1007,32 @@ void LevelEditor::UpdateToolbar() {
 
         if (IsKeyPressed(KEY_ONE) || IsKeyPressed(KEY_Q)) { _gizmo = GizmoMode::SELECT; _tool = EditorTool::SELECT; SetStatus("1/Q: SELECT mode"); }
         if (IsKeyPressed(KEY_TWO) || IsKeyPressed(KEY_W)) { _gizmo = GizmoMode::MOVE;  _tool = EditorTool::SELECT; SetStatus("2/W: MOVE gizmo"); }
-        if (IsKeyPressed(KEY_THREE) || IsKeyPressed(KEY_E)) { _gizmo = GizmoMode::ROTATE; _tool = EditorTool::SELECT; SetStatus("3/E: ROTATE gizmo"); }
+        if (IsKeyPressed(KEY_THREE)) { _gizmo = GizmoMode::ROTATE; _tool = EditorTool::SELECT; SetStatus("3: ROTATE gizmo"); }
+        if (IsKeyPressed(KEY_E)) {
+            // E on a selected path node = extrude (add connected child node)
+            if (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE) {
+                int selIdx = _sel.index;
+                int freeSlot = -1;
+                for (int k = 0; k < 3; k++) {
+                    if (_level.pathNodes[selIdx].next[k] < 0) { freeSlot = k; break; }
+                }
+                if (freeSlot >= 0) {
+                    PushUndo();
+                    float ox = _level.pathNodes[selIdx].x;
+                    float oy = _level.pathNodes[selIdx].y;
+                    PathNodeData newNode; newNode.x = ox + 80.f; newNode.y = oy + 40.f;
+                    int newIdx = (int)_level.pathNodes.size();
+                    _level.pathNodes[selIdx].next[freeSlot] = newIdx;
+                    _level.pathNodes.push_back(newNode);
+                    _sel = { (int)EditorTool::PATH_NODE, newIdx };
+                    SetStatus(TextFormat("Extruded: node %d slot %d -> node %d", selIdx, freeSlot, newIdx));
+                } else {
+                    SetStatus("Node already has 3 branches.");
+                }
+            } else {
+                _gizmo = GizmoMode::ROTATE; _tool = EditorTool::SELECT; SetStatus("E: ROTATE gizmo");
+            }
+        }
         if (IsKeyPressed(KEY_FOUR)) { _gizmo = GizmoMode::SCALE; _tool = EditorTool::SELECT; SetStatus("4: SCALE gizmo"); }
         if (IsKeyPressed(KEY_R) && _directOp == DirectOp::NONE) StartDirectOp(DirectOp::ROTATE);
 
@@ -1015,7 +1045,8 @@ void LevelEditor::UpdateToolbar() {
             if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
                 _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
             if (IsKeyPressed(KEY_ESCAPE)) {
-                _connectMode = ConnectMode::NONE; _tool = EditorTool::SELECT; _gizmo = GizmoMode::SELECT;
+                _connectMode = ConnectMode::NONE; _selEdge.clear();
+                _tool = EditorTool::SELECT; _gizmo = GizmoMode::SELECT;
                 _sel.clear(); _multiSel.clear(); _boxSelecting = false; _gizmoDragging = false;
                 SetStatus("Cancelled.");
             }
@@ -1117,8 +1148,11 @@ void LevelEditor::UpdateCanvas() {
                 if (CheckCollisionPointCircle(wm, np, 12.f)) {
                     PushUndo();
                     auto& src = _level.pathNodes[_connectFrom];
-                    if (_connectMode == ConnectMode::NEXT0)src.next[0] = i; else src.next[1] = i;
-                    _connectMode = ConnectMode::NONE; SetStatus(TextFormat("Node %d connected.", i)); return;
+                    if (_connectMode == ConnectMode::NEXT0) src.next[0] = i;
+                    else if (_connectMode == ConnectMode::NEXT1) src.next[1] = i;
+                    else src.next[2] = i;
+                    _connectMode = ConnectMode::NONE; _selEdge.clear();
+                    SetStatus(TextFormat("Node %d connected.", i)); return;
                 }
             }
         }
@@ -1136,9 +1170,29 @@ void LevelEditor::UpdateCanvas() {
                 GizmoAxis hit = GizmoHitTest(center, wm);
                 if (hit != GizmoAxis::NONE) return;
             }
+            // Edge click: check proximity to path node edge midpoints
+            bool edgeHit = false;
+            for (int ni = 0; ni < (int)_level.pathNodes.size() && !edgeHit; ni++) {
+                const auto& pn = _level.pathNodes[ni];
+                Vector2 from = { pn.x, pn.y };
+                for (int k = 0; k < 3 && !edgeHit; k++) {
+                    int nb = pn.next[k];
+                    if (nb < 0 || nb >= (int)_level.pathNodes.size()) continue;
+                    Vector2 to = { _level.pathNodes[nb].x, _level.pathNodes[nb].y };
+                    Vector2 mid = Vector2Lerp(from, to, 0.5f);
+                    if (CheckCollisionPointCircle(wm, mid, 10.f)) {
+                        _selEdge = { ni, k };
+                        _sel.clear(); _multiSel.clear();
+                        edgeHit = true;
+                    }
+                }
+            }
+            if (edgeHit) return;
+
             bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
             bool hit = PickEntity(wm);
             if (hit) {
+                _selEdge.clear();
                 if (shift) {
                     SelectedEnt clicked = _sel;
                     bool already = IsInMultiSel(clicked);
@@ -1164,6 +1218,7 @@ void LevelEditor::UpdateCanvas() {
                 }
             }
             else {
+                _selEdge.clear();
                 if (shift) {
                     _boxSelecting = true; _boxStart = _boxEnd = wm;
                 }
@@ -1513,20 +1568,40 @@ void LevelEditor::DrawCaveEnt(Vector2 pos, bool sel, bool msel) const {
 }
 void LevelEditor::DrawPathNodes() {
     const auto& nodes = _level.pathNodes;
+    // Per-slot edge colors: slot0=orange, slot1=skyblue, slot2=magenta
+    static const Color EDGE_COL[3] = { {255,140,0,200},{0,200,255,200},{220,80,220,200} };
+    static const Color EDGE_HOV[3] = { {255,200,0,255},{0,255,255,255},{255,120,255,255} };
+
     for (int i = 0; i < (int)nodes.size(); i++) {
         const auto& n = nodes[i]; Vector2 from = { n.x,n.y };
-        for (int b = 0; b < 2; b++) {
-            if (n.next[b] < 0 || n.next[b] >= (int)nodes.size()) continue;
-            Vector2 to = { nodes[n.next[b]].x,nodes[n.next[b]].y };
-            Color lc = (b == 0) ? Color{ 255,140,0,200 } : Color{ 0,200,255,200 };
-            DrawLineEx(from, to, 2.f, lc); DrawCircleV(Vector2Lerp(from, to, .65f), 3.f, lc);
+        for (int k = 0; k < 3; k++) {
+            if (n.next[k] < 0 || n.next[k] >= (int)nodes.size()) continue;
+            Vector2 to = { nodes[n.next[k]].x,nodes[n.next[k]].y };
+            bool selEdge = (_selEdge.valid() && _selEdge.from == i && _selEdge.slot == k);
+            Color lc = selEdge ? EDGE_HOV[k] : EDGE_COL[k];
+            float lw = selEdge ? 4.f : 2.f;
+            DrawLineEx(from, to, lw, lc);
+            // Direction indicator at 65%
+            DrawCircleV(Vector2Lerp(from, to, .65f), 3.f, lc);
+            // Edge midpoint pick indicator (always, subtle; brighter when selected)
+            Vector2 mid = Vector2Lerp(from, to, 0.5f);
+            if (selEdge) {
+                DrawCircleV(mid, 7.f, lc);
+                // Show edge type label
+                const char* etLabel = (n.edgeType[k] == 1) ? "LAD" : "NRM";
+                DrawText(etLabel, (int)mid.x + 8, (int)mid.y - 5, 9, lc);
+            } else {
+                DrawCircleV(mid, 4.f, { lc.r,lc.g,lc.b,130 });
+            }
         }
     }
     for (int i = 0; i < (int)nodes.size(); i++) {
         const auto& n = nodes[i];
         bool sel = (_sel.valid() && _sel.type == (int)EditorTool::PATH_NODE && _sel.index == i);
         bool ms = IsInMultiSel({ (int)EditorTool::PATH_NODE,i });
-        Color fill = (i == 0) ? WHITE : (n.next[0] == -1 && n.next[1] == -1) ? RED : n.isSplitNode ? GREEN : YELLOW;
+        // Terminal = all nexts -1
+        bool terminal = (n.next[0] < 0 && n.next[1] < 0 && n.next[2] < 0);
+        Color fill = (i == 0) ? WHITE : terminal ? RED : n.isSplitNode ? GREEN : YELLOW;
         Vector2 pos = { n.x,n.y };
         if (ms && !sel) DrawCircleV(pos, 14.f, { 255,200,0,180 });
         if (sel) DrawCircleV(pos, 13.f, YELLOW);
@@ -1535,8 +1610,9 @@ void LevelEditor::DrawPathNodes() {
     }
     if (_connectMode != ConnectMode::NONE && _connectFrom >= 0 && _connectFrom < (int)nodes.size()) {
         Vector2 src = { nodes[_connectFrom].x,nodes[_connectFrom].y };
-        DrawCircleLines((int)src.x, (int)src.y, 16, (_connectMode == ConnectMode::NEXT0) ? ORANGE : SKYBLUE);
-        DrawLineEx(src, WorldMouse(), 1.5f, (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,150 } : Color{ 0,200,255,150 });
+        int slot = (_connectMode == ConnectMode::NEXT0) ? 0 : (_connectMode == ConnectMode::NEXT1) ? 1 : 2;
+        DrawCircleLines((int)src.x, (int)src.y, 16, EDGE_COL[slot]);
+        DrawLineEx(src, WorldMouse(), 1.5f, { EDGE_COL[slot].r,EDGE_COL[slot].g,EDGE_COL[slot].b,150 });
     }
 }
 
@@ -1928,7 +2004,7 @@ void LevelEditor::DrawDataPanel() {
     DrawRectangleLinesEx(dr, 1, { 55,60,85,255 });
     DrawRectangle((int)dr.x, (int)dr.y, (int)dr.width, 18, { 28,32,48,255 });
     DrawText("PROPERTIES", (int)dr.x + 6, (int)dr.y + 3, 11, { 180,185,210,255 });
-    if (!_sel.valid()) {
+    if (!_sel.valid() && !_selEdge.valid()) {
         DrawText("Nothing selected", (int)dr.x + 8, (int)dr.y + 26, 10, { 80,85,110,255 });
         return;
     }
@@ -1940,6 +2016,15 @@ void LevelEditor::DrawDataPanel() {
         DrawText(title, (int)px, (int)cy + 2, 10, { 130,140,170,255 });
         cy += 14;
         };
+    // Propagate a single changed field to all other multi-selected entities of the same type
+    auto syncField = [&](EditorTool tool, auto setter) {
+        if (_multiSel.size() <= 1) return;
+        for (const auto& e : _multiSel) {
+            if (e.type != (int)tool || e.index == _sel.index) continue;
+            setter(e.index);
+        }
+    };
+    if (_sel.valid()) {
     SectionHeader("── Transform ─────────────");
     float& refX = (_sel.type == (int)EditorTool::PLATFORM) ? _level.platforms[_sel.index].x
         : (_sel.type == (int)EditorTool::LADDER) ? _level.ladders[_sel.index].x
@@ -1983,9 +2068,9 @@ void LevelEditor::DrawDataPanel() {
     if (_sel.type == (int)EditorTool::ELEVATOR && _sel.index < (int)_level.elevators.size()) {
         auto& el = _level.elevators[_sel.index];
         SectionHeader("── Elevator ────────────────");
-        if (NumField("H  ", el.h, 2.f, 32, 2000, px, cy, fw)) {} cy += rowH;
-        if (NumField("W  ", el.w, 1.f, 16, 200, px, cy, fw)) {} cy += rowH;
-        if (NumField("Spd", el.speed, 2.f, 10, 600, px, cy, fw)) {} cy += rowH;
+        if (NumField("H  ", el.h, 2.f, 32, 2000, px, cy, fw)) { syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].h = el.h; }); } cy += rowH;
+        if (NumField("W  ", el.w, 1.f, 16, 200, px, cy, fw)) { syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].w = el.w; }); } cy += rowH;
+        if (NumField("Spd", el.speed, 2.f, 10, 600, px, cy, fw)) { syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].speed = el.speed; }); } cy += rowH;
         float bw2 = (fw - 4) / 2.f;
         Rectangle rUp = { px, cy, bw2, 18 };
         Rectangle rDwn = { px + bw2 + 4, cy, bw2, 18 };
@@ -1995,8 +2080,8 @@ void LevelEditor::DrawDataPanel() {
         DrawRectangleRec(rDwn, el.direction == -1 ? Color{ 100,40,20,255 } : (hDwn ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
         DrawText("▲ UP", (int)(rUp.x + 4), (int)cy + 4, 9, el.direction == 1 ? WHITE : Color{ 140,145,170,255 });
         DrawText("▼ DOWN", (int)(rDwn.x + 4), (int)cy + 4, 9, el.direction == -1 ? WHITE : Color{ 140,145,170,255 });
-        if (hUp && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction = 1; }
-        if (hDwn && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction = -1; }
+        if (hUp  && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction =  1; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].direction =  1; }); }
+        if (hDwn && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction = -1; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].direction = -1; }); }
         cy += 22;
         SectionHeader("── Children ────────────────");
         SelectedEnt elEnt = { (int)EditorTool::ELEVATOR, _sel.index };
@@ -2044,7 +2129,7 @@ void LevelEditor::DrawDataPanel() {
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Rotation ───────────────");
         auto& p = _level.platforms[_sel.index];
-        if (NumField("Tilt", p.tilt, .3f, -89, 89, px, cy, fw)) {} cy += rowH;
+        if (NumField("Tilt", p.tilt, .3f, -89, 89, px, cy, fw)) { syncField(EditorTool::PLATFORM, [&](int i) { _level.platforms[i].tilt = p.tilt; }); } cy += rowH;
         float bw2 = (fw - 4) / 4.f;
         const float presets[] = { -45,-15,15,45 }; const char* plabels[] = { "-45","-15","15","45" };
         for (int pi = 0; pi < 4; pi++) {
@@ -2052,15 +2137,15 @@ void LevelEditor::DrawDataPanel() {
             bool hov = CheckCollisionPointRec(GetMousePosition(), br);
             DrawRectangleRec(br, hov ? Color{ 60,65,90,255 } : Color{ 35,38,55,255 });
             int tw = MeasureText(plabels[pi], 9); DrawText(plabels[pi], (int)(br.x + br.width / 2 - tw / 2), (int)br.y + 2, 9, { 180,185,210,255 });
-            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); p.tilt = presets[pi]; }
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); p.tilt = presets[pi]; syncField(EditorTool::PLATFORM, [&](int i) { _level.platforms[i].tilt = presets[pi]; }); }
         }
         cy += 17;
     }
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Scale ──────────────────");
         auto& p = _level.platforms[_sel.index];
-        if (NumField("W  ", p.w, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
-        if (NumField("H  ", p.h, .5f, 0, 200, px, cy, fw)) {} cy += rowH;
+        if (NumField("W  ", p.w, 1.f, GRID_SZ, 2000, px, cy, fw)) { syncField(EditorTool::PLATFORM, [&](int i) { _level.platforms[i].w = p.w; }); } cy += rowH;
+        if (NumField("H  ", p.h, .5f, 0, 200, px, cy, fw)) { syncField(EditorTool::PLATFORM, [&](int i) { _level.platforms[i].h = p.h; }); } cy += rowH;
         {
             float hw = (fw - 3) * 0.5f;
             Rectangle cpR = { px, cy, hw, 15 }, ppR = { px + hw + 3, cy, hw, 15 };
@@ -2080,8 +2165,8 @@ void LevelEditor::DrawDataPanel() {
     else if (_sel.type == (int)EditorTool::LADDER) {
         SectionHeader("── Scale ──────────────────");
         auto& l = _level.ladders[_sel.index];
-        if (NumField("W  ", l.w, 1.f, 8, 200, px, cy, fw)) {} cy += rowH;
-        if (NumField("H  ", l.h, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
+        if (NumField("W  ", l.w, 1.f, 8, 200, px, cy, fw)) { syncField(EditorTool::LADDER, [&](int i) { _level.ladders[i].w = l.w; }); } cy += rowH;
+        if (NumField("H  ", l.h, 1.f, GRID_SZ, 2000, px, cy, fw)) { syncField(EditorTool::LADDER, [&](int i) { _level.ladders[i].h = l.h; }); } cy += rowH;
     }
     if (_sel.type == (int)EditorTool::BEAM && _sel.index < (int)_level.beams.size()) {
         auto& bm = _level.beams[_sel.index];
@@ -2100,7 +2185,7 @@ void LevelEditor::DrawDataPanel() {
                 int nlw = MeasureText(lbl, 9);
                 DrawText(lbl, (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
                     isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
-                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = ti; }
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = ti; syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].texVariant = ti; }); }
             }
             cy += 20;
         }
@@ -2119,7 +2204,7 @@ void LevelEditor::DrawDataPanel() {
                 int nlw = MeasureText(lbl, 9);
                 DrawText(lbl, (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
                     isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
-                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = varIdx; }
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = varIdx; syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].texVariant = varIdx; }); }
             }
             cy += 20;
         }
@@ -2138,7 +2223,7 @@ void LevelEditor::DrawDataPanel() {
                 int nlw = MeasureText(rowLabels[ti], 9);
                 DrawText(rowLabels[ti], (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
                     isActive ? Color{ 100,200,255,255 } : Color{ 170,175,200,255 });
-                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = varIdx; }
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.texVariant = varIdx; syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].texVariant = varIdx; }); }
             }
             cy += 20;
         }
@@ -2153,6 +2238,7 @@ void LevelEditor::DrawDataPanel() {
             float rlF = (float)bm.renderLayer;
             if (NumField("Layer", rlF, 1.f, -10, 100, px, cy, fw)) {
                 PushUndo(); bm.renderLayer = (int)rlF;
+                syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].renderLayer = bm.renderLayer; });
             }
             cy += rowH;
         }
@@ -2168,7 +2254,7 @@ void LevelEditor::DrawDataPanel() {
             int flw = MeasureText(flipLbl, 9);
             DrawText(flipLbl, (int)(flipR.x + flipR.width / 2 - flw / 2), (int)flipR.y + 5, 9,
                 bm.flipX ? Color{ 200,150,255,255 } : Color{ 170,175,200,255 });
-            if (hFlip && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.flipX = !bm.flipX; }
+            if (hFlip && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.flipX = !bm.flipX; syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].flipX = bm.flipX; }); }
             cy += 22;
         }
         // ── Transparent (light pass-through) ─────────────────────────────────
@@ -2182,7 +2268,7 @@ void LevelEditor::DrawDataPanel() {
             int trw = MeasureText(trLbl, 9);
             DrawText(trLbl, (int)(trR.x + trR.width / 2 - trw / 2), (int)trR.y + 5, 9,
                 bm.transparent ? Color{ 100,200,255,255 } : Color{ 170,175,200,255 });
-            if (hTr && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.transparent = !bm.transparent; }
+            if (hTr && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.transparent = !bm.transparent; syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].transparent = bm.transparent; }); }
             cy += 22;
         }
         // ── Sound material selector ───────────────────────────────────────────
@@ -2207,7 +2293,7 @@ void LevelEditor::DrawDataPanel() {
                 int nlw = MeasureText(matNames[mi], 8);
                 DrawText(matNames[mi], (int)(mb.x + mb.width / 2 - nlw / 2), (int)mb.y + 4, 8,
                     isActive ? Color{ 140,255,80,255 } : Color{ 150,155,180,255 });
-                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.soundMaterial = mi; }
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); bm.soundMaterial = mi; syncField(EditorTool::BEAM, [&](int i) { _level.beams[i].soundMaterial = mi; }); }
             }
             cy += 20;
         }
@@ -2223,10 +2309,10 @@ void LevelEditor::DrawDataPanel() {
     if (_sel.type == (int)EditorTool::KILL_ZONE && _sel.index < (int)_level.killZones.size()) {
         auto& kz = _level.killZones[_sel.index];
         SectionHeader("── Kill Zone ──────────────");
-        if (NumField("W  ", kz.w, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
-        if (NumField("H  ", kz.h, 1.f, GRID_SZ, 2000, px, cy, fw)) {} cy += rowH;
+        if (NumField("W  ", kz.w, 1.f, GRID_SZ, 2000, px, cy, fw)) { syncField(EditorTool::KILL_ZONE, [&](int i) { _level.killZones[i].w = kz.w; }); } cy += rowH;
+        if (NumField("H  ", kz.h, 1.f, GRID_SZ, 2000, px, cy, fw)) { syncField(EditorTool::KILL_ZONE, [&](int i) { _level.killZones[i].h = kz.h; }); } cy += rowH;
         SectionHeader("── Rotation ───────────────");
-        if (NumField("Rot", kz.rotation, 1.f, -360, 360, px, cy, fw)) {} cy += rowH;
+        if (NumField("Rot", kz.rotation, 1.f, -360, 360, px, cy, fw)) { syncField(EditorTool::KILL_ZONE, [&](int i) { _level.killZones[i].rotation = kz.rotation; }); } cy += rowH;
         float bw2kz = (fw - 4) / 4.f;
         const float kzPresets[] = { 0.f, 90.f, 180.f, 270.f }; const char* kzLabels[] = { "0Â°", "90Â°", "180Â°", "270Â°" };
         for (int pi = 0; pi < 4; pi++) {
@@ -2236,7 +2322,7 @@ void LevelEditor::DrawDataPanel() {
             DrawRectangleRec(br, isAct ? Color{ 60,40,10,255 } : (hov ? Color{ 60,65,90,255 } : Color{ 35,38,55,255 }));
             DrawRectangleLinesEx(br, 1.f, isAct ? Color{ 255,200,80,255 } : Color{ 55,60,85,255 });
             int tw = MeasureText(kzLabels[pi], 9); DrawText(kzLabels[pi], (int)(br.x + br.width / 2 - tw / 2), (int)br.y + 2, 9, isAct ? Color{ 255,200,80,255 } : Color{ 180,185,210,255 });
-            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); kz.rotation = kzPresets[pi]; }
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); kz.rotation = kzPresets[pi]; syncField(EditorTool::KILL_ZONE, [&](int i) { _level.killZones[i].rotation = kzPresets[pi]; }); }
         }
         cy += 17;
         SectionHeader("── Texture ────────────────");
@@ -2252,7 +2338,7 @@ void LevelEditor::DrawDataPanel() {
             int ntw = MeasureText(texNames[ti], 9);
             DrawText(texNames[ti], (int)(tb.x + tb.width / 2 - ntw / 2), (int)tb.y + 3, 9,
                 isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
-            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); kz.texId = (KillZoneTexture)ti; }
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); kz.texId = (KillZoneTexture)ti; syncField(EditorTool::KILL_ZONE, [&](int i) { _level.killZones[i].texId = (KillZoneTexture)ti; }); }
         }
         cy += 20;
         if (kz.texId == KillZoneTexture::DK_GOLDEN_PISTON && _goldenPistonTex && _goldenPistonTex->id > 0) {
@@ -2267,6 +2353,7 @@ void LevelEditor::DrawDataPanel() {
             float rlF = (float)kz.renderLayer;
             if (NumField("Layer", rlF, 1.f, -10, 100, px, cy, fw)) {
                 PushUndo(); kz.renderLayer = (int)rlF;
+                syncField(EditorTool::KILL_ZONE, [&](int i) { _level.killZones[i].renderLayer = kz.renderLayer; });
             }
             cy += rowH;
         }
@@ -2291,9 +2378,9 @@ void LevelEditor::DrawDataPanel() {
     if (_sel.type == (int)EditorTool::CONVEYOR && _sel.index < (int)_level.conveyors.size()) {
         auto& cv = _level.conveyors[_sel.index];
         SectionHeader("── Conveyor ────────────────");
-        if (NumField("Len", cv.length, 2.f, 32, 4000, px, cy, fw)) {} cy += rowH;
-        if (NumField("Spd", cv.speed, 1.f, 10, 600, px, cy, fw)) {} cy += rowH;
-        if (NumField("Rot", cv.rotation, 0.3f, -89, 89, px, cy, fw)) {} cy += rowH;
+        if (NumField("Len", cv.length, 2.f, 32, 4000, px, cy, fw)) { syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].length = cv.length; }); } cy += rowH;
+        if (NumField("Spd", cv.speed, 1.f, 10, 600, px, cy, fw)) { syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].speed = cv.speed; }); } cy += rowH;
+        if (NumField("Rot", cv.rotation, 0.3f, -89, 89, px, cy, fw)) { syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].rotation = cv.rotation; }); } cy += rowH;
         // Direction buttons
         float bw2cv = (fw - 4) / 2.f;
         Rectangle rL = { px, cy, bw2cv, 18 }, rR = { px + bw2cv + 4, cy, bw2cv, 18 };
@@ -2303,23 +2390,23 @@ void LevelEditor::DrawDataPanel() {
         DrawRectangleRec(rR, cv.direction == 1 ? Color{ 20,100,40,255 } : (hR ? Color{ 40,45,65,255 } : Color{ 28,32,48,255 }));
         DrawText("< LEFT", (int)(rL.x + 4), (int)cy + 4, 9, cv.direction == -1 ? WHITE : Color{ 140,145,170,255 });
         DrawText("RIGHT >", (int)(rR.x + 4), (int)cy + 4, 9, cv.direction == 1 ? WHITE : Color{ 140,145,170,255 });
-        if (hL && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = -1; }
-        if (hR && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = 1; }
+        if (hL && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = -1; syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].direction = -1; }); }
+        if (hR && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction =  1; syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].direction =  1; }); }
         cy += 22;
     }
     if (_sel.type == (int)EditorTool::PROP && _sel.index < (int)_level.props.size()) {
         auto& pr = _level.props[_sel.index];
         SectionHeader("── Prop ────────────────────");
-        if (NumField("W  ", pr.width, 1.f, 4, 2000, px, cy, fw)) {} cy += rowH;
-        if (NumField("H  ", pr.height, 1.f, 4, 2000, px, cy, fw)) {} cy += rowH;
-        if (NumField("Rot", pr.rotation, 0.3f, -360, 360, px, cy, fw)) {} cy += rowH;
+        if (NumField("W  ", pr.width, 1.f, 4, 2000, px, cy, fw)) { syncField(EditorTool::PROP, [&](int i) { _level.props[i].width = pr.width; }); } cy += rowH;
+        if (NumField("H  ", pr.height, 1.f, 4, 2000, px, cy, fw)) { syncField(EditorTool::PROP, [&](int i) { _level.props[i].height = pr.height; }); } cy += rowH;
+        if (NumField("Rot", pr.rotation, 0.3f, -360, 360, px, cy, fw)) { syncField(EditorTool::PROP, [&](int i) { _level.props[i].rotation = pr.rotation; }); } cy += rowH;
         SectionHeader("── Lighting ────────────────");
-        if (NumField("Aff", pr.lightAffect, 0.05f, 0.f, 3.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("Aff", pr.lightAffect, 0.05f, 0.f, 3.f, px, cy, fw)) { syncField(EditorTool::PROP, [&](int i) { _level.props[i].lightAffect = pr.lightAffect; }); } cy += rowH;
         DrawText("0=unlit 1=lit 2+=glow", (int)px, (int)cy, 9, { 110,150,200,255 }); cy += 12;
         SectionHeader("── Render Layer ────────────");
         {
             float rlF = (float)pr.renderLayer;
-            if (NumField("Layer", rlF, 1.f, 0, 2, px, cy, fw)) { PushUndo(); pr.renderLayer = (int)rlF; }
+            if (NumField("Layer", rlF, 1.f, 0, 2, px, cy, fw)) { PushUndo(); pr.renderLayer = (int)rlF; syncField(EditorTool::PROP, [&](int i) { _level.props[i].renderLayer = pr.renderLayer; }); }
             cy += rowH;
         }
         DrawText("0=behind  1=front  2=overlay", (int)px, (int)cy, 9, { 110,150,200,255 }); cy += 12;
@@ -2333,7 +2420,7 @@ void LevelEditor::DrawDataPanel() {
             int tww = MeasureText(ts, 9);
             DrawText(ts, (int)(colR.x + colR.width / 2 - tww / 2), (int)colR.y + 5, 9,
                 pr.hasCollision ? Color{ 180,255,180,255 } : Color{ 170,175,200,255 });
-            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); pr.hasCollision = !pr.hasCollision; }
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); pr.hasCollision = !pr.hasCollision; syncField(EditorTool::PROP, [&](int i) { _level.props[i].hasCollision = pr.hasCollision; }); }
             cy += 22;
         }
         SectionHeader("── Tex Variant ─────────────");
@@ -2354,7 +2441,7 @@ void LevelEditor::DrawDataPanel() {
                     int nlw = MeasureText(propVarNames[vi], 9);
                     DrawText(propVarNames[vi], (int)(tb.x + tb.width / 2 - nlw / 2), (int)tb.y + 4, 9,
                         isActive ? Color{ 255,200,80,255 } : Color{ 170,175,200,255 });
-                    if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); pr.texVariant = vi; }
+                    if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); pr.texVariant = vi; syncField(EditorTool::PROP, [&](int i) { _level.props[i].texVariant = vi; }); }
                 }
                 cy += 20;
             }
@@ -2405,9 +2492,10 @@ void LevelEditor::DrawDataPanel() {
         cy += 20;
 
         SectionHeader("── Color ──────────────────");
-        if (NumField("R  ", L.r, 0.005f, 0.f, 1.f, px, cy, fw)) {} cy += rowH;
-        if (NumField("G  ", L.g, 0.005f, 0.f, 1.f, px, cy, fw)) {} cy += rowH;
-        if (NumField("B  ", L.b, 0.005f, 0.f, 1.f, px, cy, fw)) {} cy += rowH;
+        auto lt = (EditorTool)_sel.type;
+        if (NumField("R  ", L.r, 0.005f, 0.f, 1.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].r = L.r; }); } cy += rowH;
+        if (NumField("G  ", L.g, 0.005f, 0.f, 1.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].g = L.g; }); } cy += rowH;
+        if (NumField("B  ", L.b, 0.005f, 0.f, 1.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].b = L.b; }); } cy += rowH;
         // Color preview swatch
         Color prv = { (unsigned char)(L.r * 255), (unsigned char)(L.g * 255), (unsigned char)(L.b * 255), 255 };
         Rectangle sw2 = { px, cy, fw, 14 };
@@ -2416,31 +2504,32 @@ void LevelEditor::DrawDataPanel() {
         cy += 18;
 
         SectionHeader("── Emission ───────────────");
-        if (NumField("Int", L.intensity, 0.02f, 0.f, 8.f, px, cy, fw)) {} cy += rowH;
-        if (NumField("Rad", L.radius, 1.0f, 8.f, 4000.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("Int", L.intensity, 0.02f, 0.f, 8.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].intensity = L.intensity; }); } cy += rowH;
+        if (NumField("Rad", L.radius, 1.0f, 8.f, 4000.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].radius = L.radius; }); } cy += rowH;
         if (NumField("Inn", L.innerRadius, 1.0f, 0.f, L.radius * 0.99f, px, cy, fw)) {
             L.innerRadius = fminf(L.innerRadius, L.radius * 0.99f);
+            syncField(lt, [&](int i) { _level.lights[i].innerRadius = L.innerRadius; });
         } cy += rowH;
         DrawText("Inn = flat center; 0 = pure falloff", (int)px, (int)cy, 9, { 110, 150, 200, 255 }); cy += 12;
 
         if (L.type == LightType::SPOT) {
             SectionHeader("── Spot ───────────────────");
-            if (NumField("Ang", L.angle, 0.5f, 1.f, 175.f, px, cy, fw)) {} cy += rowH;
-            if (NumField("Dir", L.direction, 0.5f, 0.f, 360.f, px, cy, fw)) {} cy += rowH;
+            if (NumField("Ang", L.angle, 0.5f, 1.f, 175.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].angle = L.angle; }); } cy += rowH;
+            if (NumField("Dir", L.direction, 0.5f, 0.f, 360.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].direction = L.direction; }); } cy += rowH;
         }
         if (L.type == LightType::SKY) {
             SectionHeader("── Sky ────────────────────");
-            if (NumField("Dir", L.direction, 0.5f, 0.f, 360.f, px, cy, fw)) {} cy += rowH;
+            if (NumField("Dir", L.direction, 0.5f, 0.f, 360.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].direction = L.direction; }); } cy += rowH;
             DrawText("270 = light from above", (int)px, (int)cy, 9, { 110,150,200,255 }); cy += 12;
         }
 
         SectionHeader("── Advanced ───────────────");
         {
             float bF = (float)L.bounces;
-            if (NumField("Bnc", bF, 1.f, 0.f, 4.f, px, cy, fw)) { L.bounces = (int)bF; }
+            if (NumField("Bnc", bF, 1.f, 0.f, 4.f, px, cy, fw)) { L.bounces = (int)bF; syncField(lt, [&](int i) { _level.lights[i].bounces = L.bounces; }); }
             cy += rowH;
         }
-        if (NumField("Fog", L.fogStrength, 0.01f, 0.f, 2.f, px, cy, fw)) {} cy += rowH;
+        if (NumField("Fog", L.fogStrength, 0.01f, 0.f, 2.f, px, cy, fw)) { syncField(lt, [&](int i) { _level.lights[i].fogStrength = L.fogStrength; }); } cy += rowH;
 
         // Enabled toggle
         {
@@ -2453,7 +2542,7 @@ void LevelEditor::DrawDataPanel() {
             const char* ts = L.enabled ? "ENABLED (click to disable)" : "DISABLED (click to enable)";
             int tww = MeasureText(ts, 9);
             DrawText(ts, (int)(eb.x + eb.width / 2 - tww / 2), (int)eb.y + 4, 9, c2);
-            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); L.enabled = !L.enabled; }
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); L.enabled = !L.enabled; syncField(lt, [&](int i) { _level.lights[i].enabled = L.enabled; }); }
             cy += 20;
         }
 
@@ -2480,15 +2569,19 @@ void LevelEditor::DrawDataPanel() {
     if (_sel.type == (int)EditorTool::PATH_NODE) {
         SectionHeader("── Node Settings ──────────");
         auto& n = _level.pathNodes[_sel.index];
-        DrawText(TextFormat("Next[0]: %d", n.next[0]), (int)px, (int)cy + 2, 10, { 180,185,210,255 }); cy += rowH;
-        DrawText(TextFormat("Next[1]: %d", n.next[1]), (int)px, (int)cy + 2, 10, { 180,185,210,255 }); cy += rowH;
-        float bw3 = (fw - 4) / 2.f;
-        Rectangle rN0 = { px,cy,bw3,16 }, rN1 = { px + bw3 + 4,cy,bw3,16 };
-        bool h0 = CheckCollisionPointRec(GetMousePosition(), rN0), h1 = CheckCollisionPointRec(GetMousePosition(), rN1);
-        DrawRectangleRec(rN0, h0 ? Color{ 180,80,0,255 } : Color{ 80,40,0,255 }); DrawText("Set N0", (int)rN0.x + 4, (int)rN0.y + 2, 10, WHITE);
-        DrawRectangleRec(rN1, h1 ? Color{ 0,100,180,255 } : Color{ 0,50,100,255 }); DrawText("Set N1", (int)rN1.x + 4, (int)rN1.y + 2, 10, WHITE);
-        if (h0 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT0; _connectFrom = _sel.index; SetStatus("Click node -> N0"); }
-        if (h1 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = ConnectMode::NEXT1; _connectFrom = _sel.index; SetStatus("Click node -> N1"); }
+        static const Color SLOT_COL[3] = { {255,140,0,255},{0,180,255,255},{200,60,200,255} };
+        static const Color SLOT_DIM[3] = { {80,40,0,255},{0,50,100,255},{70,20,70,255} };
+        DrawText(TextFormat("N0:%d  N1:%d  N2:%d", n.next[0], n.next[1], n.next[2]), (int)px, (int)cy + 2, 9, { 180,185,210,255 }); cy += rowH;
+        float bw3 = (fw - 8) / 3.f;
+        const char* btnLbl[3] = { "Set N0","Set N1","Set N2" };
+        ConnectMode btnMode[3] = { ConnectMode::NEXT0,ConnectMode::NEXT1,ConnectMode::NEXT2 };
+        for (int k = 0; k < 3; k++) {
+            Rectangle rBtn = { px + k * (bw3 + 4), cy, bw3, 16 };
+            bool hk = CheckCollisionPointRec(GetMousePosition(), rBtn);
+            DrawRectangleRec(rBtn, hk ? SLOT_COL[k] : SLOT_DIM[k]);
+            DrawText(btnLbl[k], (int)rBtn.x + 2, (int)rBtn.y + 2, 9, WHITE);
+            if (hk && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { _connectMode = btnMode[k]; _connectFrom = _sel.index; SetStatus(TextFormat("Click node -> N%d", k)); }
+        }
         cy += 20;
         float bwS = (fw - 4) / 2.f;
         Rectangle rSpl = { px,cy,bwS,16 };
@@ -2499,16 +2592,44 @@ void LevelEditor::DrawDataPanel() {
         cy += 20;
         float rv = n.rollThreshold;
         if (NumField("Roll", rv, 0.05f, 0, 10, px, cy, fw)) { PushUndo(); n.rollThreshold = (int)roundf(rv); } cy += rowH;
+        // Hint: E to extrude
+        DrawText("[E] to extrude new node", (int)px, (int)cy + 1, 9, { 130,140,160,255 }); cy += rowH;
     }
-    // Propagate non-positional properties from primary to all other selected entities
-    SyncPropertiesFromPrimary();
+    // DELETE button (only when entity is selected)
+    {
+        Rectangle delR = { px, cy + 4, fw, 18 };
+        bool delH = CheckCollisionPointRec(GetMousePosition(), delR);
+        DrawRectangleRec(delR, delH ? Color{ 180,30,30,255 } : Color{ 100,20,20,255 });
+        int dtw = MeasureText("DELETE", 11); DrawText("DELETE", (int)(delR.x + delR.width / 2 - dtw / 2), (int)delR.y + 3, 11, WHITE);
+        if (delH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+            _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
+    }
+    } // end if (_sel.valid())
 
-    Rectangle delR = { px,dr.y + dr.height - 22,fw,18 };
-    bool delH = CheckCollisionPointRec(GetMousePosition(), delR);
-    DrawRectangleRec(delR, delH ? Color{ 180,30,30,255 } : Color{ 100,20,20,255 });
-    int dtw = MeasureText("DELETE", 11); DrawText("DELETE", (int)(delR.x + delR.width / 2 - dtw / 2), (int)delR.y + 3, 11, WHITE);
-    if (delH && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-        _multiSel.empty() ? DeleteSelected() : DeleteMultiSelected();
+    // Edge selected panel
+    if (_selEdge.valid() && _selEdge.from < (int)_level.pathNodes.size()) {
+        SectionHeader("── Edge Settings ──────────");
+        auto& srcNode = _level.pathNodes[_selEdge.from];
+        int nb = srcNode.next[_selEdge.slot];
+        DrawText(TextFormat("Edge %d -> %d (slot %d)", _selEdge.from, nb, _selEdge.slot), (int)px, (int)cy + 2, 9, { 180,185,210,255 }); cy += rowH;
+        int& et = srcNode.edgeType[_selEdge.slot];
+        float bwE = (fw - 4) / 2.f;
+        Rectangle rNrm = { px, cy, bwE, 16 }, rLad = { px + bwE + 4, cy, bwE, 16 };
+        bool hNrm = CheckCollisionPointRec(GetMousePosition(), rNrm);
+        bool hLad = CheckCollisionPointRec(GetMousePosition(), rLad);
+        DrawRectangleRec(rNrm, (et == 0) ? Color{ 60,160,60,255 } : (hNrm ? Color{ 40,80,40,255 } : Color{ 25,45,25,255 }));
+        DrawText("NORMAL", (int)rNrm.x + 4, (int)rNrm.y + 2, 9, WHITE);
+        DrawRectangleRec(rLad, (et == 1) ? Color{ 0,140,220,255 } : (hLad ? Color{ 0,60,100,255 } : Color{ 0,35,60,255 }));
+        DrawText("LADDER", (int)rLad.x + 4, (int)rLad.y + 2, 9, WHITE);
+        if (hNrm && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); et = 0; }
+        if (hLad && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); et = 1; }
+        cy += 20;
+        Rectangle rDis = { px, cy, fw, 16 };
+        bool hDis = CheckCollisionPointRec(GetMousePosition(), rDis);
+        DrawRectangleRec(rDis, hDis ? Color{ 160,50,20,255 } : Color{ 90,30,10,255 });
+        DrawText("Disconnect edge", (int)rDis.x + 4, (int)rDis.y + 2, 9, WHITE);
+        if (hDis && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); srcNode.next[_selEdge.slot] = -1; srcNode.edgeType[_selEdge.slot] = 0; _selEdge.clear(); }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2603,10 +2724,15 @@ void LevelEditor::Draw() {
     }
 
     if (_connectMode != ConnectMode::NONE) {
-        const char* h = (_connectMode == ConnectMode::NEXT0) ? ">> Click node → NEXT[0]  (ESC=cancel)" : ">> Click node → NEXT[1]  (ESC=cancel)";
+        const char* h = (_connectMode == ConnectMode::NEXT0) ? ">> Click node -> NEXT[0]  (ESC=cancel)"
+                      : (_connectMode == ConnectMode::NEXT1) ? ">> Click node -> NEXT[1]  (ESC=cancel)"
+                                                             : ">> Click node -> NEXT[2]  (ESC=cancel)";
+        Color hc = (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,255 }
+                 : (_connectMode == ConnectMode::NEXT1) ? Color{ 0,200,255,255 }
+                                                        : Color{ 220,80,220,255 };
         int tw = MeasureText(h, 13), tx = _canvasW / 2 - tw / 2, ty = _sh / 2 - 10;
         DrawRectangle(tx - 8, ty - 5, tw + 16, 24, { 0,0,0,200 });
-        DrawText(h, tx, ty, 13, (_connectMode == ConnectMode::NEXT0) ? Color{ 255,140,0,255 } : Color{ 0,200,255,255 });
+        DrawText(h, tx, ty, 13, hc);
     }
     if (_multiSel.size() > 1) {
         const char* ms = TextFormat("%d selected", (int)_multiSel.size());

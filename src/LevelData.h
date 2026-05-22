@@ -28,7 +28,8 @@ struct LadderData {
 struct PathNodeData {
     float x = 0.f;
     float y = 0.f;
-    int   next[2] = { -1, -1 };
+    int   next[3] = { -1, -1, -1 };
+    int   edgeType[3] = { 0, 0, 0 };  // 0=normal, 1=ladder movement
     int   rollThreshold = 5;
     bool  isSplitNode = false;
 };

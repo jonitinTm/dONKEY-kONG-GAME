@@ -27,7 +27,14 @@ enum class EditorTool : int {
 };
 enum class GizmoMode { SELECT = 0, MOVE, ROTATE, SCALE };
 enum class GizmoAxis { NONE, X, Y, FREE, RING };
-enum class ConnectMode { NONE, NEXT0, NEXT1 };
+enum class ConnectMode { NONE, NEXT0, NEXT1, NEXT2 };
+
+struct SelEdge {
+    int from = -1;
+    int slot = -1;  // 0/1/2 = which next[] slot this edge comes from
+    bool valid() const { return from >= 0 && slot >= 0; }
+    void clear() { from = -1; slot = -1; }
+};
 
 // SelectedEnt is identical to EntityRef (defined in LevelData.h).
 using SelectedEnt = EntityRef;
@@ -197,6 +204,7 @@ private:
     ConnectMode _connectMode = ConnectMode::NONE;
     int         _connectFrom = -1;
     double      _lastThreshClick = -999.0;
+    SelEdge     _selEdge;
 
     std::vector<OutlineRow> _outline;
     int _outlineScroll = 0;

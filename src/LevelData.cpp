@@ -61,8 +61,10 @@ bool SaveLevel(const LevelData& lv, const char* folder)
             b.x, b.y, b.texVariant, b.renderLayer, b.flipX ? 1 : 0, b.transparent ? 1 : 0, b.soundMaterial);
 
     for (const auto& n : lv.pathNodes)
-        fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d\n",
-            n.x, n.y, n.next[0], n.next[1], n.rollThreshold, n.isSplitNode ? 1 : 0);
+        fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d %d %d %d %d\n",
+            n.x, n.y, n.next[0], n.next[1], n.next[2],
+            n.edgeType[0], n.edgeType[1], n.edgeType[2],
+            n.rollThreshold, n.isSplitNode ? 1 : 0);
 
     for (const auto& v : lv.nukeSpawns)
         fprintf(f, "NUKE_SPAWN %.2f %.2f\n", v.x, v.y);
@@ -177,9 +179,22 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
             out.beams.push_back(b);
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
-            PathNodeData n; int split = 0;
-            (void)fscanf(f, "%f %f %d %d %d %d",
-                &n.x, &n.y, &n.next[0], &n.next[1], &n.rollThreshold, &split);
+            char line[512]; fgets(line, sizeof(line), f);
+            PathNodeData n; int roll = 5, split = 0;
+            // New format (10 values): x y next0 next1 next2 et0 et1 et2 roll isSplit
+            // Old format (6 values):  x y next0 next1 roll isSplit
+            // sscanf into new layout; if only 6 parsed the 5th/6th land in next[2]/edgeType[0]
+            int cnt = sscanf(line, "%f %f %d %d %d %d %d %d %d %d",
+                &n.x, &n.y, &n.next[0], &n.next[1], &n.next[2],
+                &n.edgeType[0], &n.edgeType[1], &n.edgeType[2], &roll, &split);
+            if (cnt == 6) {
+                // Old format: 5th value = rollThreshold, 6th = isSplit
+                roll  = n.next[2];
+                split = n.edgeType[0];
+                n.next[2] = -1;
+                n.edgeType[0] = n.edgeType[1] = n.edgeType[2] = 0;
+            }
+            n.rollThreshold = roll;
             n.isSplitNode = (split != 0);
             out.pathNodes.push_back(n);
         }
@@ -412,9 +427,10 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
     fprintf(f, "// Barrel path\nvector<PathNode> barrelPath = {\n");
     for (int i = 0; i < static_cast<int>(lv.pathNodes.size()); i++) {
         const auto& n = lv.pathNodes[i];
-        fprintf(f, "    /* %2d */ { {%.0f,%.0f}, {%2d,%2d}, %2d, %s },\n",
-            i, n.x, n.y, n.next[0], n.next[1], n.rollThreshold,
-            n.isSplitNode ? "true " : "false");
+        fprintf(f, "    /* %2d */ { {%.0f,%.0f}, {%2d,%2d,%2d}, {%d,%d,%d}, %2d, %s },\n",
+            i, n.x, n.y, n.next[0], n.next[1], n.next[2],
+            n.edgeType[0], n.edgeType[1], n.edgeType[2],
+            n.rollThreshold, n.isSplitNode ? "true " : "false");
     }
     fprintf(f, "};\n\n");
 
