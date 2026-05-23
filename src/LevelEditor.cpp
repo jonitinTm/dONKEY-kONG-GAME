@@ -72,6 +72,7 @@ void LevelEditor::Init(int sw, int sh) {
     // Preview ON by default — tap F8 (or F8:LIGHT button) to toggle off
     _lightingPreview = true;
 
+    LoadGameSettings(_levelRangeMin, _levelRangeMax);
     LoadLevel(1);
 }
 
@@ -2005,7 +2006,38 @@ void LevelEditor::DrawDataPanel() {
     DrawRectangle((int)dr.x, (int)dr.y, (int)dr.width, 18, { 28,32,48,255 });
     DrawText("PROPERTIES", (int)dr.x + 6, (int)dr.y + 3, 11, { 180,185,210,255 });
     if (!_sel.valid() && !_selEdge.valid()) {
-        DrawText("Nothing selected", (int)dr.x + 8, (int)dr.y + 26, 10, { 80,85,110,255 });
+        float px = dr.x + 6, fw = dr.width - 12;
+        float cy = dr.y + 22;
+        float rowH = 20.f;
+        auto SH = [&](const char* t) {
+            DrawLine((int)px, (int)cy, (int)(px + fw), (int)cy, { 60,65,90,255 });
+            DrawText(t, (int)px, (int)cy + 2, 10, { 130,140,170,255 }); cy += 14;
+        };
+        auto NumFld = [&](const char* label, float& val, float step, float mn, float mx) -> bool {
+            char buf[32]; snprintf(buf, sizeof(buf), "%.0f", val);
+            int lw = MeasureText(label, 9), bw2 = (int)(fw - lw - 4);
+            Rectangle r = { px + lw + 4, cy, (float)bw2, 15 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+            DrawText(label, (int)px, (int)cy + 3, 9, { 160,165,190,255 });
+            DrawRectangleRec(r, hov ? Color{45,48,68,255} : Color{28,32,48,255});
+            DrawRectangleLinesEx(r, 1, {70,75,100,255});
+            int tw = MeasureText(buf, 9);
+            DrawText(buf, (int)(r.x + r.width/2 - tw/2), (int)r.y + 3, 9, WHITE);
+            bool changed = false;
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (GetMouseX() < r.x + r.width/2) { val = Clamp(val - step, mn, mx); changed = true; }
+                else { val = Clamp(val + step, mn, mx); changed = true; }
+            }
+            return changed;
+        };
+        SH("── Level Range ─────────────");
+        DrawText("Random level pool:", (int)px, (int)cy, 9, { 150,155,180,255 }); cy += 12;
+        float fMin = (float)_levelRangeMin, fMax = (float)_levelRangeMax;
+        if (NumFld("Min", fMin, 1.f, 1.f, 20.f)) { _levelRangeMin = (int)fMin; SaveGameSettings(_levelRangeMin, _levelRangeMax); }
+        cy += rowH;
+        if (NumFld("Max", fMax, 1.f, 1.f, 20.f)) { _levelRangeMax = (int)fMax; SaveGameSettings(_levelRangeMin, _levelRangeMax); }
+        cy += rowH;
+        DrawText(TextFormat("Levels %d - %d in pool", _levelRangeMin, _levelRangeMax), (int)px, (int)cy, 9, { 100,200,120,255 });
         return;
     }
     float px = dr.x + 6, fw = dr.width - 12;
@@ -2083,6 +2115,40 @@ void LevelEditor::DrawDataPanel() {
         if (hUp  && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction =  1; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].direction =  1; }); }
         if (hDwn && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.direction = -1; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].direction = -1; }); }
         cy += 22;
+        SectionHeader("── Elevator Options ────────");
+        // Invisible toggle
+        {
+            Rectangle r = { px, cy, fw, 16 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+            DrawRectangleRec(r, el.invisible ? Color{20,80,60,255} : (hov ? Color{40,45,65,255} : Color{28,32,48,255}));
+            DrawRectangleLinesEx(r, el.invisible ? 2.f : 1.f, el.invisible ? Color{80,220,160,255} : Color{70,75,100,255});
+            const char* lbl = el.invisible ? "Invisible: ON" : "Invisible: OFF";
+            DrawText(lbl, (int)px + 4, (int)cy + 3, 9, el.invisible ? Color{180,255,220,255} : Color{170,175,200,255});
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.invisible = !el.invisible; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].invisible = el.invisible; }); }
+            cy += 20;
+        }
+        // Horizontal toggle
+        {
+            Rectangle r = { px, cy, fw, 16 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+            DrawRectangleRec(r, el.horizontal ? Color{20,60,100,255} : (hov ? Color{40,45,65,255} : Color{28,32,48,255}));
+            DrawRectangleLinesEx(r, el.horizontal ? 2.f : 1.f, el.horizontal ? Color{80,160,255,255} : Color{70,75,100,255});
+            const char* lbl = el.horizontal ? "Horizontal: ON" : "Horizontal: OFF (vertical)";
+            DrawText(lbl, (int)px + 4, (int)cy + 3, 9, el.horizontal ? Color{160,210,255,255} : Color{170,175,200,255});
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.horizontal = !el.horizontal; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].horizontal = el.horizontal; }); }
+            cy += 20;
+        }
+        // BackAndForth toggle
+        {
+            Rectangle r = { px, cy, fw, 16 };
+            bool hov = CheckCollisionPointRec(GetMousePosition(), r);
+            DrawRectangleRec(r, el.backAndForth ? Color{80,40,100,255} : (hov ? Color{40,45,65,255} : Color{28,32,48,255}));
+            DrawRectangleLinesEx(r, el.backAndForth ? 2.f : 1.f, el.backAndForth ? Color{200,120,255,255} : Color{70,75,100,255});
+            const char* lbl = el.backAndForth ? "BackForth: ON" : "BackForth: OFF (loop)";
+            DrawText(lbl, (int)px + 4, (int)cy + 3, 9, el.backAndForth ? Color{230,180,255,255} : Color{170,175,200,255});
+            if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); el.backAndForth = !el.backAndForth; syncField(EditorTool::ELEVATOR, [&](int i) { _level.elevators[i].backAndForth = el.backAndForth; }); }
+            cy += 20;
+        }
         SectionHeader("── Children ────────────────");
         SelectedEnt elEnt = { (int)EditorTool::ELEVATOR, _sel.index };
         auto ch = GetChildren(elEnt);
@@ -2393,6 +2459,31 @@ void LevelEditor::DrawDataPanel() {
         if (hL && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction = -1; syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].direction = -1; }); }
         if (hR && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.direction =  1; syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].direction =  1; }); }
         cy += 22;
+        SectionHeader("── Sound Material ─────────");
+        {
+            static const char* cvMatNames[] = {
+                "NONE","BLUNTWOOD","CONCRETE","DECKWOOD","DIRT","GRASS",
+                "GRAVEL","LINO","MARBLE","METALBAR","METALBOX","MUD",
+                "SAND","SNOW","STONE","WOOD","SQUEAKY"
+            };
+            static const int CV_MAT_COUNT = 17;
+            static const int CV_MCOLS = 3;
+            float tbw2 = (fw - (CV_MCOLS - 1) * 2.f) / CV_MCOLS;
+            for (int mi = 0; mi < CV_MAT_COUNT; mi++) {
+                int col = mi % CV_MCOLS;
+                if (col == 0 && mi > 0) cy += 18;
+                Rectangle mb = { px + col * (tbw2 + 2.f), cy, tbw2, 16 };
+                bool isActive = (cv.soundMaterial == mi);
+                bool hov = CheckCollisionPointRec(GetMousePosition(), mb);
+                DrawRectangleRec(mb, isActive ? Color{30,60,20,255} : (hov ? Color{45,48,68,255} : Color{28,32,48,255}));
+                DrawRectangleLinesEx(mb, isActive ? 2.f : 1.f, isActive ? Color{100,220,60,255} : Color{70,75,100,255});
+                int nlw = MeasureText(cvMatNames[mi], 8);
+                DrawText(cvMatNames[mi], (int)(mb.x + mb.width / 2 - nlw / 2), (int)mb.y + 4, 8,
+                    isActive ? Color{140,255,80,255} : Color{150,155,180,255});
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); cv.soundMaterial = mi; syncField(EditorTool::CONVEYOR, [&](int i) { _level.conveyors[i].soundMaterial = mi; }); }
+            }
+            cy += 20;
+        }
     }
     if (_sel.type == (int)EditorTool::PROP && _sel.index < (int)_level.props.size()) {
         auto& pr = _level.props[_sel.index];
@@ -3086,28 +3177,40 @@ Rectangle LevelEditor::ElevRect(const ElevatorData& el) const { return { el.x, e
 void LevelEditor::DrawElevatorEnt(const ElevatorData& el, bool sel, bool msel) const {
     const float sc = 4.f;
     Color bc = sel ? YELLOW : (msel ? Color{ 255,200,0,240 } : Color{ 255,140,50,220 });
-    if (_ropeTex && _ropeTex->id > 0) {
-        float tw = _ropeTex->width * sc, th = _ropeTex->height * sc;
-        float drawX = el.x + el.w * 0.5f - tw * 0.5f;
-        float rawPan = (float)GetTime() * el.speed * (el.direction == 1 ? 1.f : -1.f);
-        float panOff = fmodf(rawPan, th); if (panOff < 0.f) panOff += th;
-        float startY = el.y - th + panOff;
-        for (float y = startY; y < el.y + el.h; y += th) {
-            float dy = fmaxf(y, el.y), dyEnd = fminf(y + th, el.y + el.h);
-            if (dy >= dyEnd) continue;
-            float srcYOff = (dy - y) / sc, srcH = (dyEnd - dy) / sc;
-            DrawTexturePro(*_ropeTex, { 0, srcYOff, (float)_ropeTex->width, srcH }, { drawX, dy, tw, dyEnd - dy }, {}, 0.f, WHITE);
+    if (!el.invisible) {
+        if (_ropeTex && _ropeTex->id > 0) {
+            float tw = _ropeTex->width * sc, th = _ropeTex->height * sc;
+            float drawX = el.x + el.w * 0.5f - tw * 0.5f;
+            float rawPan = (float)GetTime() * el.speed * (el.direction == 1 ? 1.f : -1.f);
+            float panOff = fmodf(rawPan, th); if (panOff < 0.f) panOff += th;
+            float startY = el.y - th + panOff;
+            for (float y = startY; y < el.y + el.h; y += th) {
+                float dy = fmaxf(y, el.y), dyEnd = fminf(y + th, el.y + el.h);
+                if (dy >= dyEnd) continue;
+                float srcYOff = (dy - y) / sc, srcH = (dyEnd - dy) / sc;
+                DrawTexturePro(*_ropeTex, { 0, srcYOff, (float)_ropeTex->width, srcH }, { drawX, dy, tw, dyEnd - dy }, {}, 0.f, WHITE);
+            }
         }
+        DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, Color{ 80, 55, 30, 255 });
+        DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, sel ? Color{ 255,160,50,35 } : Color{ 255,120,30,20 });
+    } else {
+        // invisible: draw a dashed outline so it's visible in the editor only
+        DrawRectangleLinesEx({ el.x, el.y, el.w, el.h }, 1.f, Color{ 180,100,30,80 });
     }
-    // Solid opaque base (scene RT must capture a visible surface for lighting)
-    DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, Color{ 80, 55, 30, 255 });
-    // Semi-transparent stylised overlay on top
-    DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, sel ? Color{ 255,160,50,35 } : Color{ 255,120,30,20 });
     DrawRectangleLinesEx({ el.x, el.y, el.w, el.h }, sel ? 2.f : 1.5f, bc);
-    float cx = el.x + el.w * 0.5f, cy = el.y + el.h * 0.5f, ay = (el.direction == 1) ? -14.f : 14.f;
-    DrawTriangle({ cx - 7, cy - ay * 0.4f }, { cx + 7, cy - ay * 0.4f }, { cx, cy + ay }, bc);
-    char buf[48]; snprintf(buf, sizeof(buf), "%.0fpx/s %s", el.speed, el.direction == 1 ? "UP" : "DN");
+    float cx = el.x + el.w * 0.5f, cy2 = el.y + el.h * 0.5f;
+    if (el.horizontal) {
+        float ax = (el.direction == 1) ? 14.f : -14.f;
+        DrawTriangle({ cx - ax * 0.4f, cy2 - 7 }, { cx - ax * 0.4f, cy2 + 7 }, { cx + ax, cy2 }, bc);
+    } else {
+        float ay = (el.direction == 1) ? -14.f : 14.f;
+        DrawTriangle({ cx - 7, cy2 - ay * 0.4f }, { cx + 7, cy2 - ay * 0.4f }, { cx, cy2 + ay }, bc);
+    }
+    const char* modeStr = el.backAndForth ? (el.horizontal ? "H<>" : "V<>") : (el.horizontal ? "H->" : "V");
+    char buf[64]; snprintf(buf, sizeof(buf), "%.0fpx/s %s%s", el.speed,
+        el.direction == 1 ? (el.horizontal ? "R" : "UP") : (el.horizontal ? "L" : "DN"), el.backAndForth ? " B&F" : "");
     DrawText(buf, (int)el.x + 2, (int)(el.y + el.h + 2), 9, bc);
+    (void)modeStr;
     SelectedEnt e = { (int)EditorTool::ELEVATOR, (int)(&el - _level.elevators.data()) };
     for (const auto& rel : _level.relations) {
         if (!(rel.parent == e)) continue;
@@ -3307,7 +3410,9 @@ bool LevelEditor::IsAncestor(SelectedEnt anc, SelectedEnt e) const {
     return false;
 }
 void LevelEditor::SetRelationParent(SelectedEnt child, SelectedEnt parent) {
-    if (!child.valid() || !parent.valid() || child == parent) return;
+    // Allow singleton entities (Regulus, player spawn, cave, win zone) which use index=-1
+    auto entUsable = [](const SelectedEnt& e) { return e.type >= 0; };
+    if (!entUsable(child) || !entUsable(parent) || child == parent) return;
     if (IsAncestor(child, parent)) { SetStatus("Cannot parent: would create a cycle."); return; }
     PushUndo();
     _level.relations.erase(std::remove_if(_level.relations.begin(), _level.relations.end(), [&child](const ParentChildRelation& r) { return r.child == child; }), _level.relations.end());

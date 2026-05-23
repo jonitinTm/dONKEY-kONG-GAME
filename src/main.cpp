@@ -529,6 +529,11 @@ int main(void)
     unsigned int score = 0;
     int          currentLevelId = 1;
 
+    // ── Level priority system ────────────────────────────────────────────────
+    static constexpr int MAX_LEVEL_ID = 20;
+    int levelPriority[MAX_LEVEL_ID + 1] = {};  // index = level id
+    int levelRangeMin = 1, levelRangeMax = 10;
+
     LightingSystem gameLighting;
     LevelData      currentLevelData;
     LevelData      pendingLevelData;
@@ -594,7 +599,14 @@ int main(void)
     bool      isJumping = false;
     bool      facingRight = true;
     bool      isGrounded = false;
+    bool      wasGrounded = false;
+    float     airborneTime = 0.f;    // time spent ungrounded; gates landing SFX
     float     playerStepDist = 0.f;
+
+    // ── Whip visual ───────────────────────────────────────────────────────────
+    bool  whipActive      = false;
+    float whipTimer       = 0.f;
+    bool  whipFacingRight = true;
 
     int         lives = 3;
     bool        invincible = false;
@@ -712,6 +724,8 @@ int main(void)
     vector<ElevatorData>        liveElevators;
     vector<ParentChildRelation> liveRelations;
     vector<float>               elevChildPhases;
+    vector<float>               liveElevTravel;    // per-elevator travel for backAndForth
+    vector<int>                 liveElevBounceDir; // per-elevator bounce dir (+1/-1)
     vector<KillZoneData>        liveKillZones;
     vector<ConveyorData>        liveConveyors;
     int                         conveyorPlatStart = 0;
@@ -1136,6 +1150,8 @@ int main(void)
     Texture2D itemTex_Dash          = LoadTexture("Assets/Textures/Cards/Card_Dash.png");
     Texture2D itemTex_Reinhard      = LoadTexture("Assets/Textures/Cards/Card_Reinhard.png");
     Texture2D itemTex_Whip          = LoadTexture("Assets/Textures/Cards/Card_Whip.png");
+    Texture2D whipTex1              = LoadTexture("Assets/Textures/Items/Whip1.png");
+    Texture2D whipTex2              = LoadTexture("Assets/Textures/Items/Whip2.png");
     Texture2D itemTex_Speedrun      = LoadTexture("Assets/Textures/Cards/Card_Speedrun.png");
     Texture2D itemTex_Shield        = LoadTexture("Assets/Textures/Cards/Card_Shield.png");
     Texture2D itemTex_Shop          = LoadTexture("Assets/Textures/Cards/Card_astolfoShop.png");
@@ -1356,8 +1372,15 @@ int main(void)
             liveElevators = lv.elevators;
             liveRelations = lv.relations;
             elevChildPhases.resize(liveRelations.size());
-            for (int ri = 0; ri < (int)liveRelations.size(); ri++)
-                elevChildPhases[ri] = liveRelations[ri].offsetY;
+            for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
+                const auto& rel = liveRelations[ri];
+                bool horiz = (rel.parent.type == 11 && rel.parent.index >= 0
+                    && rel.parent.index < (int)liveElevators.size()
+                    && liveElevators[rel.parent.index].horizontal);
+                elevChildPhases[ri] = horiz ? rel.offsetX : rel.offsetY;
+            }
+            liveElevTravel.assign(liveElevators.size(), 0.f);
+            liveElevBounceDir.assign(liveElevators.size(), 1);
 
             RebuildLayers();
 
@@ -1737,6 +1760,10 @@ int main(void)
         }
         });
 
+    // ── Level priority init ───────────────────────────────────────────────────
+    LoadGameSettings(levelRangeMin, levelRangeMax);
+    for (int i = 1; i <= MAX_LEVEL_ID; i++) levelPriority[i] = 1;
+
     // ─────────────────────────────────────────────────────────────────────────
     // MAIN LOOP
     // ─────────────────────────────────────────────────────────────────────────
@@ -2101,6 +2128,10 @@ int main(void)
                                 : Rectangle{player.x-reach, player.y, reach, player.height};
                             for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; SetSoundVolume(sndEnemyKill, volSFX); PlaySound(sndEnemyKill); }
                             { int wi=GetRandomValue(0,2); SetSoundVolume(sndWhip[wi], volAbility); PlaySound(sndWhip[wi]); }
+                            // Visual
+                            whipActive      = true;
+                            whipTimer       = 0.f;
+                            whipFacingRight = facingRight;
                             slot.cd = info.maxCD; break; }
                         case PU_EXTRA_LIFE:
                             maxLives = 5; lives = (lives+1 < maxLives) ? lives+1 : maxLives;
@@ -2155,6 +2186,21 @@ int main(void)
             struct ElevPlatSnapshot { int platIndex; float prevY; float newY; float platW; };
             vector<ElevPlatSnapshot> elevSnapshots;
 
+            // Advance backAndForth elevator travel
+            if ((int)liveElevTravel.size() < (int)liveElevators.size())
+                liveElevTravel.resize(liveElevators.size(), 0.f);
+            if ((int)liveElevBounceDir.size() < (int)liveElevators.size())
+                liveElevBounceDir.resize(liveElevators.size(), 1);
+            for (int ei = 0; ei < (int)liveElevators.size(); ei++) {
+                const ElevatorData& el = liveElevators[ei];
+                if (!el.backAndForth) continue;
+                float& travel = liveElevTravel[ei];
+                int&   bdir   = liveElevBounceDir[ei];
+                travel += bdir * el.speed * dt;
+                if (travel >= el.h) { travel = el.h; bdir = -1; }
+                else if (travel <= 0.f) { travel = 0.f; bdir = 1; }
+            }
+
             for (int ri = 0; ri < (int)liveRelations.size(); ri++) {
                 const auto& rel = liveRelations[ri];
                 if (rel.parent.type != 11) continue;
@@ -2168,15 +2214,34 @@ int main(void)
                 if (rel.child.type == 4 && ci >= 0 && ci < (int)platforms.size())
                     elevSnapshots.push_back({ ci, platforms[ci].y, 0.f, platforms[ci].width });
 
-                if (el.direction == 1) { phase -= el.speed * dt; if (phase < 0.f)  phase = el.h; }
-                else { phase += el.speed * dt; if (phase > el.h)  phase = 0.f; }
-                float cx = el.x + rel.offsetX;
-                float cy = el.y + phase;
+                float cx, cy;
+                if (el.backAndForth) {
+                    float travel = liveElevTravel[ei];
+                    if (el.horizontal) {
+                        cx = el.x + rel.offsetX + travel * (float)el.direction;
+                        cy = el.y + rel.offsetY;
+                    } else {
+                        cx = el.x + rel.offsetX;
+                        cy = el.y + rel.offsetY - travel * (float)el.direction;
+                    }
+                } else if (el.horizontal) {
+                    if (el.direction == 1) { phase -= el.speed * dt; if (phase < 0.f) phase = el.h; }
+                    else                   { phase += el.speed * dt; if (phase > el.h) phase = 0.f; }
+                    cx = el.x + phase;
+                    cy = el.y + rel.offsetY;
+                } else {
+                    if (el.direction == 1) { phase -= el.speed * dt; if (phase < 0.f) phase = el.h; }
+                    else                   { phase += el.speed * dt; if (phase > el.h) phase = 0.f; }
+                    cx = el.x + rel.offsetX;
+                    cy = el.y + phase;
+                }
 
                 if (rel.child.type == 4 && !elevSnapshots.empty())
                     elevSnapshots.back().newY = cy;
 
                 switch (rel.child.type) {
+                case 2: // REGULUS (singleton, index=-1)
+                    currentLevelData.regulusPos = { cx, cy }; break;
                 case 4: if (ci >= 0 && ci < (int)platforms.size())     platforms[ci] = Platform::Make(cx, cy, platforms[ci].width, 0, 0.f); break;
                 case 5: if (ci >= 0 && ci < (int)ladders.size())       ladders[ci] = Ladder::Make(cx, cy, ladders[ci].width, ladders[ci].height); break;
                 case 6: if (ci >= 0 && ci < (int)beamPositions.size()) { beamPositions[ci].x = cx; beamPositions[ci].y = cy; } break;
@@ -2184,6 +2249,12 @@ int main(void)
                 case 9: if (ci >= 0 && ci < (int)beatriceSpawnNodes.size())   beatriceSpawnNodes[ci] = { cx, cy }; break;
                 case 10:if (ci >= 0 && ci < (int)enemySpawnPositions.size())  enemySpawnPositions[ci] = { cx, cy }; break;
                 }
+            }
+
+            // ── Whip visual timer ─────────────────────────────────────────────
+            if (whipActive) {
+                whipTimer += dt;
+                if (whipTimer >= 0.5f) whipActive = false;
             }
 
             animationTimer += dt;
@@ -2197,6 +2268,7 @@ int main(void)
 
             float prevX = player.x, prevY = player.y;
             bool  playerIsMoving = false;
+            wasGrounded = isGrounded;
 
             auto PlayerHitbox = [&]() -> Rectangle {
                 float colW = player.width * 0.5f;
@@ -2859,18 +2931,33 @@ int main(void)
                         static constexpr float STEP_DIST = 48.f / 1.25f;
                         if (playerStepDist >= STEP_DIST && stepped > 0.1f) {
                             playerStepDist = 0.f;
-                            // Find the beam directly below the player
                             float pcx = player.x + player.width * 0.5f;
                             float pbot = player.y + player.height;
-                            int bestMat = 0;
-                            float bestDist = 80.f;
-                            for (const auto& bm : beamPositions) {
-                                Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant - 1].id > 0)
-                                    ? &beamVariants[bm.texVariant - 1] : &beam;
-                                float bw = bt->width * 4.f, bh = bt->height * 4.f;
-                                if (pcx >= bm.x && pcx <= bm.x + bw) {
-                                    float d = bm.y - pbot;
-                                    if (d >= -bh && d < bestDist) { bestDist = d; bestMat = bm.soundMaterial; }
+                            int   bestMat = 0;
+                            // Check conveyors first using the same feet/belt overlap as the push code
+                            {
+                                float colW = player.width * 0.5f, colH = player.height * 0.5f;
+                                float offX = (player.width - colW) * 0.5f, offY = player.height - colH;
+                                Rectangle feet = { player.x + offX, player.y + offY, colW, colH };
+                                for (const auto& cv : liveConveyors) {
+                                    if (cv.soundMaterial <= 0) continue;
+                                    Rectangle belt = { cv.x, cv.y - 4.f, cv.length, cv.beltH + 8.f };
+                                    if (CheckCollisionRecs(feet, belt)) { bestMat = cv.soundMaterial; break; }
+                                }
+                            }
+                            // Fall back to beam raycast if not on a conveyor
+                            if (bestMat == 0) {
+                                static constexpr float STEP_TOL = 12.f;
+                                float bestD = -9999.f;
+                                for (const auto& bm : beamPositions) {
+                                    if (bm.soundMaterial <= 0) continue;
+                                    Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant - 1].id > 0)
+                                        ? &beamVariants[bm.texVariant - 1] : &beam;
+                                    float bw = bt->width * 4.f, bh = bt->height * 4.f;
+                                    if (pcx >= bm.x && pcx <= bm.x + bw) {
+                                        float d = bm.y - pbot;
+                                        if (d >= -bh && d < STEP_TOL && d > bestD) { bestD = d; bestMat = bm.soundMaterial; }
+                                    }
                                 }
                             }
                             if (bestMat > 0 && bestMat < MAT_COUNT) {
@@ -2886,6 +2973,48 @@ int main(void)
                     } else {
                         playerStepDist = 0.f;
                     }
+
+                    // ── Landing SFX ───────────────────────────────────────────
+                    // Only fire when coming from a real airborne stretch (≥0.1 s)
+                    if (isGrounded && !wasGrounded && airborneTime >= 0.1f && !onLadder && !isDying) {
+                        float pcx = player.x + player.width * 0.5f;
+                        float pbot = player.y + player.height;
+                        int landMat = 0;
+                        // Check conveyor first with the same belt overlap the push code uses
+                        {
+                            float colW = player.width * 0.5f, colH = player.height * 0.5f;
+                            float offX = (player.width - colW) * 0.5f, offY = player.height - colH;
+                            Rectangle feet = { player.x + offX, player.y + offY, colW, colH };
+                            for (const auto& cv : liveConveyors) {
+                                if (cv.soundMaterial <= 0) continue;
+                                Rectangle belt = { cv.x, cv.y - 4.f, cv.length, cv.beltH + 8.f };
+                                if (CheckCollisionRecs(feet, belt)) { landMat = cv.soundMaterial; break; }
+                            }
+                        }
+                        // Fall back to beam raycast
+                        if (landMat == 0) {
+                            static constexpr float LAND_TOL = 12.f;
+                            float bestLD = -9999.f;
+                            for (const auto& bm : beamPositions) {
+                                if (bm.soundMaterial <= 0) continue;
+                                Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant-1].id > 0)
+                                    ? &beamVariants[bm.texVariant-1] : &beam;
+                                float bw = bt->width * 4.f, bh = bt->height * 4.f;
+                                if (pcx >= bm.x && pcx <= bm.x + bw) {
+                                    float d = bm.y - pbot;
+                                    if (d >= -bh && d < LAND_TOL && d > bestLD) { bestLD = d; landMat = bm.soundMaterial; }
+                                }
+                            }
+                        }
+                        if (landMat > 0 && landMat < MAT_COUNT && !footsteps[landMat].walk.empty()) {
+                            int idx = GetRandomValue(0, (int)footsteps[landMat].walk.size()-1);
+                            SetSoundVolume(footsteps[landMat].walk[idx], volSFX * 0.7f);
+                            PlaySound(footsteps[landMat].walk[idx]);
+                        }
+                    }
+                    // Track time spent airborne (reset on ground)
+                    if (isGrounded) airborneTime = 0.f;
+                    else            airborneTime += dt;
 
                     // ── Player animation ──────────────────────────────────────
                     if (IsKeyPressed(KEY_B) && !isDying && isGrounded && !onLadder && !playerIsMoving)
@@ -3001,9 +3130,37 @@ int main(void)
             // ── Win condition ─────────────────────────────────────────────────
             if (CheckCollisionRecs(wincondition, player))
             {
+                // Priority-weighted random level selection
+                // Increment unplayed levels, reset played level
+                for (int i = levelRangeMin; i <= levelRangeMax && i <= MAX_LEVEL_ID; i++) {
+                    if (i == currentLevelId) { levelPriority[i] = 0; continue; }
+                    int p = levelPriority[i];
+                    levelPriority[i] = p + (p >= 10 ? 5 : p >= 3 ? 2 : 1);
+                }
+
+                // Build weighted candidate list
+                struct LvCandidate { int id; int weight; };
+                vector<LvCandidate> candidates;
+                int totalWeight = 0;
+                for (int i = levelRangeMin; i <= levelRangeMax && i <= MAX_LEVEL_ID; i++) {
+                    if (i == currentLevelId) continue;
+                    LevelData probe;
+                    if (!LoadLevel(probe, i)) continue;
+                    int w = levelPriority[i] > 0 ? levelPriority[i] : 1;
+                    candidates.push_back({ i, w });
+                    totalWeight += w;
+                }
+
+                int nextId = -1;
+                if (!candidates.empty() && totalWeight > 0) {
+                    int r = GetRandomValue(0, totalWeight - 1);
+                    for (const auto& c : candidates) { r -= c.weight; if (r < 0) { nextId = c.id; break; } }
+                    if (nextId < 0) nextId = candidates.back().id;
+                }
+
                 LevelData nextLv;
-                if (LoadLevel(nextLv, currentLevelId + 1)) {
-                    currentLevelId++;
+                if (nextId >= 0 && LoadLevel(nextLv, nextId)) {
+                    currentLevelId = nextId;
                     pendingLevelData = nextLv;
                     hasPendingLevel = true;
                     InitCardSelect(2, false);
@@ -3290,11 +3447,11 @@ int main(void)
                 { imgX, imgY, imgW, imgH }, { 0, 0 }, 0.f, bgTint);
 
             Texture2D* subTex = subaruFrames[subaruFrame];
-            float subScale = (screenHeight * 0.92f) / subTex->height;
+            float subScale = (screenHeight * 0.92f * 1.05f) / subTex->height;
             float subW = subTex->width  * subScale;
             float subH = subTex->height * subScale;
             float subX = (screenWidth - subW) * 0.5f;
-            float subY = (screenHeight - subH) * 0.5f;
+            float subY = screenHeight - subH + 15.f;   // anchored near bottom
             DrawTexturePro(*subTex,
                 { 0, 0, (float)subTex->width, (float)subTex->height },
                 { subX, subY, subW, subH }, { 0, 0 }, 0.f, WHITE);
@@ -3632,6 +3789,7 @@ int main(void)
             {
                 const float sc = 4.f;
                 for (const auto& el : liveElevators) {
+                    if (el.invisible) continue;
                     if (RopeTex.id == 0) { DrawRectangle((int)el.x, (int)el.y, (int)el.w, (int)el.h, { 80,60,40,80 }); continue; }
                     float tw = RopeTex.width * sc, th = RopeTex.height * sc;
                     float drawX = el.x + el.w * 0.5f - tw * 0.5f;
@@ -3902,6 +4060,21 @@ int main(void)
                             DrawTexturePro(*shTex, { 0,0,(float)shTex->width,(float)shTex->height },
                                 { shX, shY, shW, shH }, {}, 0.f, { 255,255,255,210 });
                         }
+                    }
+                }
+
+                // Whip visual — position follows player each frame
+                if (whipActive) {
+                    Texture2D* wTex = (whipTimer < 0.2f) ? &whipTex1 : &whipTex2;
+                    if (wTex && wTex->id > 0) {
+                        float wW = player.width * 2.f;
+                        float wH = player.height;
+                        float wx = whipFacingRight ? player.x + player.width : player.x - wW;
+                        float wy = player.y;
+                        float srcW = whipFacingRight ? (float)wTex->width : -(float)wTex->width;
+                        float srcX = whipFacingRight ? 0.f : (float)wTex->width;
+                        DrawTexturePro(*wTex, { srcX, 0, srcW, (float)wTex->height },
+                            { wx, wy, wW, wH }, { 0, 0 }, 0.f, WHITE);
                     }
                 }
             }
@@ -4966,6 +5139,7 @@ int main(void)
     UnloadTexture(itemTex_Reinhard);      UnloadTexture(itemTex_Whip);
     UnloadTexture(itemTex_Speedrun);      UnloadTexture(itemTex_Shield);
     UnloadTexture(itemTex_Shop);
+    UnloadTexture(whipTex1); UnloadTexture(whipTex2);
 
     UnloadRenderTexture(ladderLayer);
     UnloadRenderTexture(staticLayer);

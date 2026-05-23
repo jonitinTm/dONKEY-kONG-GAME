@@ -233,6 +233,10 @@ private:
     char  _status[256] = {};
     float _statusTimer = 0.f;
 
+    // ── Level range settings (game-wide, not per-level) ─────────────────────
+    int _levelRangeMin = 1;
+    int _levelRangeMax = 10;
+
     // ── Properties clipboard ─────────────────────────────────────────────────
     struct PropClipboard {
         int          type = -1;

@@ -76,13 +76,14 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "ENEMY_SPAWN %.2f %.2f\n", v.x, v.y);
 
     for (const auto& e : lv.elevators)
-        fprintf(f, "ELEVATOR %.2f %.2f %.2f %.2f %.2f %d\n",
-            e.x, e.y, e.w, e.h, e.speed, e.direction);
+        fprintf(f, "ELEVATOR %.2f %.2f %.2f %.2f %.2f %d %d %d %d\n",
+            e.x, e.y, e.w, e.h, e.speed, e.direction,
+            e.invisible ? 1 : 0, e.horizontal ? 1 : 0, e.backAndForth ? 1 : 0);
 
     for (const auto& cv : lv.conveyors)
-        fprintf(f, "CONVEYOR %.2f %.2f %.2f %.2f %d %.2f %.2f %.2f\n",
+        fprintf(f, "CONVEYOR %.2f %.2f %.2f %.2f %d %.2f %.2f %.2f %d\n",
             cv.x, cv.y, cv.length, cv.speed, cv.direction,
-            cv.rotation, cv.endCapW, cv.beltH);
+            cv.rotation, cv.endCapW, cv.beltH, cv.soundMaterial);
 
     // PROP format (9 tokens):
     // x y width height rotation hasCollision lightAffect renderLayer texVariant
@@ -212,15 +213,20 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         }
         else if (strcmp(tag, "ELEVATOR") == 0) {
             ElevatorData e;
-            (void)fscanf(f, "%f %f %f %f %f %d",
-                &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction);
+            int inv = 0, horiz = 0, baf = 0;
+            int cnt = fscanf(f, "%f %f %f %f %f %d %d %d %d",
+                &e.x, &e.y, &e.w, &e.h, &e.speed, &e.direction, &inv, &horiz, &baf);
+            e.invisible    = (cnt >= 7 && inv   != 0);
+            e.horizontal   = (cnt >= 8 && horiz != 0);
+            e.backAndForth = (cnt >= 9 && baf   != 0);
             out.elevators.push_back(e);
         }
         else if (strcmp(tag, "CONVEYOR") == 0) {
             ConveyorData cv;
-            (void)fscanf(f, "%f %f %f %f %d %f %f %f",
+            int cnt = fscanf(f, "%f %f %f %f %d %f %f %f %d",
                 &cv.x, &cv.y, &cv.length, &cv.speed, &cv.direction,
-                &cv.rotation, &cv.endCapW, &cv.beltH);
+                &cv.rotation, &cv.endCapW, &cv.beltH, &cv.soundMaterial);
+            if (cnt < 9) cv.soundMaterial = 0;
             out.conveyors.push_back(cv);
         }
         else if (strcmp(tag, "PROP") == 0) {
@@ -469,4 +475,37 @@ void ExportLevelAsCpp(const LevelData& lv, const char* outFile)
     fprintf(f, "};\n\n");
 
     fclose(f);
+}
+
+// ── Game settings (level range) ───────────────────────────────────────────────
+
+static std::string SettingsPath(const char* folder) {
+    char buf[512]; snprintf(buf, sizeof(buf), "%s/game_settings.txt", folder); return buf;
+}
+
+bool LoadGameSettings(int& levelRangeMin, int& levelRangeMax, const char* folder)
+{
+    levelRangeMin = 1; levelRangeMax = 10;
+    std::string path = SettingsPath(folder);
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return false;
+    char tag[64] = {};
+    while (fscanf(f, "%63s", tag) == 1) {
+        if      (strcmp(tag, "LEVEL_RANGE_MIN") == 0) (void)fscanf(f, "%d", &levelRangeMin);
+        else if (strcmp(tag, "LEVEL_RANGE_MAX") == 0) (void)fscanf(f, "%d", &levelRangeMax);
+    }
+    fclose(f);
+    return true;
+}
+
+bool SaveGameSettings(int levelRangeMin, int levelRangeMax, const char* folder)
+{
+    EnsureDir(folder);
+    std::string path = SettingsPath(folder);
+    FILE* f = fopen(path.c_str(), "w");
+    if (!f) return false;
+    fprintf(f, "LEVEL_RANGE_MIN %d\n", levelRangeMin);
+    fprintf(f, "LEVEL_RANGE_MAX %d\n", levelRangeMax);
+    fclose(f);
+    return true;
 }

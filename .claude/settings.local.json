@@ -43,7 +43,14 @@
       "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\Alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 5)",
       "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\Alejandropc8\\\\Documents\\\\GitHub\\\\dONKEY-kONG-GAME\\\\build\\\\build_files\\\\dONKEY-kONG-GAME.vcxproj\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 4)",
       "Bash(MSBuild dONKEY-kONG-GAME.sln /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo /v:minimal)",
-      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo /v:minimal)"
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo /v:minimal)",
+      "Bash(grep -v \"//.*draw\\\\|draw.*//\\\\|DrawText[^P]\\\\|DrawTexturePro.*Reg\\\\|DrawTexturePro.*barrel\\\\|DrawTexturePro.*en\\\\.\")",
+      "Bash(MSBuild \"dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo 2>&1 | Select-Object -Last 30)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Rebuild /m /nologo 2>&1 | Select-Object -Last 20)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo 2>&1 | Select-Object -Last 10)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo 2>&1 | Select-Object -Last 8)"
     ]
   }
 }

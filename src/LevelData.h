@@ -91,6 +91,7 @@ struct ConveyorData {
     float rotation = 0.f;
     float endCapW = 32.f;
     float beltH = 24.f;
+    int   soundMaterial = 0;
 };
 
 // ── Elevator ──────────────────────────────────────────────────────────────────
@@ -102,6 +103,9 @@ struct ElevatorData {
     float h = 200.f;
     float speed = 60.f;
     int   direction = 1;
+    bool  invisible   = false;
+    bool  horizontal  = false;
+    bool  backAndForth = false;
 };
 
 // ── Prop ──────────────────────────────────────────────────────────────────────
@@ -238,3 +242,6 @@ bool      SaveLevel(const LevelData& lv, const char* folder = "Levels");
 bool      LoadLevel(LevelData& out, int id, const char* folder = "Levels");
 LevelData GetDefaultLevel1();
 void      ExportLevelAsCpp(const LevelData& lv, const char* outFile = "LevelExport.cpp");
+
+bool      LoadGameSettings(int& levelRangeMin, int& levelRangeMax, const char* folder = "Levels");
+bool      SaveGameSettings(int levelRangeMin, int levelRangeMax, const char* folder = "Levels");
