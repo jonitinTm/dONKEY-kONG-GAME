@@ -527,6 +527,10 @@ int main(void)
     int   shieldAnimFrame  = 0;
 
     unsigned int score = 0;
+    unsigned int runScore     = 0;  // points this run (coins*10 + level bonuses), never decreases
+    int          levelsCleared = 0; // levels completed this run
+    unsigned int highScore    = 0;  // all-time best runScore
+    int          highLevels   = 0;  // all-time most levels cleared in one run
     int          currentLevelId = 1;
 
     // ── Level priority system ────────────────────────────────────────────────
@@ -1625,6 +1629,7 @@ int main(void)
             invincible = false;
             invincibleTimer = 0.0f;
             score = 0; coins = 0;
+            runScore = 0; levelsCleared = 0;
 
             playerHasBeatrice = false;
             beatriceAbilityTimer = 0.0f;
@@ -1761,8 +1766,18 @@ int main(void)
         });
 
     // ── Level priority init ───────────────────────────────────────────────────
-    LoadGameSettings(levelRangeMin, levelRangeMax);
+    LoadGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+    SetMusicVolume(music, volMusic);
     for (int i = 1; i <= MAX_LEVEL_ID; i++) levelPriority[i] = 1;
+
+    // Updates and saves highscore at end of run; call before any GAME_OVER transition
+    auto TryUpdateHighscore = [&]() {
+        bool changed = false;
+        if (runScore    > highScore)  { highScore  = runScore;    changed = true; }
+        if (levelsCleared > highLevels) { highLevels = levelsCleared; changed = true; }
+        if (changed)
+            SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     // MAIN LOOP
@@ -1816,7 +1831,10 @@ int main(void)
         }
         else if (currentScreen == SETTINGS)
         {
-            if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_N)) currentScreen = MENU;
+            if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_N)) {
+                SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+                currentScreen = MENU;
+            }
         }
         else if (currentScreen == CONTROLS)
         {
@@ -2115,9 +2133,10 @@ int main(void)
                         case PU_REINHARD:
                             { LevelData nextLv;
                               if (LoadLevel(nextLv, currentLevelId+1)) {
+                                  levelsCleared++; runScore += 300 * ((currentLevelId-1)/5+1);
                                   currentLevelId++; pendingLevelData=nextLv; hasPendingLevel=true;
                                   InitCardSelect(2,false); currentScreen=CARD_SELECT;
-                              } else { splashTimer=0.f; currentScreen=GAME_OVER; }
+                              } else { TryUpdateHighscore(); splashTimer=0.f; currentScreen=GAME_OVER; }
                             }
                             SetSoundVolume(sndReinhard, volAbility); PlaySound(sndReinhard);
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break;
@@ -2126,7 +2145,7 @@ int main(void)
                             Rectangle whipRect = facingRight
                                 ? Rectangle{player.x+player.width, player.y, reach, player.height}
                                 : Rectangle{player.x-reach, player.y, reach, player.height};
-                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; SetSoundVolume(sndEnemyKill, volSFX); PlaySound(sndEnemyKill); }
+                            for (auto& e : enemies) if (e.active && CheckCollisionRecs(e.hitbox, whipRect)) { e.active=false; score+=300; coins+=15; runScore+=150; SetSoundVolume(sndEnemyKill, volSFX); PlaySound(sndEnemyKill); }
                             { int wi=GetRandomValue(0,2); SetSoundVolume(sndWhip[wi], volAbility); PlaySound(sndWhip[wi]); }
                             // Visual
                             whipActive      = true;
@@ -2144,8 +2163,8 @@ int main(void)
                             nukeExplosionPos={player.x+player.width*0.5f-nkW*0.5f, player.y-nkH-2.f};
                             nukeExplosionPlaying=true; nukeExplosionFrame=0; nukeExplosionTimer=0.f;
                             nukeFlashTimer=0.f; nukeExtraDelay=3.f;
-                            for (auto& b:barrels){if(b.active){score+=100;coins+=5;b.active=false;}}
-                            for (auto& e:enemies){if(e.active){score+=300;coins+=15;e.active=false; SetSoundVolume(sndEnemyKill,volSFX); PlaySound(sndEnemyKill);}}
+                            for (auto& b:barrels){if(b.active){score+=100;coins+=5;runScore+=50;b.active=false;}}
+                            for (auto& e:enemies){if(e.active){score+=300;coins+=15;runScore+=150;e.active=false; SetSoundVolume(sndEnemyKill,volSFX); PlaySound(sndEnemyKill);}}
                             regulusIsStunned=true; regulusStunEnding=false; regulusStunFrame=0;
                             regulusStunTimer=0.f; regulusStunLoops=0;
                             slot.charges--; if (slot.charges<=0) slot.type=PU_NONE; break; }
@@ -2491,7 +2510,7 @@ int main(void)
                     if (!b.active) continue;
                     if (CheckCollisionRecs(bbRect, b.hitbox))
                     {
-                        b.active = false; bb.active = false; score += 100; coins += 5; break;
+                        b.active = false; bb.active = false; score += 100; coins += 5; runScore += 50; break;
                     }
                 }
                 if (bb.active) {
@@ -2500,7 +2519,7 @@ int main(void)
                         if (!en.active) continue;
                         if (CheckCollisionRecs(bbRect, en.hitbox))
                         {
-                            en.active = false; bb.active = false; score += 300; coins += 15;
+                            en.active = false; bb.active = false; score += 300; coins += 15; runScore += 150;
                             SetSoundVolume(sndEnemyKill, volSFX); PlaySound(sndEnemyKill); break;
                         }
                     }
@@ -2603,7 +2622,7 @@ int main(void)
                     bool fromBelow = (!b.isFalling && velocityY < 0.0f &&
                         (player.y + player.height * 0.5f) >(b.hitbox.y + b.hitbox.height));
                     if (fromBelow) continue;
-                    if (shieldActive) { b.active = false; score += 100; coins += 5; shieldActive = false; break; }
+                    if (shieldActive) { b.active = false; score += 100; coins += 5; runScore += 50; shieldActive = false; break; }
                     TriggerDeath();
                     break;
                 }
@@ -2616,7 +2635,7 @@ int main(void)
                 {
                     UpdateEnemy(en, player, platforms, ladders, dt);
                     if (en.active && !invincible && CheckCollisionRecs(PlayerHitbox(), en.hitbox)) {
-                        if (shieldActive) { en.active = false; score += 300; coins += 15; shieldActive = false; }
+                        if (shieldActive) { en.active = false; score += 300; coins += 15; runScore += 150; shieldActive = false; }
                         else TriggerDeath();
                     }
                 }
@@ -2636,7 +2655,7 @@ int main(void)
                     };
                     if (CheckCollisionRecs(player, jumpZone))
                     {
-                        score += 100; coins += 5; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound); SetSoundVolume(sndMoney, volSFX); PlaySound(sndMoney);
+                        score += 100; coins += 5; runScore += 50; b.jumpScored = true; SetSoundVolume(jumpBrlSound, volSFX); PlaySound(jumpBrlSound); SetSoundVolume(sndMoney, volSFX); PlaySound(sndMoney);
                     }
                 }
             }
@@ -2686,7 +2705,7 @@ int main(void)
                     deathBlackTimer += dt;
                     if (deathBlackTimer >= (DEATH_BLACK_HOLD + 0.5f))
                     {
-                        if (lives <= 0) currentScreen = GAME_OVER;
+                        if (lives <= 0) { TryUpdateHighscore(); currentScreen = GAME_OVER; }
                         else            { ResetRound(); SpawnInitialEnemies(); }
                     }
                 }
@@ -3158,6 +3177,10 @@ int main(void)
                     if (nextId < 0) nextId = candidates.back().id;
                 }
 
+                // Award level-clear bonus before changing currentLevelId
+                levelsCleared++;
+                runScore += 300 * ((currentLevelId - 1) / 5 + 1);
+
                 LevelData nextLv;
                 if (nextId >= 0 && LoadLevel(nextLv, nextId)) {
                     currentLevelId = nextId;
@@ -3167,6 +3190,7 @@ int main(void)
                     currentScreen = CARD_SELECT;
                 }
                 else {
+                    TryUpdateHighscore();
                     splashTimer = 0.0f;
                     currentScreen = GAME_OVER;
                 }
@@ -3736,7 +3760,10 @@ int main(void)
             Rectangle backR2 = {backX2 - 10.f, backY2 - 4.f, (float)(backW2 + 20), 28.f};
             if (CheckCollisionPointRec(mouse, backR2)) {
                 DrawRectangleLinesEx(backR2, 1.f, {160, 160, 255, 180});
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = MENU;
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+                    currentScreen = MENU;
+                }
             }
         }
         else if (currentScreen == LEVEL_EDITOR)
@@ -4624,18 +4651,39 @@ int main(void)
             else
             {
                 DrawText("GAME OVER", 300, 380, 50, RED);
+
+                // ── Run score ────────────────────────────────────────────────
+                const int fsSc = 34, centerX = screenWidth / 2;
+                const char* scoreTxt = TextFormat("Score: %u", runScore);
+                DrawText(scoreTxt, centerX - MeasureText(scoreTxt, fsSc) / 2, 450, fsSc, YELLOW);
+
+                // ── Levels cleared this run ──────────────────────────────────
+                const char* lvlTxt = TextFormat("Levels cleared: %d", levelsCleared);
+                DrawText(lvlTxt, centerX - MeasureText(lvlTxt, 26) / 2, 500, 26, SKYBLUE);
+
+                // ── Highscore ────────────────────────────────────────────────
+                bool newRecord = (runScore > 0 && runScore == highScore);
+                Color hscCol = newRecord ? Color{255, 220, 50, 255} : Color{180, 180, 220, 255};
+                const char* hsTxt = TextFormat("Best Score: %u", highScore);
+                DrawText(hsTxt, centerX - MeasureText(hsTxt, 26) / 2, 545, 26, hscCol);
+                if (newRecord) DrawText("NEW RECORD!", centerX - MeasureText("NEW RECORD!", 22) / 2, 578, 22, ORANGE);
+
+                const char* hlTxt = TextFormat("Best Levels: %d", highLevels);
+                DrawText(hlTxt, centerX - MeasureText(hlTxt, 24) / 2, 610, 24, Color{160, 220, 180, 255});
+
+                // ── Coins ────────────────────────────────────────────────────
                 {
                     const char* coinTxt = TextFormat("%d", coins);
-                    int fontSize = 32, iconSize = 32, gap = 8;
+                    int fontSize = 26, iconSize = 26, gap = 8;
                     int txtW = MeasureText(coinTxt, fontSize);
                     int totalW = iconSize + gap + txtW;
-                    int sx = screenWidth / 2 - totalW / 2;
+                    int sx = centerX - totalW / 2;
                     if (texCoin.id > 0)
                         DrawTexturePro(texCoin, {0,0,(float)texCoin.width,(float)texCoin.height},
-                            {(float)sx, 450.f, (float)iconSize, (float)iconSize}, {}, 0.f, WHITE);
-                    else { DrawCircle(sx+iconSize/2, 450+iconSize/2, iconSize*0.45f, GOLD);
-                           DrawCircle(sx+iconSize/2, 450+iconSize/2, iconSize*0.3f, {255,200,50,255}); }
-                    DrawText(coinTxt, sx + iconSize + gap, 450, fontSize, GOLD);
+                            {(float)sx, 650.f, (float)iconSize, (float)iconSize}, {}, 0.f, WHITE);
+                    else { DrawCircle(sx+iconSize/2, 650+iconSize/2, iconSize*0.45f, GOLD);
+                           DrawCircle(sx+iconSize/2, 650+iconSize/2, iconSize*0.3f, {255,200,50,255}); }
+                    DrawText(coinTxt, sx + iconSize + gap, 650, fontSize, GOLD);
                 }
             }
         }

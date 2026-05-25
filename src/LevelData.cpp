@@ -483,29 +483,49 @@ static std::string SettingsPath(const char* folder) {
     char buf[512]; snprintf(buf, sizeof(buf), "%s/game_settings.txt", folder); return buf;
 }
 
-bool LoadGameSettings(int& levelRangeMin, int& levelRangeMax, const char* folder)
+bool LoadGameSettings(int& levelRangeMin, int& levelRangeMax,
+                      float& volMusic, float& volSFX, float& volAbility, float& volUI,
+                      unsigned int& highScore, int& highLevels,
+                      const char* folder)
 {
     levelRangeMin = 1; levelRangeMax = 10;
+    volMusic = 0.8f; volSFX = 1.f; volAbility = 2.f; volUI = 1.f;
+    highScore = 0; highLevels = 0;
     std::string path = SettingsPath(folder);
     FILE* f = fopen(path.c_str(), "r");
     if (!f) return false;
     char tag[64] = {};
     while (fscanf(f, "%63s", tag) == 1) {
-        if      (strcmp(tag, "LEVEL_RANGE_MIN") == 0) (void)fscanf(f, "%d", &levelRangeMin);
-        else if (strcmp(tag, "LEVEL_RANGE_MAX") == 0) (void)fscanf(f, "%d", &levelRangeMax);
+        if      (strcmp(tag, "LEVEL_RANGE_MIN") == 0) (void)fscanf(f, "%d",  &levelRangeMin);
+        else if (strcmp(tag, "LEVEL_RANGE_MAX") == 0) (void)fscanf(f, "%d",  &levelRangeMax);
+        else if (strcmp(tag, "VOL_MUSIC")       == 0) (void)fscanf(f, "%f",  &volMusic);
+        else if (strcmp(tag, "VOL_SFX")         == 0) (void)fscanf(f, "%f",  &volSFX);
+        else if (strcmp(tag, "VOL_ABILITY")     == 0) (void)fscanf(f, "%f",  &volAbility);
+        else if (strcmp(tag, "VOL_UI")          == 0) (void)fscanf(f, "%f",  &volUI);
+        else if (strcmp(tag, "HIGH_SCORE")      == 0) (void)fscanf(f, "%u",  &highScore);
+        else if (strcmp(tag, "HIGH_LEVELS")     == 0) (void)fscanf(f, "%d",  &highLevels);
     }
     fclose(f);
     return true;
 }
 
-bool SaveGameSettings(int levelRangeMin, int levelRangeMax, const char* folder)
+bool SaveGameSettings(int levelRangeMin, int levelRangeMax,
+                      float volMusic, float volSFX, float volAbility, float volUI,
+                      unsigned int highScore, int highLevels,
+                      const char* folder)
 {
     EnsureDir(folder);
     std::string path = SettingsPath(folder);
     FILE* f = fopen(path.c_str(), "w");
     if (!f) return false;
-    fprintf(f, "LEVEL_RANGE_MIN %d\n", levelRangeMin);
-    fprintf(f, "LEVEL_RANGE_MAX %d\n", levelRangeMax);
+    fprintf(f, "LEVEL_RANGE_MIN %d\n",   levelRangeMin);
+    fprintf(f, "LEVEL_RANGE_MAX %d\n",   levelRangeMax);
+    fprintf(f, "VOL_MUSIC %.3f\n",       volMusic);
+    fprintf(f, "VOL_SFX %.3f\n",         volSFX);
+    fprintf(f, "VOL_ABILITY %.3f\n",     volAbility);
+    fprintf(f, "VOL_UI %.3f\n",          volUI);
+    fprintf(f, "HIGH_SCORE %u\n",        highScore);
+    fprintf(f, "HIGH_LEVELS %d\n",       highLevels);
     fclose(f);
     return true;
 }

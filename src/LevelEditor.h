@@ -234,8 +234,14 @@ private:
     float _statusTimer = 0.f;
 
     // ── Level range settings (game-wide, not per-level) ─────────────────────
-    int _levelRangeMin = 1;
-    int _levelRangeMax = 10;
+    int          _levelRangeMin = 1;
+    int          _levelRangeMax = 10;
+    float        _volMusic   = 0.8f;
+    float        _volSFX     = 1.f;
+    float        _volAbility = 2.f;
+    float        _volUI      = 1.f;
+    unsigned int _highScore  = 0;
+    int          _highLevels = 0;
 
     // ── Properties clipboard ─────────────────────────────────────────────────
     struct PropClipboard {

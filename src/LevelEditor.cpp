@@ -72,7 +72,7 @@ void LevelEditor::Init(int sw, int sh) {
     // Preview ON by default — tap F8 (or F8:LIGHT button) to toggle off
     _lightingPreview = true;
 
-    LoadGameSettings(_levelRangeMin, _levelRangeMax);
+    LoadGameSettings(_levelRangeMin, _levelRangeMax, _volMusic, _volSFX, _volAbility, _volUI, _highScore, _highLevels);
     LoadLevel(1);
 }
 
@@ -2033,9 +2033,9 @@ void LevelEditor::DrawDataPanel() {
         SH("── Level Range ─────────────");
         DrawText("Random level pool:", (int)px, (int)cy, 9, { 150,155,180,255 }); cy += 12;
         float fMin = (float)_levelRangeMin, fMax = (float)_levelRangeMax;
-        if (NumFld("Min", fMin, 1.f, 1.f, 20.f)) { _levelRangeMin = (int)fMin; SaveGameSettings(_levelRangeMin, _levelRangeMax); }
+        if (NumFld("Min", fMin, 1.f, 1.f, 20.f)) { _levelRangeMin = (int)fMin; SaveGameSettings(_levelRangeMin, _levelRangeMax, _volMusic, _volSFX, _volAbility, _volUI, _highScore, _highLevels); }
         cy += rowH;
-        if (NumFld("Max", fMax, 1.f, 1.f, 20.f)) { _levelRangeMax = (int)fMax; SaveGameSettings(_levelRangeMin, _levelRangeMax); }
+        if (NumFld("Max", fMax, 1.f, 1.f, 20.f)) { _levelRangeMax = (int)fMax; SaveGameSettings(_levelRangeMin, _levelRangeMax, _volMusic, _volSFX, _volAbility, _volUI, _highScore, _highLevels); }
         cy += rowH;
         DrawText(TextFormat("Levels %d - %d in pool", _levelRangeMin, _levelRangeMax), (int)px, (int)cy, 9, { 100,200,120,255 });
         return;

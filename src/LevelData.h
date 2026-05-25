@@ -243,5 +243,11 @@ bool      LoadLevel(LevelData& out, int id, const char* folder = "Levels");
 LevelData GetDefaultLevel1();
 void      ExportLevelAsCpp(const LevelData& lv, const char* outFile = "LevelExport.cpp");
 
-bool      LoadGameSettings(int& levelRangeMin, int& levelRangeMax, const char* folder = "Levels");
-bool      SaveGameSettings(int levelRangeMin, int levelRangeMax, const char* folder = "Levels");
+bool      LoadGameSettings(int& levelRangeMin, int& levelRangeMax,
+                          float& volMusic, float& volSFX, float& volAbility, float& volUI,
+                          unsigned int& highScore, int& highLevels,
+                          const char* folder = "Levels");
+bool      SaveGameSettings(int levelRangeMin, int levelRangeMax,
+                          float volMusic, float volSFX, float volAbility, float volUI,
+                          unsigned int highScore, int highLevels,
+                          const char* folder = "Levels");
