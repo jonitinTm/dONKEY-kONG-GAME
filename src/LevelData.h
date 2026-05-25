@@ -32,6 +32,8 @@ struct PathNodeData {
     int   edgeType[3] = { 0, 0, 0 };  // 0=normal, 1=ladder movement
     int   rollThreshold = 5;
     bool  isSplitNode = false;
+    // -1 = normal terminal  0 = fall down  1 = go right  2 = go left  3 = stay (no movement)
+    int   enderDir = -1;
 };
 
 // ── Win zone ──────────────────────────────────────────────────────────────────
@@ -216,6 +218,7 @@ struct LevelData {
     bool    caveVisible = true;
     bool    caveSpawnEnabled = false;
     float   caveSpawnRate    = 10.f;
+    bool    barrelEndSpawnBunnies = true;  // spawn bunny when barrel reaches terminal node
 
     std::vector<PlatformData>        platforms;
     std::vector<LadderData>          ladders;

@@ -1602,7 +1602,18 @@ void LevelEditor::DrawPathNodes() {
         bool ms = IsInMultiSel({ (int)EditorTool::PATH_NODE,i });
         // Terminal = all nexts -1
         bool terminal = (n.next[0] < 0 && n.next[1] < 0 && n.next[2] < 0);
-        Color fill = (i == 0) ? WHITE : terminal ? RED : n.isSplitNode ? GREEN : YELLOW;
+        static const Color ENDER_COL[4] = {
+            {0,200,220,255},   // 0=down   cyan
+            {80,200,80,255},   // 1=right  lime
+            {200,140,40,255},  // 2=left   amber
+            {180,80,200,255},  // 3=none   purple
+        };
+        bool isEnder = terminal && n.enderDir >= 0 && n.enderDir <= 3;
+        Color fill = (i == 0) ? WHITE
+                   : isEnder  ? ENDER_COL[n.enderDir]
+                   : terminal ? RED
+                   : n.isSplitNode ? GREEN
+                   : YELLOW;
         Vector2 pos = { n.x,n.y };
         if (ms && !sel) DrawCircleV(pos, 14.f, { 255,200,0,180 });
         if (sel) DrawCircleV(pos, 13.f, YELLOW);
@@ -2191,6 +2202,19 @@ void LevelEditor::DrawDataPanel() {
             if (NumField("Rate(s)", _level.caveSpawnRate, 0.1f, 2.f, 120.f, px, cy, fw)) {}
             cy += rowH;
         }
+
+        // Barrel-end bunny spawn toggle
+        Rectangle bbR = { px, cy, fw, 18 };
+        bool hBB = CheckCollisionPointRec(GetMousePosition(), bbR);
+        bool isBB = _level.barrelEndSpawnBunnies;
+        DrawRectangleRec(bbR, isBB ? Color{20,60,20,255} : (hBB ? Color{60,30,30,255} : Color{40,20,20,255}));
+        DrawRectangleLinesEx(bbR, isBB ? 2.f : 1.f, isBB ? Color{80,220,80,255} : Color{220,80,80,255});
+        const char* bbLbl = isBB ? "BarrelBunny: ON" : "BarrelBunny: OFF";
+        int bbLblW = MeasureText(bbLbl, 9);
+        DrawText(bbLbl, (int)(bbR.x + bbR.width*0.5f - bbLblW*0.5f), (int)cy+5, 9,
+            isBB ? Color{180,255,180,255} : Color{255,140,140,255});
+        if (hBB && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); _level.barrelEndSpawnBunnies = !_level.barrelEndSpawnBunnies; }
+        cy += 22;
     }
     if (_sel.type == (int)EditorTool::PLATFORM) {
         SectionHeader("── Rotation ───────────────");
@@ -2516,11 +2540,11 @@ void LevelEditor::DrawDataPanel() {
         }
         SectionHeader("── Tex Variant ─────────────");
         {
-            static const char* propVarNames[] = { "Light", "WoodBox", "Barrel", "Support", "OilCan", "Fire" };
-            static constexpr int PROP_VAR_COUNT = 6;
+            static const char* propVarNames[] = { "Light", "WoodBox", "Barrel", "Support", "OilCan", "Fire", "Coin" };
+            static constexpr int PROP_VAR_COUNT = 7;
             const int COLS = 3;
             float tbw = (fw - (COLS - 1) * 2.f) / COLS;
-            for (int row = 0; row < 2; row++) {
+            for (int row = 0; row < 3; row++) {
                 for (int col = 0; col < COLS; col++) {
                     int vi = row * COLS + col;
                     if (vi >= PROP_VAR_COUNT) break;
@@ -2675,11 +2699,32 @@ void LevelEditor::DrawDataPanel() {
         }
         cy += 20;
         float bwS = (fw - 4) / 2.f;
-        Rectangle rSpl = { px,cy,bwS,16 };
+        // Split toggle (half width)
+        Rectangle rSpl = { px, cy, bwS, 16 };
         bool hs = CheckCollisionPointRec(GetMousePosition(), rSpl);
-        DrawRectangleRec(rSpl, n.isSplitNode ? (hs ? Color{ 20,120,20,255 } : Color{ 10,80,10,255 }) : (hs ? Color{ 60,60,80,255 } : Color{ 35,38,55,255 }));
+        DrawRectangleRec(rSpl, n.isSplitNode ? (hs ? Color{20,120,20,255} : Color{10,80,10,255}) : (hs ? Color{60,60,80,255} : Color{35,38,55,255}));
         DrawText(n.isSplitNode ? "Split: ON" : "Split: OFF", (int)rSpl.x + 4, (int)rSpl.y + 2, 10, WHITE);
         if (hs && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); n.isSplitNode = !n.isSplitNode; }
+        cy += 20;
+        // Ender direction row — 5 equal buttons: Normal / Down / Right / Left / None
+        {
+            static const char* EDIR_LBL[5] = { "Nrm", "Down", "Rght", "Left", "None" };
+            static const Color EDIR_ON[5]  = { {55,55,75,255},{0,160,180,255},{40,160,40,255},{190,120,20,255},{140,40,180,255} };
+            static const Color EDIR_OFF[5] = { {30,32,45,255},{0,60,70,255},{15,55,15,255},{70,45,8,255},{55,15,70,255} };
+            DrawText("Ender:", (int)px, (int)cy + 2, 9, {150,155,180,255});
+            float bw5 = (fw - 4) / 5.f;
+            for (int k = 0; k < 5; k++) {
+                int dir = k - 1; // k==0 → -1 (normal), k==1 → 0 (down), ...
+                Rectangle rb = { px + k*(bw5+1), cy, bw5, 16 };
+                bool hov = CheckCollisionPointRec(GetMousePosition(), rb);
+                bool sel = (n.enderDir == dir);
+                Color bc = sel ? EDIR_ON[k] : (hov ? Color{EDIR_ON[k].r,(unsigned char)fminf(EDIR_ON[k].g+20,255),EDIR_ON[k].b,200} : EDIR_OFF[k]);
+                DrawRectangleRec(rb, bc);
+                if (sel) DrawRectangleLinesEx(rb, 1.f, WHITE);
+                int tw = MeasureText(EDIR_LBL[k], 9); DrawText(EDIR_LBL[k], (int)(rb.x+(rb.width-tw)/2), (int)rb.y+3, 9, sel ? WHITE : Color{160,165,185,255});
+                if (hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); n.enderDir = dir; }
+            }
+        }
         cy += 20;
         float rv = n.rollThreshold;
         if (NumField("Roll", rv, 0.05f, 0, 10, px, cy, fw)) { PushUndo(); n.rollThreshold = (int)roundf(rv); } cy += rowH;

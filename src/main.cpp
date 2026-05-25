@@ -30,6 +30,7 @@ struct PathNode
     int     edgeType[3] = { 0, 0, 0 };  // 0=normal, 1=ladder
     int     rollThreshold = 5;
     bool    isSplitNode = false;
+    int     enderDir = -1;  // -1=normal  0=down  1=right  2=left  3=none
 };
 
 struct Barrel
@@ -45,6 +46,9 @@ struct Barrel
     int       animFrame = 0;
     bool      jumpScored = false;
     bool      reachedEnd = false;
+    int       barrelEnderDir = -1;  // -1=normal  0=down  1=right  2=left  3=none (wait)
+    float     fallEndTimer  = 0.f;
+    float     fallEndVelY   = 0.f;
 };
 
 struct NukeItem { Vector2 pos; bool active = true; };
@@ -238,7 +242,14 @@ static void UpdateBarrel(Barrel& b, const vector<PathNode>& path, float delta)
             if (node.isSplitNode) { b.isFalling = (choice == 0 && validCount > 1); b.animFrame = 0; }
             b.currentNode = validNext[choice];
         }
-        else { b.active = false; b.reachedEnd = true; }
+        else {
+            if (node.enderDir >= 0) {
+                b.barrelEnderDir = node.enderDir;
+                b.isFalling = (node.enderDir == 0); // show fall anim only when going down
+            } else {
+                b.active = false; b.reachedEnd = true;
+            }
+        }
     }
     else
     {
@@ -606,6 +617,7 @@ int main(void)
     bool      wasGrounded = false;
     float     airborneTime = 0.f;    // time spent ungrounded; gates landing SFX
     float     playerStepDist = 0.f;
+    int       floorMaterial  = 0;   // last known floor sound material; latched per-frame when grounded
 
     // ── Whip visual ───────────────────────────────────────────────────────────
     bool  whipActive      = false;
@@ -1117,8 +1129,9 @@ int main(void)
     Texture2D texShield1   = LoadTexture("Assets/Textures/Cards/Shield1.png");
     Texture2D texShield2   = LoadTexture("Assets/Textures/Cards/Shield2.png");
 
-    static constexpr int PROP_TEX_COUNT = 6;
+    static constexpr int PROP_TEX_COUNT   = 7;
     static constexpr int PROP_FIRE_VARIANT = 5;
+    static constexpr int PROP_COIN_VARIANT = 6;
     Texture2D propTextures[PROP_TEX_COUNT] = {
         LoadTexture("Assets/Textures/Lighting/Light.png"),
         LoadTexture("Assets/Textures/Architecture/WoodBox.png"),
@@ -1126,6 +1139,7 @@ int main(void)
         LoadTexture("Assets/Textures/Architecture/SupportBeam.png"),
         LoadTexture("Assets/Textures/Items/Dk_OilCanister.png"),
         LoadTexture("Assets/Textures/Items/Dk_Oil_Fire3.png"),
+        LoadTexture("Assets/Textures/UI/coin.png"),
     };
     Texture2D propFireFrame2 = LoadTexture("Assets/Textures/Items/Dk_Oil_Fire4.png");
     float propFireTimer = 0.f;
@@ -1348,7 +1362,8 @@ int main(void)
                 n.edgeType[1] = nd.edgeType[1];
                 n.edgeType[2] = nd.edgeType[2];
                 n.rollThreshold = nd.rollThreshold;
-                n.isSplitNode = nd.isSplitNode;
+                n.isSplitNode   = nd.isSplitNode;
+                n.enderDir      = nd.enderDir;
                 barrelPath.push_back(n);
             }
 
@@ -2301,10 +2316,28 @@ int main(void)
             {
                 for (auto& b : barrels)
                 {
+                    if (!b.active) continue;
+
+                    // Ender mode: barrel moves in fixed direction for 5 s then despawns
+                    if (b.barrelEnderDir >= 0) {
+                        switch (b.barrelEnderDir) {
+                        case 0: b.fallEndVelY += 0.35f; b.hitbox.y += b.fallEndVelY; break; // down
+                        case 1: b.hitbox.x += b.speed * 1.5f; break;                        // right
+                        case 2: b.hitbox.x -= b.speed * 1.5f; break;                        // left
+                        default: break;                                                       // none: stay
+                        }
+                        b.fallEndTimer += dt;
+                        if (b.fallEndTimer >= 5.f) b.active = false;
+                        continue;
+                    }
+
+                    // Out-of-bounds despawn (fell through the map without hitting a node)
+                    if (b.hitbox.y > 1500.f) { b.active = false; continue; }
+
                     bool wasActive = b.active;
                     b.reachedEnd = false;
                     UpdateBarrel(b, barrelPath, dt);
-                    if (wasActive && !b.active && b.reachedEnd)
+                    if (wasActive && !b.active && b.reachedEnd && currentLevelData.barrelEndSpawnBunnies)
                         SpawnEnemyAtEnd(b.hitbox.x + b.hitbox.width * 0.5f);
                 }
             }
@@ -2712,7 +2745,7 @@ int main(void)
             }
 
             // ── Blue barrel / house collision ─────────────────────────────────
-            if (!isDying && !houseAnimPlaying)
+            if (!isDying && !houseAnimPlaying && currentLevelData.caveVisible)
             {
                 for (auto& b : barrels)
                 {
@@ -2943,89 +2976,63 @@ int main(void)
                         }
                     }
 
-                    // ── Footstep sounds ───────────────────────────────────────
+                    // ── Floor material detection (every grounded frame) ───────
+                    // Cache the material so step/landing triggers don't miss
+                    // gaps between beams when the threshold fires.
                     if (isGrounded && !onLadder && !isDying) {
+                        float pbot  = player.y + player.height;
+                        float pleft = player.x;
+                        float pright = player.x + player.width;
+                        int detMat = 0;
+                        for (const auto& cv : liveConveyors) {
+                            if (cv.soundMaterial <= 0) continue;
+                            if (pright <= cv.x || pleft >= cv.x + cv.length) continue;
+                            if (pbot < cv.y - 24.f || pbot > cv.y + cv.beltH + 8.f) continue;
+                            detMat = cv.soundMaterial; break;
+                        }
+                        if (detMat == 0) {
+                            static constexpr float STEP_TOL = 32.f;
+                            float bestD = -9999.f;
+                            for (const auto& bm : beamPositions) {
+                                if (bm.soundMaterial <= 0) continue;
+                                Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant - 1].id > 0)
+                                    ? &beamVariants[bm.texVariant - 1] : &beam;
+                                float bw = bt->width * 4.f, bh = bt->height * 4.f;
+                                if (pright > bm.x && pleft < bm.x + bw) {
+                                    float d = bm.y - pbot;
+                                    if (d >= -bh && d < STEP_TOL && d > bestD) { bestD = d; detMat = bm.soundMaterial; }
+                                }
+                            }
+                        }
+                        if (detMat > 0) floorMaterial = detMat;  // latch; persist through small gaps
+
+                        // ── Footstep sounds ───────────────────────────────────
                         float stepped = fabsf(player.x - prevX);
-                        playerStepDist += stepped;
+                        if (stepped > 0.1f) playerStepDist += stepped;  // only count real movement
                         static constexpr float STEP_DIST = 48.f / 1.25f;
-                        if (playerStepDist >= STEP_DIST && stepped > 0.1f) {
+                        if (playerStepDist >= STEP_DIST) {
                             playerStepDist = 0.f;
-                            float pcx = player.x + player.width * 0.5f;
-                            float pbot = player.y + player.height;
-                            int   bestMat = 0;
-                            // Check conveyors first using the same feet/belt overlap as the push code
-                            {
-                                float colW = player.width * 0.5f, colH = player.height * 0.5f;
-                                float offX = (player.width - colW) * 0.5f, offY = player.height - colH;
-                                Rectangle feet = { player.x + offX, player.y + offY, colW, colH };
-                                for (const auto& cv : liveConveyors) {
-                                    if (cv.soundMaterial <= 0) continue;
-                                    Rectangle belt = { cv.x, cv.y - 4.f, cv.length, cv.beltH + 8.f };
-                                    if (CheckCollisionRecs(feet, belt)) { bestMat = cv.soundMaterial; break; }
-                                }
-                            }
-                            // Fall back to beam raycast if not on a conveyor
-                            if (bestMat == 0) {
-                                static constexpr float STEP_TOL = 12.f;
-                                float bestD = -9999.f;
-                                for (const auto& bm : beamPositions) {
-                                    if (bm.soundMaterial <= 0) continue;
-                                    Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant - 1].id > 0)
-                                        ? &beamVariants[bm.texVariant - 1] : &beam;
-                                    float bw = bt->width * 4.f, bh = bt->height * 4.f;
-                                    if (pcx >= bm.x && pcx <= bm.x + bw) {
-                                        float d = bm.y - pbot;
-                                        if (d >= -bh && d < STEP_TOL && d > bestD) { bestD = d; bestMat = bm.soundMaterial; }
-                                    }
-                                }
-                            }
-                            if (bestMat > 0 && bestMat < MAT_COUNT) {
-                                bool useRun = speedrunActive && !footsteps[bestMat].run.empty();
-                                const auto& pool = useRun ? footsteps[bestMat].run : footsteps[bestMat].walk;
-                                if (!pool.empty()) {
-                                    int idx = GetRandomValue(0, (int)pool.size() - 1);
-                                    SetSoundVolume(pool[idx], volSFX * 0.5f);
-                                    PlaySound(pool[idx]);
-                                }
+                            // fall back to BLUNTWOOD when no surface material is set in the level
+                            int stepMat = (floorMaterial > 0 && floorMaterial < MAT_COUNT) ? floorMaterial : 1;
+                            bool useRun = speedrunActive && !footsteps[stepMat].run.empty();
+                            const auto& pool = useRun ? footsteps[stepMat].run : footsteps[stepMat].walk;
+                            if (!pool.empty()) {
+                                int idx = GetRandomValue(0, (int)pool.size() - 1);
+                                SetSoundVolume(pool[idx], volSFX * 0.5f);
+                                PlaySound(pool[idx]);
                             }
                         }
                     } else {
                         playerStepDist = 0.f;
+                        floorMaterial  = 0;
                     }
 
                     // ── Landing SFX ───────────────────────────────────────────
-                    // Only fire when coming from a real airborne stretch (≥0.1 s)
+                    // Only fire when coming from a real airborne stretch (≥0.1 s).
+                    // floorMaterial was just updated above on this landing frame.
                     if (isGrounded && !wasGrounded && airborneTime >= 0.1f && !onLadder && !isDying) {
-                        float pcx = player.x + player.width * 0.5f;
-                        float pbot = player.y + player.height;
-                        int landMat = 0;
-                        // Check conveyor first with the same belt overlap the push code uses
-                        {
-                            float colW = player.width * 0.5f, colH = player.height * 0.5f;
-                            float offX = (player.width - colW) * 0.5f, offY = player.height - colH;
-                            Rectangle feet = { player.x + offX, player.y + offY, colW, colH };
-                            for (const auto& cv : liveConveyors) {
-                                if (cv.soundMaterial <= 0) continue;
-                                Rectangle belt = { cv.x, cv.y - 4.f, cv.length, cv.beltH + 8.f };
-                                if (CheckCollisionRecs(feet, belt)) { landMat = cv.soundMaterial; break; }
-                            }
-                        }
-                        // Fall back to beam raycast
-                        if (landMat == 0) {
-                            static constexpr float LAND_TOL = 12.f;
-                            float bestLD = -9999.f;
-                            for (const auto& bm : beamPositions) {
-                                if (bm.soundMaterial <= 0) continue;
-                                Texture2D* bt = (bm.texVariant >= 1 && bm.texVariant <= 12 && beamVariants[bm.texVariant-1].id > 0)
-                                    ? &beamVariants[bm.texVariant-1] : &beam;
-                                float bw = bt->width * 4.f, bh = bt->height * 4.f;
-                                if (pcx >= bm.x && pcx <= bm.x + bw) {
-                                    float d = bm.y - pbot;
-                                    if (d >= -bh && d < LAND_TOL && d > bestLD) { bestLD = d; landMat = bm.soundMaterial; }
-                                }
-                            }
-                        }
-                        if (landMat > 0 && landMat < MAT_COUNT && !footsteps[landMat].walk.empty()) {
+                        int landMat = (floorMaterial > 0 && floorMaterial < MAT_COUNT) ? floorMaterial : 1;
+                        if (!footsteps[landMat].walk.empty()) {
                             int idx = GetRandomValue(0, (int)footsteps[landMat].walk.size()-1);
                             SetSoundVolume(footsteps[landMat].walk[idx], volSFX * 0.7f);
                             PlaySound(footsteps[landMat].walk[idx]);
@@ -3110,7 +3117,7 @@ int main(void)
                     if (CheckCollisionRecs(en.hitbox, belt)) { en.hitbox.x += driftX; en.hitbox.y += driftY; }
                 }
                 for (auto& b : barrels) {
-                    if (!b.active || b.isFalling) continue;
+                    if (!b.active || b.isFalling || b.barrelEnderDir >= 0) continue;
                     Rectangle bFeet = { b.hitbox.x, b.hitbox.y + b.hitbox.height - 6.f, b.hitbox.width, 6.f };
                     if (CheckCollisionRecs(bFeet, belt)) { b.hitbox.x += driftX; b.hitbox.y += driftY; }
                 }

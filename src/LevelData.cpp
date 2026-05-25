@@ -48,6 +48,8 @@ bool SaveLevel(const LevelData& lv, const char* folder)
         fprintf(f, "CAVE %.2f %.2f %d\n", lv.cavePos.x, lv.cavePos.y, lv.caveVisible ? 1 : 0);
         if (lv.caveSpawnEnabled)
             fprintf(f, "CAVE_SPAWN %.2f\n", lv.caveSpawnRate);
+        if (!lv.barrelEndSpawnBunnies)
+            fprintf(f, "BARREL_BUNNY_SPAWN 0\n");
     }
 
     for (const auto& p : lv.platforms)
@@ -61,10 +63,11 @@ bool SaveLevel(const LevelData& lv, const char* folder)
             b.x, b.y, b.texVariant, b.renderLayer, b.flipX ? 1 : 0, b.transparent ? 1 : 0, b.soundMaterial);
 
     for (const auto& n : lv.pathNodes)
-        fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d %d %d %d %d\n",
+        // 11th token = enderDir+2: 1=normal(-1), 2=down(0), 3=right(1), 4=left(2), 5=none(3)
+        fprintf(f, "PATH_NODE %.2f %.2f %d %d %d %d %d %d %d %d %d\n",
             n.x, n.y, n.next[0], n.next[1], n.next[2],
             n.edgeType[0], n.edgeType[1], n.edgeType[2],
-            n.rollThreshold, n.isSplitNode ? 1 : 0);
+            n.rollThreshold, n.isSplitNode ? 1 : 0, n.enderDir + 2);
 
     for (const auto& v : lv.nukeSpawns)
         fprintf(f, "NUKE_SPAWN %.2f %.2f\n", v.x, v.y);
@@ -181,23 +184,28 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         }
         else if (strcmp(tag, "PATH_NODE") == 0) {
             char line[512]; fgets(line, sizeof(line), f);
-            PathNodeData n; int roll = 5, split = 0;
-            // New format (10 values): x y next0 next1 next2 et0 et1 et2 roll isSplit
-            // Old format (6 values):  x y next0 next1 roll isSplit
-            // sscanf into new layout; if only 6 parsed the 5th/6th land in next[2]/edgeType[0]
-            int cnt = sscanf(line, "%f %f %d %d %d %d %d %d %d %d",
+            PathNodeData n; int roll = 5, split = 0, enderFall = 0;
+            // Format v3 (11 values): x y next0 next1 next2 et0 et1 et2 roll isSplit isEnderFall
+            // Format v2 (10 values): x y next0 next1 next2 et0 et1 et2 roll isSplit
+            // Format v1 (6 values):  x y next0 next1 roll isSplit
+            int cnt = sscanf(line, "%f %f %d %d %d %d %d %d %d %d %d",
                 &n.x, &n.y, &n.next[0], &n.next[1], &n.next[2],
-                &n.edgeType[0], &n.edgeType[1], &n.edgeType[2], &roll, &split);
+                &n.edgeType[0], &n.edgeType[1], &n.edgeType[2], &roll, &split, &enderFall);
             if (cnt == 6) {
-                // Old format: 5th value = rollThreshold, 6th = isSplit
                 roll  = n.next[2];
                 split = n.edgeType[0];
                 n.next[2] = -1;
                 n.edgeType[0] = n.edgeType[1] = n.edgeType[2] = 0;
             }
             n.rollThreshold = roll;
-            n.isSplitNode = (split != 0);
+            n.isSplitNode   = (split != 0);
+            // 11th token: 0=old-not-ender, 1=old-ender-down, 2+=new(raw-2)
+            n.enderDir = (cnt >= 11) ? (enderFall <= 1 ? (enderFall - 1) : (enderFall - 2)) : -1;
             out.pathNodes.push_back(n);
+        }
+        else if (strcmp(tag, "BARREL_BUNNY_SPAWN") == 0) {
+            int v = 1; (void)fscanf(f, "%d", &v);
+            out.barrelEndSpawnBunnies = (v != 0);
         }
         else if (strcmp(tag, "NUKE_SPAWN") == 0) {
             Vector2 v; (void)fscanf(f, "%f %f", &v.x, &v.y);
