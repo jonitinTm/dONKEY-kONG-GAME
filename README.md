@@ -33,6 +33,13 @@ Your main objective is to climb to the top of the tower using the stairs and avo
 |W|Jump|
 |W(close to stairs)|Climb|
 |S(close to stairs)|Climb Down|
+|F|Pick up item|
+|E/Left mouse button|Use item when equipped|
+|E/ left mouse button|Use power up when equipped|
+|1, 2, 3|Select hotbar slot|
+|Scroll mouse wheel|Scroll hotbar|
+|Esc|Pause menu button|
+|N|Return to main menu|
 
 
 | Item |Function|
@@ -54,6 +61,23 @@ Your main objective is to climb to the top of the tower using the stairs and avo
 |One more Larp|Restore one of the lifes of the player if its lost|
 |Return by death|Returns the level to a certain point automatically when dead|
 
+## Debug Funcionalities
+* Activate Debug mode with `M`
+
+* Increase lifes
+
+* Increase Max lifes
+
+* Activate inmortality
+
+* Activate flight
+
+* Activate the capacity to cross through walls
+
+* Spawn enemies and items
+
+* Give yourself abilities
+
 ## Implemented Features
 
 ### Screens
@@ -71,13 +95,34 @@ Your main objective is to climb to the top of the tower using the stairs and avo
 
 * Victory screen
 
+* Level Editor Screen
+
+* Options Screen
+
 ### Soundtrack
+* Main menu
+* In game
+  
 ### Sound Effect
+* Move
+* Jump
+* Climb ladder
+* Use whip
+* Use larp
+* Select card
+* Use Beatrice
+* Use Nuke
+* Jump barrel
+* Use extra life
+* Use return by death
+* Use one more larp
+* Use shop 
 ### UI
 * Score
 
 * Lives
 
+* Power up slots
 
 ### Animations
 `Main character animations`
@@ -92,6 +137,14 @@ Your main objective is to climb to the top of the tower using the stairs and avo
 
 * Carrying Beatrice
 
+* Using dash
+
+* Using shield
+
+* Using ladder
+
+* Using Whip
+
 `Enemy animation`
 
 * Throwing the barrels
@@ -100,6 +153,8 @@ Your main objective is to climb to the top of the tower using the stairs and avo
 
 `Obstacles animation`
 * Barrels animation
+* Special Barel animation
+* Rabbit Animation
 
 `Pre-Gameplay animation`
 
