@@ -53,6 +53,10 @@ public:
     void EndOccluders();
     void BakeOccludersFromLevel(const LevelData& lv, Camera2D cam);
 
+    // When set, all final output is redirected to this render texture instead of the
+    // default framebuffer — required for the fullscreen letterbox render-texture approach.
+    void SetOutputTarget(RenderTexture2D* rt) { _outputRT = rt; }
+
     // Composite() reads lv.lights (level-authored) PLUS any runtime lights added
     // this frame via AddRuntimeLight().  Runtime list is cleared automatically.
     void Composite(const LevelData& lv, Camera2D cam,
@@ -110,6 +114,9 @@ private:
 
     void RunBlur(RenderTexture2D src, RenderTexture2D dst, Vector2 dir);
     void UploadLights(const LevelData& lv);
+    void RestoreOutputTarget();  // re-binds _outputRT after internal EndTextureMode resets to FBO 0
+
+    RenderTexture2D* _outputRT = nullptr;
 
     bool    _bloomEnabled   = false;
     float   _bloomThreshold = 0.7f;

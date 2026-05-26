@@ -9,7 +9,7 @@
 #include <ctime>
 #include <algorithm>
 
-enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR, CARD_SELECT, SETTINGS };
+enum GameScreen { SPLASH_SCREEN = 0, SPLASH_SCREEN2, MENU, CONTROLS, GAMEPLAY, GAME_OVER, HOW_HIGH, LEVEL_EDITOR, CARD_SELECT, SETTINGS, HIGHSCORES };
 
 static constexpr float DEATH_FLASH_DURATION = 0.40f;
 static constexpr float DEATH_FADE_DURATION = 1.10f;
@@ -152,14 +152,23 @@ struct CardDisplay {
 
 // Return-by-death snapshot
 struct RBDSnapshot {
-    Rectangle   player; float vx,vy; bool facingR,onLadder; int curLadder; float ladderProg;
-    int lives; unsigned score; int coins;
-    struct BS{Rectangle h;int node;float spd;bool active,isBlue,isFalling;};
-    struct ES{Rectangle h;Vector2 vel;EnemyType type;EnemyState st;float stT;bool active,grounded,facingR;};
+    Rectangle   player    = {};
+    float       vx        = 0.f, vy = 0.f;
+    bool        facingR   = false, onLadder = false;
+    int         curLadder = -1;
+    float       ladderProg = 0.f;
+    int         lives     = 0;
+    unsigned    score     = 0;
+    int         coins     = 0;
+    struct BS { Rectangle h = {}; int node = 0; float spd = 0.f; bool active = false, isBlue = false, isFalling = false; };
+    struct ES { Rectangle h = {}; Vector2 vel = {}; EnemyType type = GRUNT; EnemyState st = ES_IDLE; float stT = 0.f; bool active = false, grounded = false, facingR = true; };
     vector<BS> barrels; vector<ES> enemies;
     vector<NukeItem> nukes; vector<BeatriceItem> beatrices;
-    bool regThrowing,regPending,regForceBlue,regActive,regStunned;
-    float regThrowT; int regThrowFr; float regIdleT; int regIdleFr;
+    bool  regThrowing = false, regPending = false, regForceBlue = false, regActive = false, regStunned = false;
+    float regThrowT   = 0.f;
+    int   regThrowFr  = 0;
+    float regIdleT    = 0.f;
+    int   regIdleFr   = 0;
 };
 
 // Growing ladder (Larper)
@@ -499,10 +508,11 @@ int main(void)
     int       selectedOption = 0;
     int       settingsTab      = 0;   // 0=Controls, 1=Settings, 2=Debug
     float     settingsDbgScroll= 0.f; // scroll offset for DEBUG tab
-    Rectangle btnPlay    = { 340, 450, 200, 40 };
-    Rectangle btnExit    = { 340, 500, 200, 40 };
-    Rectangle btnEditor  = { 340, 550, 200, 40 };
-    Rectangle btnSettings= { 340, 600, 200, 40 };
+    Rectangle btnPlay       = { 340, 450, 200, 40 };
+    Rectangle btnExit       = { 340, 500, 200, 40 };
+    Rectangle btnEditor     = { 340, 550, 200, 40 };
+    Rectangle btnSettings   = { 340, 600, 200, 40 };
+    Rectangle btnHighscores = { 340, 650, 200, 40 };
 
     bool debugPath = false;
 
@@ -523,6 +533,9 @@ int main(void)
     float volSFX     = 1.f;  // gameplay sounds (death, hit, barrel jump, RBD)
     float volAbility = 2.f;  // ability activation sounds (shield, dash, whip, etc.) — 200% default
     float volUI      = 1.f;  // UI/card sounds
+    float volAmbient = 0.6f; // ambient loops (rain, etc.)
+    bool videoFullscreen = false;
+    bool videoSmooth     = true;  // bilinear upscale filter on the game render texture
 
     // ── Music fade-out state ──────────────────────────────────────────────────
     static constexpr float MUSIC_FADE_DUR = 0.5f;
@@ -578,7 +591,7 @@ int main(void)
 
     // ── Return-by-death ──────────────────────────────────────────────────────
     static constexpr int RBD_BUF = 50;
-    RBDSnapshot    rbdBuf[RBD_BUF] = {};
+    vector<RBDSnapshot> rbdBuf(RBD_BUF);
     int            rbdHead    = 0;
     int            rbdCount   = 0;
     float          rbdSaveTimer = 0.f;
@@ -896,12 +909,42 @@ int main(void)
     regulusThrowTimer = 0.0f;
 
     // ── Window / audio init ───────────────────────────────────────────────────
+    SetConfigFlags(FLAG_MSAA_4X_HINT);
     InitWindow(screenWidth, screenHeight, "Donkey Kong");
     editor.Init(screenWidth, screenHeight);
     gameLighting.Init(screenWidth, screenHeight, LightingSystem::Quality::MEDIUM);
     gameLighting.SetGlobalAmbient(0.06f);
     gameLighting.SetGlobalDarkness(1.00f);
     gameLighting.SetAmbientColor({ 25, 30, 50, 255 });
+
+    // ── Game render target (used for fullscreen letterbox) ────────────────────
+    RenderTexture2D gameRT = LoadRenderTexture(screenWidth, screenHeight);
+    SetTextureFilter(gameRT.texture, TEXTURE_FILTER_BILINEAR);
+
+    // Enter/exit fullscreen helper (updates window, mouse transform, lighting target)
+    auto ToggleFS = [&](bool toFS) {
+        videoFullscreen = toFS;
+        if (toFS) {
+            int mon = GetCurrentMonitor();
+            SetWindowSize(GetMonitorWidth(mon), GetMonitorHeight(mon));
+            ToggleFullscreen();
+            int sw = GetScreenWidth(), sh = GetScreenHeight();
+            float scl = fminf((float)sw / (float)screenWidth, (float)sh / (float)screenHeight);
+            SetMouseOffset(-(int)(((float)sw  - (float)screenWidth  * scl) * 0.5f),
+                           -(int)(((float)sh  - (float)screenHeight * scl) * 0.5f));
+            SetMouseScale(1.f / scl, 1.f / scl);
+            gameLighting.SetOutputTarget(&gameRT);
+        } else {
+            ToggleFullscreen();
+            SetWindowSize(screenWidth, screenHeight);
+            int mon = GetCurrentMonitor();
+            SetWindowPosition((GetMonitorWidth(mon) - screenWidth)  / 2,
+                              (GetMonitorHeight(mon) - screenHeight) / 2);
+            SetMouseOffset(0, 0);
+            SetMouseScale(1.f, 1.f);
+            gameLighting.SetOutputTarget(nullptr);
+        }
+    };
     Cinematic::Global.LoadAll();
     SetRandomSeed((unsigned int)time(NULL));
     InitAudioDevice();
@@ -909,7 +952,7 @@ int main(void)
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
-    Music music = LoadMusicStream("Assets/Nuevo audio/audiosmenus/lo.mp3");
+    Music music = LoadMusicStream("Assets/Nuevo audio/NewSFX/MusicaFinalRezero.mp3");
     Music menuMusic = LoadMusicStream("Assets/Nuevo audio/audiosmenus/menu.mp3");
     Music rainMusic = LoadMusicStream("Assets/Nuevo audio/NewSFX/RAIN-processed.wav");
     bool menuMusicPlaying = false;
@@ -1465,7 +1508,7 @@ int main(void)
             ResumeMusicStream(music);
             menuMusicPlaying = false;
         }
-        SetMusicVolume(rainMusic, volMusic * 0.45f);
+        SetMusicVolume(rainMusic, volAmbient);
         };
 
     auto RespawnItems = [&]()
@@ -1820,7 +1863,7 @@ int main(void)
         });
 
     // ── Level priority init ───────────────────────────────────────────────────
-    LoadGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+    LoadGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, volAmbient, highScore, highLevels);
     SetMusicVolume(menuMusic, volMusic);
     SetMusicVolume(music, volMusic);
     SetMusicVolume(music, volMusic);
@@ -1833,7 +1876,7 @@ int main(void)
         if (runScore    > highScore)  { highScore  = runScore;    changed = true; }
         if (levelsCleared > highLevels) { highLevels = levelsCleared; changed = true; }
         if (changed)
-            SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+            SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, volAmbient, highScore, highLevels);
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1891,11 +1934,21 @@ int main(void)
             {
                 selectedOption = 3; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { settingsTab = 0; currentScreen = SETTINGS; }
             }
+            if (CheckCollisionPointRec(mouse, btnHighscores))
+            {
+                selectedOption = 4; if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = HIGHSCORES;
+            }
+        }
+        else if (currentScreen == HIGHSCORES)
+        {
+            SwitchToMenuMusic();
+            if (IsKeyPressed(KEY_ESCAPE)) currentScreen = MENU;
+            // Reset button is handled in the draw section via IsMouseButtonPressed
         }
         else if (currentScreen == SETTINGS)
         {
             if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_N)) {
-                SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+                SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, volAmbient, highScore, highLevels);
                 currentScreen = MENU;
             }
         }
@@ -3468,9 +3521,9 @@ int main(void)
         if (rain2ScrollY >= Rain2.height) rain2ScrollY = 0.0f;
 
         // ─────────────────────────────────────────────────────────────────────
-        // DRAW
+        // DRAW  (all rendering goes into gameRT; blitted to screen below)
         // ─────────────────────────────────────────────────────────────────────
-        BeginDrawing();
+        BeginTextureMode(gameRT);
         ClearBackground(BLACK);
 
         if (currentScreen == SPLASH_SCREEN)
@@ -3497,6 +3550,7 @@ int main(void)
             const char* exitText   = "EXIT";
             const char* editorText = "LEVEL EDITOR";
             const char* optTxt     = "OPTIONS";
+            const char* hsTxt      = "HIGHSCORES";
             const char* subtitle   = "1967 Bomboclat Industries LLC";
 
             int titleW  = MeasureText(title,      titleFont);
@@ -3504,32 +3558,37 @@ int main(void)
             int exitW   = MeasureText(exitText,   menuFont);
             int editorW = MeasureText(editorText, menuFont);
             int optW    = MeasureText(optTxt,     menuFont);
+            int hsW     = MeasureText(hsTxt,      menuFont);
             int subW    = MeasureText(subtitle,   smallFont);
 
-            // 4 items: play, exit, editor, options
-            int startY  = (screenHeight - (titleFont + spacing * 5 + menuFont * 4 + smallFont)) / 2;
+            // 5 items: play, exit, editor, options, highscores
+            int startY  = (screenHeight - (titleFont + spacing * 6 + menuFont * 5 + smallFont)) / 2;
             int titleX  = (screenWidth - titleW)  / 2, titleY  = startY;
-            int playX   = (screenWidth - playW)   / 2, playY   = titleY + titleFont + spacing;
-            int exitX   = (screenWidth - exitW)   / 2, exitY   = playY  + menuFont  + spacing;
-            int editorX = (screenWidth - editorW) / 2, editorY = exitY  + menuFont  + spacing;
+            int playX   = (screenWidth - playW)   / 2, playY   = titleY  + titleFont + spacing;
+            int exitX   = (screenWidth - exitW)   / 2, exitY   = playY   + menuFont  + spacing;
+            int editorX = (screenWidth - editorW) / 2, editorY = exitY   + menuFont  + spacing;
             int optX    = (screenWidth - optW)    / 2, optY    = editorY + menuFont  + spacing;
-            int subX    = (screenWidth - subW)    / 2, subY    = optY   + menuFont  + spacing;
+            int hsX     = (screenWidth - hsW)     / 2, hsY     = optY    + menuFont  + spacing;
+            int subX    = (screenWidth - subW)    / 2, subY    = hsY     + menuFont  + spacing;
 
-            btnPlay     = { (float)(playX   - 10), (float)playY,   (float)(playW   + 20), (float)(menuFont + 6) };
-            btnExit     = { (float)(exitX   - 10), (float)exitY,   (float)(exitW   + 20), (float)(menuFont + 6) };
-            btnEditor   = { (float)(editorX - 10), (float)editorY, (float)(editorW + 20), (float)(menuFont + 6) };
-            btnSettings = { (float)(optX    - 10), (float)optY,    (float)(optW    + 20), (float)(menuFont + 6) };
+            btnPlay       = { (float)(playX   - 10), (float)playY,   (float)(playW   + 20), (float)(menuFont + 6) };
+            btnExit       = { (float)(exitX   - 10), (float)exitY,   (float)(exitW   + 20), (float)(menuFont + 6) };
+            btnEditor     = { (float)(editorX - 10), (float)editorY, (float)(editorW + 20), (float)(menuFont + 6) };
+            btnSettings   = { (float)(optX    - 10), (float)optY,    (float)(optW    + 20), (float)(menuFont + 6) };
+            btnHighscores = { (float)(hsX     - 10), (float)hsY,     (float)(hsW     + 20), (float)(menuFont + 6) };
 
             if (selectedOption == 0) DrawText(">", playX   - 40, playY,   menuFont, dkOrange);
             if (selectedOption == 1) DrawText(">", exitX   - 40, exitY,   menuFont, dkOrange);
             if (selectedOption == 2) DrawText(">", editorX - 40, editorY, menuFont, dkOrange);
             if (selectedOption == 3) DrawText(">", optX    - 40, optY,    menuFont, dkOrange);
+            if (selectedOption == 4) DrawText(">", hsX     - 40, hsY,     menuFont, dkOrange);
 
             DrawText(title,      titleX,  titleY,  titleFont, dkRed);
             DrawText(playText,   playX,   playY,   menuFont,  dkWhite);
             DrawText(exitText,   exitX,   exitY,   menuFont,  dkWhite);
             DrawText(editorText, editorX, editorY, menuFont,  dkOrange);
             DrawText(optTxt,     optX,    optY,    menuFont,  { 120, 220, 120, 255 });
+            DrawText(hsTxt,      hsX,     hsY,     menuFont,  { 220, 180, 255, 255 });
             DrawText(subtitle,   subX,    subY,    smallFont, dkOrange);
         }
         else if (currentScreen == HOW_HIGH)
@@ -3585,18 +3644,18 @@ int main(void)
             DrawText(titTxt, (int)(panX + (panW - MeasureText(titTxt, 38)) * 0.5f), (int)(panY + 20), 38, {120, 220, 120, 255});
 
             // ── Tab bar ───────────────────────────────────────────────────────
-            const char* tabNames[3] = { "CONTROLS", "SETTINGS", "DEBUG" };
+            const char* tabNames[4] = { "CONTROLS", "AUDIO", "VIDEO", "DEBUG" };
             const float tabY = panY + 70.f, tabH = 34.f;
-            const float tabW = panW / 3.f;
-            for (int t = 0; t < 3; t++) {
+            const float tabW = panW / 4.f;
+            for (int t = 0; t < 4; t++) {
                 float tx = panX + t * tabW;
                 bool active = (settingsTab == t);
                 Color tabBg  = active ? Color{50, 100, 200, 220} : Color{30, 30, 55, 200};
                 Color tabFg  = active ? WHITE : Color{160, 160, 200, 255};
                 DrawRectangleRec({tx, tabY, tabW, tabH}, tabBg);
                 DrawRectangleLinesEx({tx, tabY, tabW, tabH}, 1.f, {80, 80, 140, 200});
-                int tw = MeasureText(tabNames[t], 18);
-                DrawText(tabNames[t], (int)(tx + (tabW - tw) * 0.5f), (int)(tabY + (tabH - 18) * 0.5f), 18, tabFg);
+                int tw = MeasureText(tabNames[t], 16);
+                DrawText(tabNames[t], (int)(tx + (tabW - tw) * 0.5f), (int)(tabY + (tabH - 16) * 0.5f), 16, tabFg);
                 if (!active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, {tx, tabY, tabW, tabH}))
                     settingsTab = t;
             }
@@ -3633,17 +3692,18 @@ int main(void)
 
             // ── TAB 1: SETTINGS (volume sliders) ──────────────────────────────
             if (settingsTab == 1) {
-                // SFX and Ability go 0–4 (0–400%), Music 0–1 (0–100%)
+                // SFX and Ability go 0–4 (0–400%), Music/Ambient 0–1 (0–100%)
                 struct SliderDef { const char* label; float* vol; float maxVal; };
                 SliderDef sliders[] = {
                     { "Music",        &volMusic,   1.f },
+                    { "Ambient SFX",  &volAmbient, 1.f },
                     { "Abilities",    &volAbility, 4.f },
                     { "Gameplay SFX", &volSFX,     4.f },
                 };
                 const float sX = cX + 160.f, sW = 350.f, sH = 14.f;
                 const int   lFS = 22;
-                const float rowGap = 85.f;
-                for (int i = 0; i < 3; i++) {
+                const float rowGap = 68.f;
+                for (int i = 0; i < 4; i++) {
                     float sy = cY + 30.f + i * rowGap;
                     float& vol = *sliders[i].vol;
                     float  mx  = sliders[i].maxVal;
@@ -3673,10 +3733,39 @@ int main(void)
                 }
                 SetMusicVolume(music, volMusic);
                 SetMusicVolume(menuMusic, volMusic);
+                SetMusicVolume(rainMusic, volAmbient);
             }
 
-            // ── TAB 2: DEBUG ──────────────────────────────────────────────────
+            // ── TAB 2: VIDEO ──────────────────────────────────────────────────
             if (settingsTab == 2) {
+                float vy = cY + 10.f;
+                const float bW = 110.f, bH = 38.f, lFS2 = 20.f;
+                auto vidToggle = [&](const char* label, bool val, const char* note) -> bool {
+                    DrawText(label, (int)cX, (int)(vy + (bH - lFS2) * 0.5f), (int)lFS2, RAYWHITE);
+                    Rectangle bR = { cX + cW - bW, vy, bW, bH };
+                    bool hov = CheckCollisionPointRec(mouse, bR);
+                    Color bg = val ? Color{50,160,50,230} : Color{55,55,75,220};
+                    if (hov) { bg.r = (unsigned char)fminf(bg.r+30,255); bg.g = (unsigned char)fminf(bg.g+30,255); bg.b = (unsigned char)fminf(bg.b+30,255); }
+                    DrawRectangleRounded(bR, 0.4f, 6, bg);
+                    DrawRectangleRoundedLinesEx(bR, 0.4f, 6, 1.5f, val ? Color{80,220,80,200} : Color{100,100,140,200});
+                    const char* t = val ? "ON" : "OFF";
+                    DrawText(t, (int)(bR.x+(bW-(float)MeasureText(t,20))*0.5f),(int)(bR.y+(bH-20.f)*0.5f),20, val?WHITE:Color{180,180,180,255});
+                    vy += bH + 4.f;
+                    if (note) { DrawText(note,(int)cX,(int)vy,13,{120,135,165,255}); vy += 16.f; }
+                    vy += 18.f;
+                    return hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+                };
+                if (vidToggle("Fullscreen", videoFullscreen, "Borderless fullscreen with letterboxing"))
+                    ToggleFS(!videoFullscreen);
+                if (vidToggle("Smooth Scaling", videoSmooth, "Bilinear filter — softer upscale in fullscreen")) {
+                    videoSmooth = !videoSmooth;
+                    SetTextureFilter(gameRT.texture, videoSmooth ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
+                }
+                DrawText("MSAA 4x is always enabled.", (int)cX, (int)vy, 14, {100,130,180,255});
+            }
+
+            // ── TAB 3: DEBUG ──────────────────────────────────────────────────
+            if (settingsTab == 3) {
                 const float ROW_H     = 33.f;
                 const float clipH     = panY + panH - 52.f - cY;
                 const float sbW       = 8.f;   // scrollbar width
@@ -3686,7 +3775,7 @@ int main(void)
                 // Scroll with mouse wheel
                 if (CheckCollisionPointRec(mouse, {cX, cY, cW, clipH}))
                     settingsDbgScroll -= GetMouseWheelMove() * ROW_H;
-                const int TOTAL_DBG_ROWS = 18;
+                const int TOTAL_DBG_ROWS = 19;
                 float totalH = TOTAL_DBG_ROWS * ROW_H;
                 float maxDbgScroll = fmaxf(0.f, totalH - clipH);
                 settingsDbgScroll = Clamp(settingsDbgScroll, 0.f, maxDbgScroll);
@@ -3815,11 +3904,13 @@ int main(void)
                 if (actionBtn("Summon Beatrice", {50,50,100,220},true))  beatrices.push_back({{player.x,player.y-60.f},true});
 
                 fstepper("Music Vol",     volMusic,   0.f, 1.f, 0.05f, "%.2f");
+                fstepper("Ambient Vol",   volAmbient, 0.f, 1.f, 0.05f, "%.2f");
                 fstepper("SFX Vol",       volSFX,     0.f, 4.f, 0.05f, "%.2f");
                 fstepper("Abilities Vol", volAbility, 0.f, 4.f, 0.1f,  "%.1f");
                 fstepper("UI Vol",        volUI,      0.f, 1.f, 0.05f, "%.2f");
                 SetMusicVolume(music, volMusic);
                 SetMusicVolume(menuMusic, volMusic);
+                SetMusicVolume(rainMusic, volAmbient);
 
                 EndScissorMode();
 
@@ -3842,10 +3933,83 @@ int main(void)
             if (CheckCollisionPointRec(mouse, backR2)) {
                 DrawRectangleLinesEx(backR2, 1.f, {160, 160, 255, 180});
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                    SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+                    SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, volAmbient, highScore, highLevels);
                     currentScreen = MENU;
                 }
             }
+        }
+        else if (currentScreen == HIGHSCORES)
+        {
+            SwitchToMenuMusic();
+            Vector2 mouse = GetMousePosition();
+
+            // Dim the background
+            DrawRectangle(0, 0, screenWidth, screenHeight, { 8, 8, 18, 230 });
+
+            // ── Panel ──────────────────────────────────────────────────────────
+            const float panW = 560.f, panH = 420.f;
+            const float panX = (screenWidth  - panW) * 0.5f;
+            const float panY = (screenHeight - panH) * 0.5f;
+            DrawRectangleRounded({ panX, panY, panW, panH }, 0.05f, 8, { 16, 14, 28, 250 });
+            DrawRectangleRoundedLinesEx({ panX, panY, panW, panH }, 0.05f, 8, 2.5f, { 220, 180, 255, 200 });
+
+            // Title
+            const char* panTitle = "HIGHSCORES";
+            int ptw = MeasureText(panTitle, 42);
+            DrawText(panTitle, (int)(panX + (panW - ptw) * 0.5f), (int)(panY + 24), 42, { 220, 180, 255, 255 });
+
+            // Divider
+            DrawLineEx({ panX + 30, panY + 80 }, { panX + panW - 30, panY + 80 }, 1.5f, { 100, 80, 140, 200 });
+
+            // ── Best Score row ─────────────────────────────────────────────────
+            const float rowY1 = panY + 110.f;
+            DrawText("BEST SCORE", (int)(panX + 50), (int)rowY1, 24, { 180, 185, 210, 255 });
+            bool newScoreRecord = (highScore > 0);
+            const char* scorVal = (highScore > 0) ? TextFormat("%u", highScore) : "---";
+            int svW = MeasureText(scorVal, 34);
+            DrawText(scorVal, (int)(panX + panW - 50 - svW), (int)(rowY1 - 5), 34,
+                newScoreRecord ? Color{ 255, 220, 60, 255 } : Color{ 160, 160, 200, 255 });
+
+            // ── Best Levels row ────────────────────────────────────────────────
+            const float rowY2 = panY + 175.f;
+            DrawText("BEST LEVELS CLEARED", (int)(panX + 50), (int)rowY2, 24, { 180, 185, 210, 255 });
+            const char* lvlVal = (highLevels > 0) ? TextFormat("%d", highLevels) : "---";
+            int lvW = MeasureText(lvlVal, 34);
+            DrawText(lvlVal, (int)(panX + panW - 50 - lvW), (int)(rowY2 - 5), 34,
+                (highLevels > 0) ? Color{ 100, 220, 180, 255 } : Color{ 160, 160, 200, 255 });
+
+            // ── Divider ────────────────────────────────────────────────────────
+            DrawLineEx({ panX + 30, panY + 235 }, { panX + panW - 30, panY + 235 }, 1.f, { 80, 60, 110, 180 });
+
+            // ── Reset button ───────────────────────────────────────────────────
+            const float btnW = 240.f, btnH = 44.f;
+            Rectangle resetR = { panX + (panW - btnW) * 0.5f, panY + 258.f, btnW, btnH };
+            bool resetHov = CheckCollisionPointRec(mouse, resetR);
+            Color resetBg  = resetHov ? Color{ 160, 30, 30, 240 } : Color{ 90, 18, 18, 220 };
+            Color resetBdr = resetHov ? Color{ 255, 80, 80, 255 }  : Color{ 180, 50, 50, 200 };
+            DrawRectangleRounded(resetR, 0.3f, 6, resetBg);
+            DrawRectangleRoundedLinesEx(resetR, 0.3f, 6, 2.f, resetBdr);
+            const char* resetTxt = "RESET SCORES";
+            int rtw = MeasureText(resetTxt, 22);
+            DrawText(resetTxt, (int)(resetR.x + (resetR.width - rtw) * 0.5f),
+                     (int)(resetR.y + (resetR.height - 22) * 0.5f), 22, resetHov ? WHITE : Color{ 220, 160, 160, 255 });
+            if (resetHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                highScore = 0; highLevels = 0;
+                SaveGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, volAmbient, highScore, highLevels);
+            }
+
+            // ── Back button ────────────────────────────────────────────────────
+            Rectangle backR = { panX + (panW - btnW) * 0.5f, panY + 320.f, btnW, btnH };
+            bool backHov = CheckCollisionPointRec(mouse, backR);
+            Color backBg  = backHov ? Color{ 50, 80, 160, 240 } : Color{ 28, 40, 90, 220 };
+            Color backBdr = backHov ? Color{ 100, 160, 255, 255 } : Color{ 70, 100, 180, 200 };
+            DrawRectangleRounded(backR, 0.3f, 6, backBg);
+            DrawRectangleRoundedLinesEx(backR, 0.3f, 6, 2.f, backBdr);
+            const char* backTxt = "BACK  [ESC]";
+            int btw = MeasureText(backTxt, 22);
+            DrawText(backTxt, (int)(backR.x + (backR.width - btw) * 0.5f),
+                     (int)(backR.y + (backR.height - 22) * 0.5f), 22, backHov ? WHITE : Color{ 160, 190, 255, 255 });
+            if (backHov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) currentScreen = MENU;
         }
         else if (currentScreen == LEVEL_EDITOR)
         {
@@ -4554,15 +4718,15 @@ int main(void)
                 DrawText(pTitle, (int)(pX + (pW - MeasureText(pTitle, 38)) * 0.5f), (int)(pY + 18), 38, {120, 220, 120, 255});
 
                 // Tab bar
-                const char* pTabNames[3] = { "CONTROLS", "SETTINGS", "DEBUG" };
-                const float pTabY = pY + 68.f, pTabH = 34.f, pTabW = pW / 3.f;
-                for (int t = 0; t < 3; t++) {
+                const char* pTabNames[4] = { "CONTROLS", "AUDIO", "VIDEO", "DEBUG" };
+                const float pTabY = pY + 68.f, pTabH = 34.f, pTabW = pW / 4.f;
+                for (int t = 0; t < 4; t++) {
                     float tx = pX + t * pTabW;
                     bool active = (settingsTab == t);
                     DrawRectangleRec({tx, pTabY, pTabW, pTabH}, active ? Color{50,100,200,220} : Color{30,30,55,200});
                     DrawRectangleLinesEx({tx, pTabY, pTabW, pTabH}, 1.f, {80,80,140,200});
-                    int tw = MeasureText(pTabNames[t], 18);
-                    DrawText(pTabNames[t], (int)(tx+(pTabW-tw)*0.5f), (int)(pTabY+(pTabH-18)*0.5f), 18, active?WHITE:Color{160,160,200,255});
+                    int tw = MeasureText(pTabNames[t], 16);
+                    DrawText(pTabNames[t], (int)(tx+(pTabW-tw)*0.5f), (int)(pTabY+(pTabH-16)*0.5f), 16, active?WHITE:Color{160,160,200,255});
                     if (!active && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(pauseMouse,{tx,pTabY,pTabW,pTabH}))
                         settingsTab = t;
                 }
@@ -4598,10 +4762,10 @@ int main(void)
                 // ── Settings tab (volume sliders) ─────────────────────────────
                 if (settingsTab == 1) {
                     struct SD { const char* label; float* vol; float maxVal; };
-                    SD sldrs[] = {{"Music",&volMusic,1.f},{"Abilities",&volAbility,4.f},{"Gameplay SFX",&volSFX,4.f}};
+                    SD sldrs[] = {{"Music",&volMusic,1.f},{"Ambient SFX",&volAmbient,1.f},{"Abilities",&volAbility,4.f},{"Gameplay SFX",&volSFX,4.f}};
                     const float sX = pcX+160.f, sW = 350.f, sH = 14.f;
-                    const float rowGap = 85.f;
-                    for (int i = 0; i < 3; i++) {
+                    const float rowGap = 68.f;
+                    for (int i = 0; i < 4; i++) {
                         float sy = pcY + 30.f + i * rowGap;
                         float& vol = *sldrs[i].vol;
                         float  mx  = sldrs[i].maxVal;
@@ -4620,10 +4784,39 @@ int main(void)
                             vol = Clamp((pauseMouse.x-sX)/sW,0.f,1.f)*mx;
                     }
                     SetMusicVolume(music,volMusic);
+                    SetMusicVolume(rainMusic, volAmbient);
+                }
+
+                // ── Video tab ─────────────────────────────────────────────────
+                if (settingsTab == 2) {
+                    float pvy = pcY + 10.f;
+                    const float pbW = 110.f, pbH = 38.f, plFS = 20.f;
+                    auto pVidToggle = [&](const char* label, bool val, const char* note) -> bool {
+                        DrawText(label, (int)pcX, (int)(pvy + (pbH - plFS) * 0.5f), (int)plFS, RAYWHITE);
+                        Rectangle bR = { pcX + pcW - pbW, pvy, pbW, pbH };
+                        bool hov = CheckCollisionPointRec(pauseMouse, bR);
+                        Color bg = val ? Color{50,160,50,230} : Color{55,55,75,220};
+                        if (hov){bg.r=(unsigned char)fminf(bg.r+30,255);bg.g=(unsigned char)fminf(bg.g+30,255);bg.b=(unsigned char)fminf(bg.b+30,255);}
+                        DrawRectangleRounded(bR, 0.4f, 6, bg);
+                        DrawRectangleRoundedLinesEx(bR, 0.4f, 6, 1.5f, val?Color{80,220,80,200}:Color{100,100,140,200});
+                        const char* t2 = val ? "ON" : "OFF";
+                        DrawText(t2,(int)(bR.x+(pbW-(float)MeasureText(t2,20))*0.5f),(int)(bR.y+(pbH-20.f)*0.5f),20,val?WHITE:Color{180,180,180,255});
+                        pvy += pbH + 4.f;
+                        if (note){DrawText(note,(int)pcX,(int)pvy,13,{120,135,165,255});pvy+=16.f;}
+                        pvy += 18.f;
+                        return hov && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+                    };
+                    if (pVidToggle("Fullscreen", videoFullscreen, "Borderless fullscreen with letterboxing"))
+                        ToggleFS(!videoFullscreen);
+                    if (pVidToggle("Smooth Scaling", videoSmooth, "Bilinear filter — softer upscale in fullscreen")) {
+                        videoSmooth = !videoSmooth;
+                        SetTextureFilter(gameRT.texture, videoSmooth ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
+                    }
+                    DrawText("MSAA 4x is always enabled.", (int)pcX, (int)pvy, 14, {100,130,180,255});
                 }
 
                 // ── Debug tab ─────────────────────────────────────────────────
-                if (settingsTab == 2) {
+                if (settingsTab == 3) {
                     const float ROW_H  = 33.f;
                     const float clipH  = pY + pH2 - 52.f - pcY;
                     const float sbW    = 8.f;
@@ -4631,7 +4824,7 @@ int main(void)
                     const int   lFS    = 17;
                     if (CheckCollisionPointRec(pauseMouse,{pcX,pcY,pcW,clipH}))
                         settingsDbgScroll -= GetMouseWheelMove() * ROW_H;
-                    const int TOTAL_ROWS = 18;
+                    const int TOTAL_ROWS = 19;
                     float totalH2 = TOTAL_ROWS * ROW_H;
                     float maxScroll2 = fmaxf(0.f, totalH2 - clipH);
                     settingsDbgScroll = Clamp(settingsDbgScroll, 0.f, maxScroll2);
@@ -4720,10 +4913,12 @@ int main(void)
                     if (actBtn2("Summon Nuke",    {80,70,25,220}))  nukes.push_back({{player.x,player.y-60.f},true});
                     if (actBtn2("Summon Beatrice",{50,50,100,220})) beatrices.push_back({{player.x,player.y-60.f},true});
                     fstep2("Music Vol",    volMusic,  0.f,1.f,0.05f,"%.2f");
+                    fstep2("Ambient Vol",  volAmbient,0.f,1.f,0.05f,"%.2f");
                     fstep2("SFX Vol",      volSFX,    0.f,4.f,0.05f,"%.2f");
                     fstep2("Ability Vol",  volAbility,0.f,4.f,0.1f, "%.1f");
                     fstep2("UI Vol",       volUI,     0.f,1.f,0.05f,"%.2f");
                     SetMusicVolume(music,volMusic);
+                    SetMusicVolume(rainMusic, volAmbient);
                     EndScissorMode();
                     if (maxScroll2 > 0.f) {
                         float ratio=clipH/totalH2, thumbH=fmaxf(clipH*ratio,20.f);
@@ -5225,10 +5420,26 @@ int main(void)
             }
         }
 
+        EndTextureMode();
+
+        // Blit gameRT to screen, letterboxed when in fullscreen
+        BeginDrawing();
+        ClearBackground(BLACK);
+        {
+            int sw = GetScreenWidth(), sh = GetScreenHeight();
+            float scl = fminf((float)sw / (float)screenWidth, (float)sh / (float)screenHeight);
+            float ox = ((float)sw - (float)screenWidth  * scl) * 0.5f;
+            float oy = ((float)sh - (float)screenHeight * scl) * 0.5f;
+            DrawTexturePro(gameRT.texture,
+                { 0.f, 0.f, (float)screenWidth, -(float)screenHeight },
+                { ox, oy, (float)screenWidth * scl, (float)screenHeight * scl },
+                { 0.f, 0.f }, 0.f, WHITE);
+        }
         EndDrawing();
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
+    UnloadRenderTexture(gameRT);
     UnloadMusicStream(music);
     UnloadMusicStream(menuMusic);
     UnloadMusicStream(rainMusic);

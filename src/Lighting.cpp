@@ -432,6 +432,12 @@ void LightingSystem::EndScene()
 {
     EndMode2D();
     EndTextureMode();
+    RestoreOutputTarget();
+}
+
+void LightingSystem::RestoreOutputTarget()
+{
+    if (_outputRT) BeginTextureMode(*_outputRT);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -450,12 +456,6 @@ void LightingSystem::BeginOccluders(Camera2D cam)
     halfCam.offset.y *= 0.5f;
     BeginMode2D(halfCam);
 }
-void LightingSystem::EndOccluders()
-{
-    EndMode2D();
-    EndTextureMode();
-}
-
 // BakeOccludersFromLevel: called every frame so that moving geometry (platforms,
 // conveyors, kill zones) always casts the correct shadows — fully dynamic.
 void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
@@ -493,6 +493,13 @@ void LightingSystem::BakeOccludersFromLevel(const LevelData& lv, Camera2D cam)
     // Elevators intentionally omitted — no collision geometry, transparent to light.
 
     EndOccluders();
+}
+
+void LightingSystem::EndOccluders()
+{
+    EndMode2D();
+    EndTextureMode();
+    RestoreOutputTarget();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -716,6 +723,8 @@ void LightingSystem::Composite(const LevelData& lv, Camera2D cam, Rectangle dst)
         RunBlur(_bloomRT,    _scratchRT, { 3.5f / (float)_liW, 0.f });
         RunBlur(_scratchRT,  _bloomRT,   { 0.f, 3.5f / (float)_liH });
 
+        RestoreOutputTarget();  // redirect final draw to gameRT if fullscreen
+
         // Draw composite, then additive bloom overlay
         DrawTexturePro(_compositeRT.texture,
             { 0, 0, (float)_compositeRT.texture.width, -(float)_compositeRT.texture.height },
@@ -726,6 +735,7 @@ void LightingSystem::Composite(const LevelData& lv, Camera2D cam, Rectangle dst)
             blitDst, { 0, 0 }, 0.f, WHITE);
         EndBlendMode();
     } else {
+        RestoreOutputTarget();  // redirect final draw to gameRT if fullscreen
         DrawTexturePro(_sceneRT.texture,
             { 0, 0, (float)_sceneRT.texture.width, -(float)_sceneRT.texture.height },
             blitDst, { 0, 0 }, 0.f, WHITE);

@@ -499,11 +499,12 @@ static std::string SettingsPath(const char* folder) {
 
 bool LoadGameSettings(int& levelRangeMin, int& levelRangeMax,
                       float& volMusic, float& volSFX, float& volAbility, float& volUI,
+                      float& volAmbient,
                       unsigned int& highScore, int& highLevels,
                       const char* folder)
 {
     levelRangeMin = 1; levelRangeMax = 10;
-    volMusic = 0.8f; volSFX = 1.f; volAbility = 2.f; volUI = 1.f;
+    volMusic = 0.8f; volSFX = 1.f; volAbility = 2.f; volUI = 1.f; volAmbient = 0.6f;
     highScore = 0; highLevels = 0;
     std::string path = SettingsPath(folder);
     FILE* f = fopen(path.c_str(), "r");
@@ -516,6 +517,7 @@ bool LoadGameSettings(int& levelRangeMin, int& levelRangeMax,
         else if (strcmp(tag, "VOL_SFX")         == 0) (void)fscanf(f, "%f",  &volSFX);
         else if (strcmp(tag, "VOL_ABILITY")     == 0) (void)fscanf(f, "%f",  &volAbility);
         else if (strcmp(tag, "VOL_UI")          == 0) (void)fscanf(f, "%f",  &volUI);
+        else if (strcmp(tag, "VOL_AMBIENT")     == 0) (void)fscanf(f, "%f",  &volAmbient);
         else if (strcmp(tag, "HIGH_SCORE")      == 0) (void)fscanf(f, "%u",  &highScore);
         else if (strcmp(tag, "HIGH_LEVELS")     == 0) (void)fscanf(f, "%d",  &highLevels);
     }
@@ -525,6 +527,7 @@ bool LoadGameSettings(int& levelRangeMin, int& levelRangeMax,
 
 bool SaveGameSettings(int levelRangeMin, int levelRangeMax,
                       float volMusic, float volSFX, float volAbility, float volUI,
+                      float volAmbient,
                       unsigned int highScore, int highLevels,
                       const char* folder)
 {
@@ -538,6 +541,7 @@ bool SaveGameSettings(int levelRangeMin, int levelRangeMax,
     fprintf(f, "VOL_SFX %.3f\n",         volSFX);
     fprintf(f, "VOL_ABILITY %.3f\n",     volAbility);
     fprintf(f, "VOL_UI %.3f\n",          volUI);
+    fprintf(f, "VOL_AMBIENT %.3f\n",     volAmbient);
     fprintf(f, "HIGH_SCORE %u\n",        highScore);
     fprintf(f, "HIGH_LEVELS %d\n",       highLevels);
     fclose(f);

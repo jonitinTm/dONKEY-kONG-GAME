@@ -255,9 +255,11 @@ void      ExportLevelAsCpp(const LevelData& lv, const char* outFile = "LevelExpo
 
 bool      LoadGameSettings(int& levelRangeMin, int& levelRangeMax,
                           float& volMusic, float& volSFX, float& volAbility, float& volUI,
+                          float& volAmbient,
                           unsigned int& highScore, int& highLevels,
                           const char* folder = "Levels");
 bool      SaveGameSettings(int levelRangeMin, int levelRangeMax,
                           float volMusic, float volSFX, float volAbility, float volUI,
+                          float volAmbient,
                           unsigned int highScore, int highLevels,
                           const char* folder = "Levels");

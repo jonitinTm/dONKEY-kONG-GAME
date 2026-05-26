@@ -247,6 +247,7 @@ private:
     float        _volSFX     = 1.f;
     float        _volAbility = 2.f;
     float        _volUI      = 1.f;
+    float        _volAmbient = 0.6f;
     unsigned int _highScore  = 0;
     int          _highLevels = 0;
 
