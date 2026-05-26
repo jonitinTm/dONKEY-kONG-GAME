@@ -947,6 +947,29 @@ int main(void)
             SetMouseScale(1.f, 1.f);
         }
     };
+    // Compute correct initial menu button positions now that InitWindow has run
+    // (MeasureText needs the font, available after InitWindow).
+    {
+        const int mF = 28, tF = 60, sF = 20, sp = 30;
+        const int total = tF + sp*6 + mF*5 + sF;
+        int sy = (screenHeight - total) / 2;
+        int pY = sy + tF + sp;
+        int eY = pY + mF + sp;
+        int edY = eY + mF + sp;
+        int oY = edY + mF + sp;
+        int hY = oY  + mF + sp;
+        int pW  = MeasureText("1 PLAYER GAME", mF);
+        int eW  = MeasureText("EXIT",          mF);
+        int edW = MeasureText("LEVEL EDITOR",  mF);
+        int oW  = MeasureText("OPTIONS",        mF);
+        int hW  = MeasureText("HIGHSCORES",     mF);
+        btnPlay       = { (float)((screenWidth-pW )/2-10), (float)pY,  (float)(pW +20), (float)(mF+6) };
+        btnExit       = { (float)((screenWidth-eW )/2-10), (float)eY,  (float)(eW +20), (float)(mF+6) };
+        btnEditor     = { (float)((screenWidth-edW)/2-10), (float)edY, (float)(edW+20), (float)(mF+6) };
+        btnSettings   = { (float)((screenWidth-oW )/2-10), (float)oY,  (float)(oW +20), (float)(mF+6) };
+        btnHighscores = { (float)((screenWidth-hW )/2-10), (float)hY,  (float)(hW +20), (float)(mF+6) };
+    }
+
     Cinematic::Global.LoadAll();
     SetRandomSeed((unsigned int)time(NULL));
     InitAudioDevice();
@@ -3942,7 +3965,6 @@ int main(void)
         }
         else if (currentScreen == HIGHSCORES)
         {
-            SwitchToMenuMusic();
             Vector2 mouse = GetMousePosition();
 
             // Dim the background
