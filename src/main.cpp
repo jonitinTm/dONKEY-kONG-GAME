@@ -909,8 +909,8 @@ int main(void)
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
-    Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
-    Music menuMusic = LoadMusicStream("Assets/Nuevo audio/mp3/do.mp3");
+    Music music = LoadMusicStream("Assets/Nuevo audio/audiosmenus/lo.mp3");
+    Music menuMusic = LoadMusicStream("Assets/Nuevo audio/audiosmenus/menu.mp3");
     bool menuMusicPlaying = false;
     Sound deathSound = LoadSound("Assets/Nuevo audio/mp3/20. Dead.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
