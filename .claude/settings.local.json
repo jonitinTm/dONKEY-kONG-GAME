@@ -56,7 +56,8 @@
       "PowerShell($msbuild = \\(Get-ChildItem \"C:\\\\Program Files\\\\Microsoft Visual Studio\" -Recurse -Filter \"MSBuild.exe\" -ErrorAction SilentlyContinue | Select-Object -First 1\\).FullName; & $msbuild \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo /v:minimal 2>&1 | Select-Object -Last 20)",
       "PowerShell($msbuild = \\(Get-ChildItem \"C:\\\\Program Files\\\\Microsoft Visual Studio\" -Recurse -Filter \"MSBuild.exe\" -ErrorAction SilentlyContinue | Select-Object -First 1\\).FullName; & $msbuild \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo /v:minimal 2>&1 | Where-Object { $_ -match \"error|warning C[0-9]|Generando|dONKEY\" } | Select-Object -Last 20)",
       "PowerShell($msbuild = \\(Get-ChildItem \"C:\\\\Program Files\\\\Microsoft Visual Studio\" -Recurse -Filter \"MSBuild.exe\" -ErrorAction SilentlyContinue | Select-Object -First 1\\).FullName; & $msbuild \"C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\dONKEY-kONG-GAME.sln\" /p:Configuration=Debug /p:Platform=x64 /t:Build /m /nologo /v:minimal 2>&1 | Where-Object { $_ -match \"error C|error LNK|dONKEY-kONG-GAME\\\\.exe\" } | Select-Object -Last 10)",
-      "PowerShell(mingw32-make config=debug_x64 *)"
+      "PowerShell(mingw32-make config=debug_x64 *)",
+      "Bash(dir C:\\\\Users\\\\Usuario\\\\Documents\\\\Unreal Projects\\\\HorrorMC\\\\dONKEY-kONG-GAME\\\\Assets\\\\Nuevo audio\\\\NewSFX *)"
     ]
   }
 }

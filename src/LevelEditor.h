@@ -71,6 +71,7 @@ public:
     bool WantsPlay()  const { return _wantsPlay; }
     bool WantsEmote() const { return _wantsEmote; }
     void ClearFlags() { _wantsMenu = false; _wantsPlay = false; _wantsEmote = false; }
+    void SetRenderTarget(RenderTexture2D* rt) { _lighting.SetOutputTarget(rt); }
 
     void SetGameTextures(Texture2D* bg, Texture2D* beam, Texture2D* ladder,
         Texture2D* player, Texture2D* regulus, Texture2D* cave,

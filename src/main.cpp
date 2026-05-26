@@ -535,7 +535,7 @@ int main(void)
     float volUI      = 1.f;  // UI/card sounds
     float volAmbient = 0.6f; // ambient loops (rain, etc.)
     bool videoFullscreen = false;
-    bool videoSmooth     = true;  // bilinear upscale filter on the game render texture
+    bool videoSmooth     = false; // bilinear upscale filter on the game render texture
 
     // ── Music fade-out state ──────────────────────────────────────────────────
     static constexpr float MUSIC_FADE_DUR = 0.5f;
@@ -919,9 +919,13 @@ int main(void)
 
     // ── Game render target (used for fullscreen letterbox) ────────────────────
     RenderTexture2D gameRT = LoadRenderTexture(screenWidth, screenHeight);
-    SetTextureFilter(gameRT.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(gameRT.texture, TEXTURE_FILTER_POINT);
 
-    // Enter/exit fullscreen helper (updates window, mouse transform, lighting target)
+    // All rendering goes through gameRT — wire up lighting targets now.
+    gameLighting.SetOutputTarget(&gameRT);
+    editor.SetRenderTarget(&gameRT);
+
+    // Enter/exit fullscreen helper (updates window, mouse transform)
     auto ToggleFS = [&](bool toFS) {
         videoFullscreen = toFS;
         if (toFS) {
@@ -933,7 +937,6 @@ int main(void)
             SetMouseOffset(-(int)(((float)sw  - (float)screenWidth  * scl) * 0.5f),
                            -(int)(((float)sh  - (float)screenHeight * scl) * 0.5f));
             SetMouseScale(1.f / scl, 1.f / scl);
-            gameLighting.SetOutputTarget(&gameRT);
         } else {
             ToggleFullscreen();
             SetWindowSize(screenWidth, screenHeight);
@@ -942,7 +945,6 @@ int main(void)
                               (GetMonitorHeight(mon) - screenHeight) / 2);
             SetMouseOffset(0, 0);
             SetMouseScale(1.f, 1.f);
-            gameLighting.SetOutputTarget(nullptr);
         }
     };
     Cinematic::Global.LoadAll();
@@ -952,7 +954,7 @@ int main(void)
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
-    Music music = LoadMusicStream("Assets/Nuevo audio/NewSFX/MusicaFinalRezero.mp3");
+    Music music = LoadMusicStream("Assets/Nuevo audio/NewSFX/MusicaFinalRezero.wav");
     Music menuMusic = LoadMusicStream("Assets/Nuevo audio/audiosmenus/menu.mp3");
     Music rainMusic = LoadMusicStream("Assets/Nuevo audio/NewSFX/RAIN-processed.wav");
     bool menuMusicPlaying = false;
