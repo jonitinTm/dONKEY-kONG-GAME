@@ -32,13 +32,27 @@ Your main objective is to climb to the top of the tower using the stairs and avo
 |A|Move to the left|
 |W|Jump|
 |W(close to stairs)|Climb|
+|S(close to stairs)|Climb Down|
+
 
 | Item |Function|
 |-------|------|
 |Nuke|Destroy all barrels on screen and stuns Remulus|
 |Beatrice|Shoots at mouse position|
+|Cards|Allows the player to choose a Power Ups and Items |
 
-
+| Power Up |Function|
+|-------|------|
+|Dash|Moves the player to a big distance in an instant|
+|SpeedRun|Increases player speed for 5 seconds|
+|Shield|Blocks hits for an instant|
+|Whip|Eliminates enemies and obstacles in a certain distance|
+|Shop|Allows the player to go to the shop and buy items|
+|Larper|Allows the player to plant a ladder anywhere|
+|Extra Life|Gives one more life to the player when is used|
+|Reinhard|Allows the player to pass the level instantly|
+|One more Larp|Restore one of the lifes of the player if its lost|
+|Return by death|Returns the level to a certain point automatically when dead|
 
 ## Implemented Features
 
