@@ -858,9 +858,9 @@ void LevelEditor::BuildOutline() {
 
     auto EmitRoot = [&](SelectedEnt e) { if (!hasParent(e)) BuildOutlineTree(e, 0); };
 
-    if (_level.hasPlayerSpawn) EmitRoot({ (int)EditorTool::PLAYER_SPAWN,-1 });
-    if (_level.hasRegulus)     EmitRoot({ (int)EditorTool::REGULUS,-1 });
-    if (_level.hasCave)        EmitRoot({ (int)EditorTool::CAVE,-1 });
+    if (_level.hasPlayerSpawn) EmitRoot({ (int)EditorTool::PLAYER_SPAWN, 0 });
+    if (_level.hasRegulus)     EmitRoot({ (int)EditorTool::REGULUS, 0 });
+    if (_level.hasCave)        EmitRoot({ (int)EditorTool::CAVE, 0 });
     if (_level.hasWinZone)     EmitRoot({ (int)EditorTool::WIN_ZONE,0 });
     for (int i = 0; i < (int)_level.elevators.size(); i++)    EmitRoot({ (int)EditorTool::ELEVATOR,i });
     for (int i = 0; i < (int)_level.platforms.size(); i++)    EmitRoot({ (int)EditorTool::PLATFORM,i });
@@ -2292,7 +2292,7 @@ void LevelEditor::DrawDataPanel() {
             cy += 18;
         }
     }
-    else if (_sel.type == (int)EditorTool::LADDER) {
+    else if (_sel.type == (int)EditorTool::LADDER && _sel.index < (int)_level.ladders.size()) {
         SectionHeader("── Scale ──────────────────");
         auto& l = _level.ladders[_sel.index];
         if (NumField("W  ", l.w, 1.f, 8, 200, px, cy, fw)) { syncField(EditorTool::LADDER, [&](int i) { _level.ladders[i].w = l.w; }); } cy += rowH;
