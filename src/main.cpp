@@ -911,6 +911,7 @@ int main(void)
 
     Music music = LoadMusicStream("Assets/Nuevo audio/audiosmenus/lo.mp3");
     Music menuMusic = LoadMusicStream("Assets/Nuevo audio/audiosmenus/menu.mp3");
+    Music rainMusic = LoadMusicStream("Assets/Nuevo audio/NewSFX/RAIN-processed.wav");
     bool menuMusicPlaying = false;
     Sound deathSound = LoadSound("Assets/Nuevo audio/mp3/20. Dead.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
@@ -995,6 +996,9 @@ int main(void)
     PlayMusicStream(menuMusic);
     SetMusicVolume(menuMusic, volMusic);
     menuMusicPlaying = true;
+
+    SetMusicVolume(rainMusic, 0.f);   // starts silent (menu); game states will unmute
+    PlayMusicStream(rainMusic);
 
     // ── Textures ──────────────────────────────────────────────────────────────
     Texture2D imgMarioIdle = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
@@ -1450,16 +1454,18 @@ int main(void)
             ResumeMusicStream(menuMusic);
             menuMusicPlaying = true;
         }
+        SetMusicVolume(rainMusic, 0.f);
         };
     auto SwitchToGameMusic = [&]() {
         if (menuMusicPlaying) {
             PauseMusicStream(menuMusic);
             SetMusicVolume(music, volMusic);
             SetMusicVolume(menuMusic, volMusic);
-            
+
             ResumeMusicStream(music);
             menuMusicPlaying = false;
         }
+        SetMusicVolume(rainMusic, volMusic * 0.45f);
         };
 
     auto RespawnItems = [&]()
@@ -1845,6 +1851,7 @@ int main(void)
         if (IsKeyPressed(KEY_M)) dbgMenuOpen = !dbgMenuOpen;
 
         UpdateMusicStream(menuMusic);
+        UpdateMusicStream(rainMusic);
 
         if (currentScreen == SPLASH_SCREEN)
         {
@@ -3074,8 +3081,18 @@ int main(void)
                             }
                         }
                     } else {
-                        playerStepDist = 0.f;
-                        floorMaterial  = 0;
+                        // Only truly reset on genuine airborne / ladder / dying.
+                        // Brief not-grounded frames (< 0.1 s) are FP jitter from the
+                        // player sitting exactly on pMinY — don't wipe the step dist.
+                        if (isDying || onLadder || airborneTime >= 0.1f) {
+                            playerStepDist = 0.f;
+                            floorMaterial  = 0;
+                        } else {
+                            // Still count horizontal movement on these micro-airborne
+                            // frames so the step interval doesn't stretch to 2× speed.
+                            float stepped = fabsf(player.x - prevX);
+                            if (stepped > 0.1f) playerStepDist += stepped;
+                        }
                     }
 
                     // ── Landing SFX ───────────────────────────────────────────
@@ -3989,16 +4006,72 @@ int main(void)
                 }
             }
 
+            // ── Prop animation helpers ────────────────────────────────────────
+            float propTime = (float)GetTime();
+
+            // Returns the texture for a prop (handles fire animation).
+            auto PropTex = [&](const PropData& pr) -> Texture2D* {
+                if (pr.texVariant == PROP_FIRE_VARIANT)
+                    return propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2;
+                if (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
+                    return &propTextures[pr.texVariant];
+                return nullptr;
+            };
+
+            // Computes animated dest rect, origin, rotation, and draw-y for a prop.
+            struct PropAnim { Rectangle dest; Vector2 origin; float rot; };
+            auto CalcPropAnim = [&](const PropData& pr) -> PropAnim {
+                float phase   = pr.x * 0.031f + pr.y * 0.019f;
+                float drawY   = pr.y + (pr.bobAmp > 0.f
+                                    ? sinf(propTime * pr.bobSpeed + phase) * pr.bobAmp : 0.f);
+                float swayOff = (pr.swayAngle > 0.f)
+                                    ? sinf(propTime * pr.swaySpeed + phase) * pr.swayAngle : 0.f;
+                float totalRot = pr.rotation + swayOff;
+                PropAnim a;
+                a.rot = totalRot;
+                if (pr.swayAngle > 0.f) {
+                    // Pivot at top-centre of the prop
+                    a.dest   = { pr.x, drawY - pr.height * 0.5f, pr.width, pr.height };
+                    a.origin = { pr.width * 0.5f, 0.f };
+                } else {
+                    // Pivot at centre (default)
+                    a.dest   = { pr.x, drawY, pr.width, pr.height };
+                    a.origin = { pr.width * 0.5f, pr.height * 0.5f };
+                }
+                return a;
+            };
+
+            // Draws a prop with bobbing, swaying, and flicker applied.
+            auto DrawAnimProp = [&](const PropData& pr) {
+                PropAnim a   = CalcPropAnim(pr);
+                Texture2D* tex = PropTex(pr);
+                if (!tex) {
+                    DrawRectanglePro(
+                        { pr.x - pr.width * .5f, a.dest.y + (pr.swayAngle > 0.f ? 0.f : -pr.height * .5f),
+                          pr.width, pr.height },
+                        {0.f, 0.f}, a.rot, { 180,100,220,140 });
+                    return;
+                }
+                Rectangle src = { 0, 0, (float)tex->width, (float)tex->height };
+                DrawTexturePro(*tex, src, a.dest, a.origin, a.rot, WHITE);
+                // Flicker / shine overlay (additive blend)
+                if (pr.flickerIntens > 0.f) {
+                    float phase = pr.x * 0.031f + pr.y * 0.019f;
+                    float f = (sinf(propTime * pr.flickerSpeed + phase * 2.f) * 0.5f + 0.5f)
+                              * pr.flickerIntens;
+                    unsigned char fa = (unsigned char)(f * 200.f);
+                    if (fa > 0) {
+                        BeginBlendMode(BLEND_ADDITIVE);
+                        DrawTexturePro(*tex, src, a.dest, a.origin, a.rot, { 255,255,255,fa });
+                        EndBlendMode();
+                    }
+                }
+            };
+
             // 5.3 Props (layer 0, lit)
             for (const auto& pr : currentLevelData.props) {
                 if (pr.renderLayer != 0 || pr.lightAffect <= 0.f) continue;
-                Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
-                    ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
-                    : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
-                        ? &propTextures[pr.texVariant] : nullptr;
-                if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
-                else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
-                    { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
+                DrawAnimProp(pr);
             }
 
             // 6. House (only render when cave is visible)
@@ -4160,7 +4233,7 @@ int main(void)
                     if (wTex && wTex->id > 0) {
                         float wW = player.width * 2.f;
                         float wH = player.height;
-                        float wx = whipFacingRight ? player.x + player.width : player.x - wW;
+                        float wx = whipFacingRight ? player.x + player.width * 0.5f : player.x - wW + player.width * 0.5f;
                         float wy = player.y;
                         float srcW = whipFacingRight ? (float)wTex->width : -(float)wTex->width;
                         float srcX = whipFacingRight ? 0.f : (float)wTex->width;
@@ -4196,13 +4269,7 @@ int main(void)
             // 13. Props (layer 1, lit)
             for (const auto& pr : currentLevelData.props) {
                 if (pr.renderLayer != 1 || pr.lightAffect <= 0.f) continue;
-                Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
-                    ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
-                    : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
-                        ? &propTextures[pr.texVariant] : nullptr;
-                if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
-                else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
-                    { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
+                DrawAnimProp(pr);
             }
 
             // 14. Beatrice bullets
@@ -4248,16 +4315,10 @@ int main(void)
 
             // 17. Props (unlit / overlay)
             for (const auto& pr : currentLevelData.props) {
-                bool isUnlit = (pr.lightAffect <= 0.f);
+                bool isUnlit   = (pr.lightAffect <= 0.f);
                 bool isOverlay = (pr.renderLayer == 2);
                 if (!isUnlit && !isOverlay) continue;
-                Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
-                    ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
-                    : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
-                        ? &propTextures[pr.texVariant] : nullptr;
-                if (!tex) DrawRectanglePro({ pr.x - pr.width * .5f, pr.y - pr.height * .5f, pr.width, pr.height }, {}, pr.rotation, { 180,100,220,140 });
-                else DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
-                    { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, WHITE);
+                DrawAnimProp(pr);
             }
 
             // 17.1 Glow pass (additive)
@@ -4268,14 +4329,12 @@ int main(void)
                     BeginBlendMode(BLEND_ADDITIVE);
                     for (const auto& pr : currentLevelData.props) {
                         if (pr.lightAffect <= 1.f) continue;
-                        Texture2D* tex = (pr.texVariant == PROP_FIRE_VARIANT)
-                            ? (propFireFrame == 0 ? &propTextures[PROP_FIRE_VARIANT] : &propFireFrame2)
-                            : (pr.texVariant >= 0 && pr.texVariant < PROP_TEX_COUNT && propTextures[pr.texVariant].id > 0)
-                                ? &propTextures[pr.texVariant] : nullptr;
+                        Texture2D* tex = PropTex(pr);
                         if (!tex) continue;
+                        PropAnim a = CalcPropAnim(pr);
                         unsigned char glowA = (unsigned char)Clamp((pr.lightAffect - 1.f) / 2.f * 255.f, 0.f, 255.f);
                         DrawTexturePro(*tex, { 0,0,(float)tex->width,(float)tex->height },
-                            { pr.x, pr.y, pr.width, pr.height }, { pr.width * .5f, pr.height * .5f }, pr.rotation, { 255,255,255,glowA });
+                            a.dest, a.origin, a.rot, { 255,255,255,glowA });
                     }
                     EndBlendMode();
                 }
@@ -5172,6 +5231,7 @@ int main(void)
     // ── Cleanup ───────────────────────────────────────────────────────────────
     UnloadMusicStream(music);
     UnloadMusicStream(menuMusic);
+    UnloadMusicStream(rainMusic);
     UnloadSound(deathSound);
     UnloadSound(HitSound);
     UnloadSound(nukeSound);

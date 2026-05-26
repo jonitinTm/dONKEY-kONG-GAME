@@ -134,6 +134,13 @@ struct PropData {
     float lightAffect = 1.f;
     int   renderLayer = 0;
     int   texVariant = 0;
+    // Animation (0 = disabled)
+    float bobAmp       = 0.f;   // bob amplitude in pixels
+    float bobSpeed     = 3.0f;  // bob angular speed (rad/s)
+    float flickerIntens = 0.f;  // shine/flicker intensity 0–1
+    float flickerSpeed  = 5.0f; // flicker angular speed (rad/s)
+    float swayAngle    = 0.f;   // max sway degrees (pivot at top-centre); 0 = off
+    float swaySpeed    = 1.5f;  // sway angular speed (rad/s, ~4 s period)
 };
 
 // ── Light ─────────────────────────────────────────────────────────────────────

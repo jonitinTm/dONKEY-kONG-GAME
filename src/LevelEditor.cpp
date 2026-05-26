@@ -394,6 +394,9 @@ void LevelEditor::SyncPropertiesFromPrimary() {
             dst.width = src.width; dst.height = src.height; dst.rotation = src.rotation;
             dst.hasCollision = src.hasCollision; dst.lightAffect = src.lightAffect;
             dst.renderLayer = src.renderLayer; dst.texVariant = src.texVariant;
+            dst.bobAmp = src.bobAmp; dst.bobSpeed = src.bobSpeed;
+            dst.flickerIntens = src.flickerIntens; dst.flickerSpeed = src.flickerSpeed;
+            dst.swayAngle = src.swayAngle; dst.swaySpeed = src.swaySpeed;
         } else if ((et == EditorTool::POINT_LIGHT || et == EditorTool::SPOT_LIGHT || et == EditorTool::SKY_LIGHT)
             && pi < (int)_level.lights.size() && ii < (int)_level.lights.size()) {
             float ox = _level.lights[ii].x, oy = _level.lights[ii].y;
@@ -1116,6 +1119,13 @@ void LevelEditor::UpdateRightPanel() {
         _outlineScroll = (int)(_outlineScroll - wheel);
         _outlineScroll = std::max(0, _outlineScroll);
     }
+    Rectangle dr = DataPanelRect();
+    if (CheckCollisionPointRec(mouse, dr) && wheel != 0) {
+        _dataPanelScroll += (int)(-wheel * 20.f);
+        _dataPanelScroll = std::max(0, _dataPanelScroll);
+        int maxS = std::max(0, (int)(_dataPanelContentH - dr.height + 22.f));
+        if (_dataPanelScroll > maxS) _dataPanelScroll = maxS;
+    }
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, or_)) {
         int vis = (int)(or_.height - 20) / OUTLINE_ROW;
         for (int r = 0; r < vis; r++) {
@@ -1134,13 +1144,11 @@ void LevelEditor::UpdateRightPanel() {
 
 void LevelEditor::UpdateCanvas() {
     if (_directOp != DirectOp::NONE) { UpdateDirectOp(); return; }
+    if (_camPanning) return;   // RMB drag pan is handled in master Update
     Vector2 wm = WorldMouse(), swm = Snap(wm);
     bool lP = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
     bool lD = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
     bool lR = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
-    bool rP = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
-
-    if (rP) { PickEntity(wm); if (_sel.valid())DeleteSelected(); return; }
 
     if (_connectMode != ConnectMode::NONE) {
         if (lP) {
@@ -1445,6 +1453,32 @@ void LevelEditor::Update(float dt) {
 
     UpdateBrowser();
     UpdateRightPanel();
+
+    // ── Camera pan (RMB drag) & zoom (mouse wheel) ─────────────────────────────
+    if (InCanvas()) {
+        bool rP = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
+        bool rR = IsMouseButtonReleased(MOUSE_RIGHT_BUTTON);
+        Vector2 mp = GetMousePosition();
+        if (rP) { _camPanning = true; _camPanStart = mp; _camTargetAtPanStart = _cam.target; _camPanMoved = false; }
+        if (_camPanning && IsMouseButtonDown(MOUSE_RIGHT_BUTTON)) {
+            float dx = mp.x - _camPanStart.x, dy = mp.y - _camPanStart.y;
+            if (!_camPanMoved && fabsf(dx) + fabsf(dy) > 4.f) _camPanMoved = true;
+            if (_camPanMoved) { _cam.target.x = _camTargetAtPanStart.x - dx / _cam.zoom; _cam.target.y = _camTargetAtPanStart.y - dy / _cam.zoom; }
+        }
+        if (rR && _camPanning) {
+            bool wasDrag = _camPanMoved; _camPanning = false; _camPanMoved = false;
+            if (!wasDrag && _directOp == DirectOp::NONE) { Vector2 wm = GetScreenToWorld2D(mp, _cam); PickEntity(wm); if (_sel.valid()) DeleteSelected(); }
+        }
+        float whl = GetMouseWheelMove();
+        if (whl != 0 && _directOp == DirectOp::NONE) {
+            Vector2 worldBefore = GetScreenToWorld2D(mp, _cam);
+            float f = (whl > 0) ? 1.12f : (1.f / 1.12f);
+            _cam.zoom = Clamp(_cam.zoom * f, 0.08f, 8.f);
+            Vector2 worldAfter = GetScreenToWorld2D(mp, _cam);
+            _cam.target.x += worldBefore.x - worldAfter.x; _cam.target.y += worldBefore.y - worldAfter.y;
+        }
+    }
+
     if (InCanvas()) UpdateCanvas();
 }
 
@@ -1712,6 +1746,9 @@ void LevelEditor::DrawLevelLitContent() {
 void LevelEditor::DrawLevelOverlays() {
     auto IS = [&](EditorTool t, int i) { return _sel.valid() && _sel.type == (int)t && _sel.index == i; };
     auto IMS = [&](EditorTool t, int i) { return IsInMultiSel({ (int)t, i }); };
+
+    // Game display boundary — red outline showing the 875×950 window area
+    DrawRectangleLinesEx({ 0.f, 0.f, 875.f, 950.f }, 2.f / _cam.zoom, { 220, 40, 40, 200 });
 
     // Win zone outline (just an editor marker, not a real visible object)
     if (_level.hasWinZone) DrawWinZoneEnt(_level.winZone, IS(EditorTool::WIN_ZONE, 0), IMS(EditorTool::WIN_ZONE, 0));
@@ -2016,9 +2053,10 @@ void LevelEditor::DrawDataPanel() {
     DrawRectangleLinesEx(dr, 1, { 55,60,85,255 });
     DrawRectangle((int)dr.x, (int)dr.y, (int)dr.width, 18, { 28,32,48,255 });
     DrawText("PROPERTIES", (int)dr.x + 6, (int)dr.y + 3, 11, { 180,185,210,255 });
+    BeginScissorMode((int)dr.x, (int)(dr.y + 18), (int)dr.width, (int)(dr.height - 18));
     if (!_sel.valid() && !_selEdge.valid()) {
         float px = dr.x + 6, fw = dr.width - 12;
-        float cy = dr.y + 22;
+        float cy = dr.y + 22 - (float)_dataPanelScroll;
         float rowH = 20.f;
         auto SH = [&](const char* t) {
             DrawLine((int)px, (int)cy, (int)(px + fw), (int)cy, { 60,65,90,255 });
@@ -2049,10 +2087,12 @@ void LevelEditor::DrawDataPanel() {
         if (NumFld("Max", fMax, 1.f, 1.f, 20.f)) { _levelRangeMax = (int)fMax; SaveGameSettings(_levelRangeMin, _levelRangeMax, _volMusic, _volSFX, _volAbility, _volUI, _highScore, _highLevels); }
         cy += rowH;
         DrawText(TextFormat("Levels %d - %d in pool", _levelRangeMin, _levelRangeMax), (int)px, (int)cy, 9, { 100,200,120,255 });
+        _dataPanelContentH = cy - (dr.y + 22 - (float)_dataPanelScroll) + (float)_dataPanelScroll;
+        EndScissorMode();
         return;
     }
     float px = dr.x + 6, fw = dr.width - 12;
-    float cy = dr.y + 22;
+    float cy = dr.y + 22 - (float)_dataPanelScroll;
     float rowH = 20.f;
     auto SectionHeader = [&](const char* title) {
         DrawLine((int)px, (int)cy, (int)(px + fw), (int)cy, { 60,65,90,255 });
@@ -2561,6 +2601,30 @@ void LevelEditor::DrawDataPanel() {
                 cy += 20;
             }
         }
+        // ── Bob ───────────────────────────────────────────────────────────────────
+        {
+            SectionHeader("── Bob ─────────────────────");
+            if (NumField("Amp", pr.bobAmp, 0.5f, 0.f, 40.f, px, cy, fw)) { PushUndo(); syncField(EditorTool::PROP, [&](int i) { _level.props[i].bobAmp = pr.bobAmp; }); } cy += rowH;
+            DrawText("0 = off  pixels", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 12;
+            if (NumField("Spd", pr.bobSpeed, 0.05f, 0.1f, 20.f, px, cy, fw)) { PushUndo(); syncField(EditorTool::PROP, [&](int i) { _level.props[i].bobSpeed = pr.bobSpeed; }); } cy += rowH;
+            DrawText("rad/s  3=normal", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 12;
+        }
+        // ── Flicker ───────────────────────────────────────────────────────────────
+        {
+            SectionHeader("── Flicker ─────────────────");
+            if (NumField("Int", pr.flickerIntens, 0.02f, 0.f, 1.f, px, cy, fw)) { PushUndo(); syncField(EditorTool::PROP, [&](int i) { _level.props[i].flickerIntens = pr.flickerIntens; }); } cy += rowH;
+            DrawText("0=off  1=max shine", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 12;
+            if (NumField("Spd", pr.flickerSpeed, 0.1f, 0.1f, 30.f, px, cy, fw)) { PushUndo(); syncField(EditorTool::PROP, [&](int i) { _level.props[i].flickerSpeed = pr.flickerSpeed; }); } cy += rowH;
+            DrawText("rad/s  5=normal", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 12;
+        }
+        // ── Sway ──────────────────────────────────────────────────────────────────
+        {
+            SectionHeader("── Sway ────────────────────");
+            if (NumField("Ang", pr.swayAngle, 0.5f, 0.f, 45.f, px, cy, fw)) { PushUndo(); syncField(EditorTool::PROP, [&](int i) { _level.props[i].swayAngle = pr.swayAngle; }); } cy += rowH;
+            DrawText("0=off  deg 5-10 typical", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 12;
+            if (NumField("Spd", pr.swaySpeed, 0.05f, 0.1f, 10.f, px, cy, fw)) { PushUndo(); syncField(EditorTool::PROP, [&](int i) { _level.props[i].swaySpeed = pr.swaySpeed; }); } cy += rowH;
+            DrawText("rad/s  1.5=~4s period", (int)px, (int)cy, 9, { 110,130,180,255 }); cy += 12;
+        }
         // Copy / Paste props
         {
             float hw = (fw - 3) * 0.5f;
@@ -2765,6 +2829,21 @@ void LevelEditor::DrawDataPanel() {
         DrawRectangleRec(rDis, hDis ? Color{ 160,50,20,255 } : Color{ 90,30,10,255 });
         DrawText("Disconnect edge", (int)rDis.x + 4, (int)rDis.y + 2, 9, WHITE);
         if (hDis && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) { PushUndo(); srcNode.next[_selEdge.slot] = -1; srcNode.edgeType[_selEdge.slot] = 0; _selEdge.clear(); }
+    }
+
+    // Track total content height so the scroll bar can be sized correctly
+    _dataPanelContentH = (cy + (float)_dataPanelScroll) - (dr.y + 22.f);
+    EndScissorMode();
+
+    // Scroll bar (only when content overflows)
+    if (_dataPanelContentH > dr.height - 18.f) {
+        float barTrackH = dr.height - 18.f;
+        float barFrac   = barTrackH / (_dataPanelContentH + 18.f);
+        float barH      = fmaxf(20.f, barTrackH * barFrac);
+        float maxScroll = fmaxf(0.f, _dataPanelContentH - barTrackH + 18.f);
+        float barY      = dr.y + 18.f + (barTrackH - barH) * ((float)_dataPanelScroll / maxScroll);
+        DrawRectangle((int)(dr.x + dr.width - 4), (int)(dr.y + 18), 4, (int)barTrackH, { 30,33,48,255 });
+        DrawRectangle((int)(dr.x + dr.width - 4), (int)barY, 4, (int)barH, { 90,95,130,255 });
     }
 }
 

@@ -207,7 +207,14 @@ private:
     SelEdge     _selEdge;
 
     std::vector<OutlineRow> _outline;
-    int _outlineScroll = 0;
+    int   _outlineScroll = 0;
+    int   _dataPanelScroll = 0;
+    float _dataPanelContentH = 0.f;
+
+    bool    _camPanning = false;
+    bool    _camPanMoved = false;
+    Vector2 _camPanStart = {};
+    Vector2 _camTargetAtPanStart = {};
 
     // Outliner parent-child interaction
     bool _outlCtxMenu = false;

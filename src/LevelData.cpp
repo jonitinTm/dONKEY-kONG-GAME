@@ -88,13 +88,16 @@ bool SaveLevel(const LevelData& lv, const char* folder)
             cv.x, cv.y, cv.length, cv.speed, cv.direction,
             cv.rotation, cv.endCapW, cv.beltH, cv.soundMaterial);
 
-    // PROP format (9 tokens):
+    // PROP format (15 tokens):
     // x y width height rotation hasCollision lightAffect renderLayer texVariant
+    // bobAmp bobSpeed flickerIntens flickerSpeed swayAngle swaySpeed
     for (const auto& pr : lv.props)
-        fprintf(f, "PROP %.2f %.2f %.2f %.2f %.2f %d %.3f %d %d\n",
+        fprintf(f, "PROP %.2f %.2f %.2f %.2f %.2f %d %.3f %d %d %.2f %.2f %.3f %.2f %.2f %.2f\n",
             pr.x, pr.y, pr.width, pr.height, pr.rotation,
             pr.hasCollision ? 1 : 0,
-            pr.lightAffect, pr.renderLayer, pr.texVariant);
+            pr.lightAffect, pr.renderLayer, pr.texVariant,
+            pr.bobAmp, pr.bobSpeed, pr.flickerIntens, pr.flickerSpeed,
+            pr.swayAngle, pr.swaySpeed);
 
     for (const auto& r : lv.relations)
         fprintf(f, "RELATION %d %d %d %d %.2f %.2f\n",
@@ -240,11 +243,14 @@ bool LoadLevel(LevelData& out, int id, const char* folder)
         else if (strcmp(tag, "PROP") == 0) {
             PropData pr;
             int colFlag = 0;
-            // All 9 fields; older files without PROP just skip (no such tag)
-            (void)fscanf(f, "%f %f %f %f %f %d %f %d %d",
+            int cnt = fscanf(f, "%f %f %f %f %f %d %f %d %d %f %f %f %f %f %f",
                 &pr.x, &pr.y, &pr.width, &pr.height, &pr.rotation,
-                &colFlag, &pr.lightAffect, &pr.renderLayer, &pr.texVariant);
+                &colFlag, &pr.lightAffect, &pr.renderLayer, &pr.texVariant,
+                &pr.bobAmp, &pr.bobSpeed, &pr.flickerIntens, &pr.flickerSpeed,
+                &pr.swayAngle, &pr.swaySpeed);
             pr.hasCollision = (colFlag != 0);
+            // Older files (< 15 tokens): animation fields keep their struct defaults
+            (void)cnt;
             out.props.push_back(pr);
         }
         else if (strcmp(tag, "RELATION") == 0) {
