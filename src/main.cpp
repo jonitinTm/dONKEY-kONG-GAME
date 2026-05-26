@@ -909,7 +909,9 @@ int main(void)
 
     TraceLog(LOG_INFO, TextFormat("Working Directory: %s", GetWorkingDirectory()));
 
-    Music music = LoadMusicStream("Assets/Nuevo audio/audiosmenus/main_menu.mp3");
+    Music music = LoadMusicStream("Assets/Nuevo audio/mp3/Danza.mp3");
+    Music menuMusic = LoadMusicStream("Assets/Nuevo audio/mp3/do.mp3");
+    bool menuMusicPlaying = false;
     Sound deathSound = LoadSound("Assets/Nuevo audio/mp3/20. Dead.mp3");
     Sound HitSound = LoadSound("Assets/Nuevo audio/mp3/19. Bonus.mp3");
     Sound nukeSound = LoadSound("Assets/Nuevo audio/mp3/Flash.mp3");
@@ -983,8 +985,16 @@ int main(void)
 
     SetMasterVolume(1.0f);
     SetMusicVolume(music, volMusic);
+    SetMusicVolume(menuMusic, volMusic);
     SetMusicPan(music, 0.0f);
     PlayMusicStream(music);
+    PauseMusicStream(music);
+
+    SetMusicVolume(menuMusic, volMusic);
+    SetMusicPan(menuMusic, 0.0f);
+    PlayMusicStream(menuMusic);
+    SetMusicVolume(menuMusic, volMusic);
+    menuMusicPlaying = true;
 
     // ── Textures ──────────────────────────────────────────────────────────────
     Texture2D imgMarioIdle = LoadTexture("Assets/Textures/Characters/Mario/Dk_Mario_Idle1.png");
@@ -1433,6 +1443,25 @@ int main(void)
     Color rain2Tint = { 255, 255, 255,  50 };
 
     // ── Lambdas ───────────────────────────────────────────────────────────────
+    auto SwitchToMenuMusic = [&]() {
+        if (!menuMusicPlaying) {
+            PauseMusicStream(music);
+            SetMusicVolume(menuMusic, volMusic);
+            ResumeMusicStream(menuMusic);
+            menuMusicPlaying = true;
+        }
+        };
+    auto SwitchToGameMusic = [&]() {
+        if (menuMusicPlaying) {
+            PauseMusicStream(menuMusic);
+            SetMusicVolume(music, volMusic);
+            SetMusicVolume(menuMusic, volMusic);
+            
+            ResumeMusicStream(music);
+            menuMusicPlaying = false;
+        }
+        };
+
     auto RespawnItems = [&]()
         {
             if (nukeRespawnNodes.empty()) return;
@@ -1626,6 +1655,8 @@ int main(void)
             invincibleTimer = invincibleDuration;
             musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
+            SetMusicVolume(menuMusic, volMusic);
+            SwitchToGameMusic();
             ResumeMusicStream(music);
         };
 
@@ -1690,6 +1721,8 @@ int main(void)
 
             musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
+            SetMusicVolume(menuMusic, volMusic);
+            SwitchToGameMusic();
             ResumeMusicStream(music);
         };
 
@@ -1782,7 +1815,10 @@ int main(void)
 
     // ── Level priority init ───────────────────────────────────────────────────
     LoadGameSettings(levelRangeMin, levelRangeMax, volMusic, volSFX, volAbility, volUI, highScore, highLevels);
+    SetMusicVolume(menuMusic, volMusic);
     SetMusicVolume(music, volMusic);
+    SetMusicVolume(music, volMusic);
+    SetMusicVolume(menuMusic, volMusic);
     for (int i = 1; i <= MAX_LEVEL_ID; i++) levelPriority[i] = 1;
 
     // Updates and saves highscore at end of run; call before any GAME_OVER transition
@@ -1808,8 +1844,11 @@ int main(void)
         if (IsKeyPressed(KEY_F1)) debugPath = !debugPath;
         if (IsKeyPressed(KEY_M)) dbgMenuOpen = !dbgMenuOpen;
 
+        UpdateMusicStream(menuMusic);
+
         if (currentScreen == SPLASH_SCREEN)
         {
+            SwitchToMenuMusic();
             if (IsKeyPressed(KEY_ENTER)) currentScreen = SPLASH_SCREEN2;
             splashTimer += dt;
             if (splashTimer >= splashDuration) { splashTimer = 0.0f; currentScreen = SPLASH_SCREEN2; }
@@ -1822,6 +1861,8 @@ int main(void)
         }
         else if (currentScreen == MENU)
         {
+            SwitchToMenuMusic();
+            
             Vector2 mouse = GetMousePosition();
             if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ENTER))
             {
@@ -1912,6 +1953,9 @@ int main(void)
                     SpawnInitialEnemies();
                     musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
+            SetMusicVolume(menuMusic, volMusic);
+            SwitchToGameMusic();
+            
             ResumeMusicStream(music);
                     currentScreen = GAMEPLAY;
                 }
@@ -1962,6 +2006,8 @@ int main(void)
                 SpawnInitialEnemies();
                 musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
+            SetMusicVolume(menuMusic, volMusic);
+            SwitchToGameMusic();
             ResumeMusicStream(music);
                 currentScreen = GAMEPLAY;
             }
@@ -1979,6 +2025,7 @@ int main(void)
                     PauseMusicStream(music);
                     musicPendingPause = false;
                     SetMusicVolume(music, volMusic);
+                    SetMusicVolume(menuMusic, volMusic);
                 }
             }
 
@@ -2055,6 +2102,9 @@ int main(void)
                 invincible = true; invincibleTimer = 2.0f;
                 musicFadeTimer = 0.f; musicPendingPause = false;
             SetMusicVolume(music, volMusic);
+            SetMusicVolume(menuMusic, volMusic);
+            SwitchToGameMusic();
+            
             ResumeMusicStream(music);
             }
 
@@ -2738,7 +2788,8 @@ int main(void)
                     deathBlackTimer += dt;
                     if (deathBlackTimer >= (DEATH_BLACK_HOLD + 0.5f))
                     {
-                        if (lives <= 0) { TryUpdateHighscore(); currentScreen = GAME_OVER; }
+
+                        if (lives <= 0) { TryUpdateHighscore(); SwitchToMenuMusic(); currentScreen = GAME_OVER; }
                         else            { ResetRound(); SpawnInitialEnemies(); }
                     }
                 }
@@ -3407,11 +3458,13 @@ int main(void)
 
         if (currentScreen == SPLASH_SCREEN)
         {
+            
             DrawText("A DONKEY KONG GAME PROJECT", 15, 400, 50, WHITE);
             DrawText("Assignatura: Projecte 1 \nCurs: Disseny i Desenvolupament de videojocs 1 \nUniversitat: UPC", 50, 800, 20, GRAY);
         }
         else if (currentScreen == SPLASH_SCREEN2)
         {
+            SwitchToMenuMusic();
             DrawText("Game by:\n\n Alejandro Perez\n Jonathan Bermello\n Marc Flores\n Biel Yubero", 300, 250, 30, WHITE);
             DrawText("Tutor Alejandro Paris", 50, 800, 30, GRAY);
         }
@@ -3498,6 +3551,8 @@ int main(void)
         }
         else if (currentScreen == SETTINGS)
         {
+            SwitchToMenuMusic();
+
             Vector2 mouse = GetMousePosition();
 
             // ── Panel ─────────────────────────────────────────────────────────
@@ -3600,6 +3655,7 @@ int main(void)
                         vol = Clamp((mouse.x - sX) / sW, 0.f, 1.f) * mx;
                 }
                 SetMusicVolume(music, volMusic);
+                SetMusicVolume(menuMusic, volMusic);
             }
 
             // ── TAB 2: DEBUG ──────────────────────────────────────────────────
@@ -3746,6 +3802,7 @@ int main(void)
                 fstepper("Abilities Vol", volAbility, 0.f, 4.f, 0.1f,  "%.1f");
                 fstepper("UI Vol",        volUI,      0.f, 1.f, 0.05f, "%.2f");
                 SetMusicVolume(music, volMusic);
+                SetMusicVolume(menuMusic, volMusic);
 
                 EndScissorMode();
 
@@ -4637,6 +4694,7 @@ int main(void)
         }
         else if (currentScreen == GAME_OVER)
         {
+            SwitchToMenuMusic();
             if (lives > 0)
             {
                 subaruTimer += dt;
@@ -5113,6 +5171,7 @@ int main(void)
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     UnloadMusicStream(music);
+    UnloadMusicStream(menuMusic);
     UnloadSound(deathSound);
     UnloadSound(HitSound);
     UnloadSound(nukeSound);
