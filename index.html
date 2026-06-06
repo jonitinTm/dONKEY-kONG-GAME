@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Donkey Kong: Subaru's Climb — A Tribute</title>
+<meta name="description" content="A 2D arcade platformer tribute to Donkey Kong (1981), built in C++ with Raylib. Climb the tower as Subaru to reach Regulus." />
+
+<!-- Retro arcade font -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --bg:#0a0a12;
+    --bg-2:#11111f;
+    --panel:#16162a;
+    --accent:#ff2b2b;     /* DK red */
+    --accent-2:#ffcc00;   /* arcade yellow */
+    --accent-3:#3df0ff;   /* neon cyan */
+    --text:#f3f3f7;
+    --muted:#a8a8c0;
+    --border:#2a2a45;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+
+  html{scroll-behavior:smooth;}
+
+  body{
+    font-family:'VT323', monospace;
+    font-size:20px;
+    background:
+      radial-gradient(circle at 20% -10%, rgba(255,43,43,.10), transparent 40%),
+      radial-gradient(circle at 90% 10%, rgba(61,240,255,.08), transparent 40%),
+      var(--bg);
+    color:var(--text);
+    line-height:1.55;
+    overflow-x:hidden;
+  }
+
+  h1,h2,h3,.pixel{font-family:'Press Start 2P', monospace;line-height:1.45;}
+
+  a{color:var(--accent-3);text-decoration:none;}
+  a:hover{color:var(--accent-2);}
+
+  .wrap{max-width:1100px;margin:0 auto;padding:0 20px;}
+
+  section{padding:70px 0;border-bottom:1px solid var(--border);}
+
+  /* ---------- NAV ---------- */
+  nav{
+    position:sticky;top:0;z-index:50;
+    background:rgba(10,10,18,.85);
+    backdrop-filter:blur(8px);
+    border-bottom:2px solid var(--accent);
+  }
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:62px;}
+  nav .brand{font-family:'Press Start 2P';font-size:11px;color:var(--accent-2);}
+  nav ul{display:flex;gap:22px;list-style:none;flex-wrap:wrap;}
+  nav ul a{font-family:'Press Start 2P';font-size:9px;color:var(--muted);}
+  nav ul a:hover{color:var(--accent-3);}
+
+  /* ---------- HERO ---------- */
+  header.hero{
+    position:relative;
+    text-align:center;
+    padding:90px 20px 80px;
+    border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, rgba(255,43,43,.08), transparent 60%);
+  }
+  header.hero h1{
+    font-size:clamp(20px,4.2vw,40px);
+    color:var(--accent-2);
+    text-shadow:4px 4px 0 var(--accent);
+    margin-bottom:18px;
+  }
+  header.hero .tagline{
+    font-size:24px;color:var(--muted);max-width:680px;margin:0 auto 28px;
+  }
+  header.hero img.banner{
+    image-rendering:pixelated;
+    max-width:340px;width:60%;
+    filter:drop-shadow(0 0 24px rgba(255,43,43,.35));
+    margin:10px auto 26px;display:block;
+  }
+  .btn-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;}
+
+  .btn{
+    font-family:'Press Start 2P';font-size:11px;
+    padding:16px 22px;border:3px solid;border-radius:4px;
+    display:inline-block;transition:transform .08s ease, box-shadow .15s ease;
+    cursor:pointer;
+  }
+  .btn-primary{background:var(--accent);border-color:#fff;color:#fff;box-shadow:0 4px 0 #8a0000;}
+  .btn-primary:hover{transform:translateY(-2px);color:#fff;box-shadow:0 6px 0 #8a0000;}
+  .btn-ghost{background:transparent;border-color:var(--accent-3);color:var(--accent-3);}
+  .btn-ghost:hover{transform:translateY(-2px);background:rgba(61,240,255,.08);}
+
+  /* ---------- HEADINGS ---------- */
+  h2.section-title{
+    font-size:clamp(15px,2.6vw,24px);
+    color:var(--accent-3);
+    margin-bottom:14px;
+  }
+  h2.section-title::before{content:"▸ ";color:var(--accent);}
+  .lead{color:var(--muted);max-width:780px;margin-bottom:28px;font-size:21px;}
+
+  /* ---------- ABOUT GRID ---------- */
+  .about-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:34px;align-items:center;}
+  .about-grid .card-img{
+    border:3px solid var(--border);border-radius:8px;overflow:hidden;
+    background:var(--panel);
+  }
+  .about-grid .card-img img{width:100%;display:block;image-rendering:pixelated;}
+  .feature-list{list-style:none;display:grid;gap:10px;margin-top:20px;}
+  .feature-list li{padding-left:26px;position:relative;color:var(--text);}
+  .feature-list li::before{content:"★";position:absolute;left:0;color:var(--accent-2);}
+
+  /* ---------- VIDEO ---------- */
+  .video-frame{
+    position:relative;width:100%;padding-top:56.25%;
+    border:3px solid var(--accent);border-radius:8px;overflow:hidden;
+    box-shadow:0 0 30px rgba(255,43,43,.25);
+    background:#000;
+  }
+  .video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}
+  .caption{color:var(--muted);font-size:18px;margin-top:14px;text-align:center;}
+
+  /* ---------- TEAM ---------- */
+  .team-photo{
+    border:3px dashed var(--border);border-radius:8px;
+    background:var(--panel);
+    aspect-ratio:16/7;display:flex;align-items:center;justify-content:center;
+    text-align:center;color:var(--muted);font-size:18px;margin-bottom:36px;overflow:hidden;
+  }
+  .team-photo img{width:100%;height:100%;object-fit:cover;display:block;}
+
+  .team-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;}
+  .member{
+    background:var(--panel);border:2px solid var(--border);border-radius:8px;
+    padding:22px;transition:border-color .15s ease, transform .1s ease;
+  }
+  .member:hover{border-color:var(--accent);transform:translateY(-3px);}
+  .member h3{font-size:13px;color:var(--accent-2);margin-bottom:6px;}
+  .member .role{font-family:'Press Start 2P';font-size:8px;color:var(--accent-3);margin-bottom:12px;display:block;}
+  .member p{color:var(--muted);font-size:19px;margin-bottom:12px;}
+  .member .gh{font-family:'Press Start 2P';font-size:8px;}
+
+  /* ---------- TABLES / FEATURES ---------- */
+  .cols{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+  .panel{
+    background:var(--panel);border:2px solid var(--border);border-radius:8px;padding:22px;
+  }
+  .panel h3{font-size:11px;color:var(--accent-2);margin-bottom:14px;}
+  .panel ul{list-style:none;display:grid;gap:8px;}
+  .panel li{color:var(--muted);font-size:19px;padding-left:20px;position:relative;}
+  .panel li::before{content:"»";position:absolute;left:0;color:var(--accent);}
+
+  /* ---------- DOWNLOAD CTA ---------- */
+  .download-cta{text-align:center;background:linear-gradient(180deg, rgba(255,204,0,.06), transparent);}
+  .download-cta h2{color:var(--accent-2);font-size:clamp(16px,3vw,26px);margin-bottom:18px;}
+  .download-cta p{color:var(--muted);max-width:620px;margin:0 auto 30px;font-size:21px;}
+
+  /* ---------- FOOTER ---------- */
+  footer{padding:40px 20px;text-align:center;color:var(--muted);font-size:18px;}
+  footer .tribute{color:var(--accent-2);font-family:'Press Start 2P';font-size:9px;margin-bottom:14px;}
+
+  .note{
+    font-size:15px;color:#6f6f8c;font-style:italic;border-left:3px solid var(--accent-2);
+    padding:4px 12px;margin-top:10px;
+  }
+
+  /* ---------- RESPONSIVE ---------- */
+  @media (max-width:820px){
+    .about-grid{grid-template-columns:1fr;}
+    .team-grid{grid-template-columns:1fr;}
+    .cols{grid-template-columns:1fr;}
+    nav ul{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav>
+  <div class="wrap">
+    <span class="brand">🛢️ SUBARU'S CLIMB</span>
+    <ul>
+      <li><a href="#about">Game</a></li>
+      <li><a href="#video">Video</a></li>
+      <li><a href="#team">Team</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#download">Download</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap">
+    <img class="banner" src="Assets/Textures/UI/Dk_Kong_StartScreen.png" alt="Donkey Kong start screen" onerror="this.style.display='none'">
+    <h1>DONKEY KONG<br>SUBARU'S CLIMB</h1>
+    <p class="tagline">A 2D arcade platformer built in <strong>C++ &amp; Raylib</strong> — a tribute to the original Donkey Kong (1981).</p>
+    <div class="btn-row">
+      <a class="btn btn-primary" href="https://github.com/jonitinTm/dONKEY-kONG-GAME/releases/latest">⬇ DOWNLOAD LATEST</a>
+      <a class="btn btn-ghost" href="#video">▶ WATCH TRAILER</a>
+    </div>
+  </div>
+</header>
+
+<!-- ============ ABOUT ============ -->
+<section id="about">
+  <div class="wrap">
+    <h2 class="section-title">The Game</h2>
+    <div class="about-grid">
+      <div>
+        <p class="lead">
+          Donkey Kong is the 1981 arcade classic where you control Jumpman, climbing a
+          construction site to rescue Pauline from a barrel-throwing ape. In <strong>our
+          version</strong>, you play as <strong>Subaru</strong>, climbing to the top of a
+          tower to reach <strong>Regulus</strong> — the one hurling the barrels down at you.
+        </p>
+        <p class="lead">
+          Dodge barrels, scale ladders, grab power-ups and fight your way up across 5 levels.
+          The project also ships with a full in-game <strong>level editor</strong>, GPU-based
+          2D <strong>lighting</strong>, and a <strong>keyframe cinematic</strong> system.
+        </p>
+        <ul class="feature-list">
+          <li><strong>Win condition:</strong> Climb the tower and reach Regulus at the top.</li>
+          <li><strong>Lose condition:</strong> Lose all 3 lives to the barrels and hazards.</li>
+          <li><strong>Items:</strong> Nuke (clears barrels &amp; stuns Regulus) &amp; Beatrice (shoots at the cursor).</li>
+          <li><strong>Power-ups:</strong> Dash, Shield, Whip, Extra Life, Larper and more.</li>
+          <li><strong>Enemy:</strong> Regulus, with a full jump/stun AI state machine.</li>
+        </ul>
+      </div>
+      <div class="card-img">
+        <img src="Assets/stage1.png" alt="Gameplay stage" onerror="this.parentElement.style.display='none'">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ VIDEO ============ -->
+<section id="video">
+  <div class="wrap">
+    <h2 class="section-title">Gameplay Video</h2>
+    <p class="lead">Project purpose, gameplay walkthrough, items &amp; enemies, win/lose
+      conditions and the in-engine debug tools (colliders, paths, light areas).</p>
+    <div class="video-frame">
+      <iframe
+        src="https://www.youtube.com/embed/JKkVLx6sDLw"
+        title="Donkey Kong: Subaru's Climb — Gameplay"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen></iframe>
+    </div>
+    <p class="caption">▲ A tribute project — made for the C++ &amp; Raylib course.</p>
+  </div>
+</section>
+
+<!-- ============ TEAM ============ -->
+<section id="team">
+  <div class="wrap">
+    <h2 class="section-title">The Team</h2>
+
+    <div class="team-photo">
+      <!-- Replace src with your team photo (e.g. team.jpg placed next to index.html) -->
+      <img src="team.jpg" alt="Team photo" onerror="this.parentElement.innerHTML='📸 Add your team photo here &mdash; save it as <b>team.jpg</b> next to index.html';">
+    </div>
+
+    <div class="team-grid">
+      <div class="member">
+        <h3>Alejandro Perez</h3>
+        <span class="role">Programmer</span>
+        <p>Main contribution: <em>describe your work here</em> — e.g. gameplay loop, physics, collision and core systems.</p>
+        <a class="gh" href="https://github.com/ENDERCONO">@ENDERCONO ↗</a>
+      </div>
+      <div class="member">
+        <h3>Marc Flores</h3>
+        <span class="role">Programmer</span>
+        <p>Main contribution: <em>describe your work here</em> — e.g. lighting system, shaders and visual effects.</p>
+        <a class="gh" href="https://github.com/Marcfs0607">@Marcfs0607 ↗</a>
+      </div>
+      <div class="member">
+        <h3>Jonathan Bermello</h3>
+        <span class="role">Programmer</span>
+        <p>Main contribution: <em>describe your work here</em> — e.g. level editor, level data and serialization.</p>
+        <a class="gh" href="https://github.com/jonitinTm">@jonitinTm ↗</a>
+      </div>
+      <div class="member">
+        <h3>Biel Yubero</h3>
+        <span class="role">Programmer</span>
+        <p>Main contribution: <em>describe your work here</em> — e.g. enemy AI, items, power-ups and audio.</p>
+        <a class="gh" href="https://github.com/Angrojya">@Angrojya ↗</a>
+      </div>
+    </div>
+    <p class="note">Tip: edit the contribution text above to reflect what each member actually built.</p>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section id="features">
+  <div class="wrap">
+    <h2 class="section-title">Features</h2>
+    <div class="cols">
+      <div class="panel">
+        <h3>Items &amp; Power-ups</h3>
+        <ul>
+          <li>Nuke — clears barrels, stuns Regulus</li>
+          <li>Beatrice — shoots at the cursor</li>
+          <li>Dash &amp; SpeedRun</li>
+          <li>Shield &amp; Whip</li>
+          <li>Extra Life &amp; Larper</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Systems</h3>
+        <ul>
+          <li>In-game level editor</li>
+          <li>GPU 2D raytraced lighting</li>
+          <li>Keyframe cinematics</li>
+          <li>Parallelogram collision</li>
+          <li>Path-based barrel AI</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Debug Tools</h3>
+        <ul>
+          <li>Toggle debug mode with <b>M</b></li>
+          <li>Show colliders &amp; areas</li>
+          <li>Show barrel path lines</li>
+          <li>Light area visualization</li>
+          <li>Spawn enemies / items, fly, immortality</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DOWNLOAD ============ -->
+<section id="download" class="download-cta">
+  <div class="wrap">
+    <h2>Ready to Climb?</h2>
+    <p>Grab the latest Windows build and start your ascent up the tower.</p>
+    <div class="btn-row">
+      <a class="btn btn-primary" href="https://github.com/jonitinTm/dONKEY-kONG-GAME/releases/latest">⬇ DOWNLOAD LATEST RELEASE</a>
+      <a class="btn btn-ghost" href="https://github.com/jonitinTm/dONKEY-kONG-GAME">★ SOURCE ON GITHUB</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <p class="tribute">★ A TRIBUTE TO DONKEY KONG (1981) ★</p>
+  <p>Made with C++ &amp; Raylib by Alejandro Perez · Marc Flores · Jonathan Bermello · Biel Yubero</p>
+  <p style="margin-top:8px;">&copy; 2026 — Educational project. Donkey Kong is a trademark of Nintendo.</p>
+</footer>
+
+</body>
+</html>
