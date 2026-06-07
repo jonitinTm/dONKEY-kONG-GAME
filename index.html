@@ -179,6 +179,23 @@
     .cols{grid-template-columns:1fr;}
     nav ul{display:none;}
   }
+
+.hero {
+  position: relative;
+}
+
+.hero-logo {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 110px;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 10px rgba(255, 204, 0, 0.5));
+  z-index: 10;
+}
+
+
+  
 </style>
 </head>
 <body>
@@ -200,6 +217,10 @@
 <!-- ============ HERO ============ -->
 <header class="hero">
   <div class="wrap">
+    <img 
+  src="https://raw.githubusercontent.com/jonitinTm/dONKEY-kONG-GAME/main/Wiki/LOGO.png"
+  alt="Logo"
+  class="hero-logo">
     <img class="banner" src="Assets/Textures/UI/Dk_Kong_StartScreen.png" alt="Donkey Kong start screen" onerror="this.style.display='none'">
     <h1>DONKEY KONG<br>SUBARU'S CLIMB</h1>
     <p class="tagline">A 2D arcade platformer built in <strong>C++ &amp; Raylib</strong> — a tribute to the original Donkey Kong (1981).</p>
